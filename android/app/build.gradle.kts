@@ -5,7 +5,7 @@ plugins {
 }
 
 android {
-    namespace = "com.example.i_am_ok"
+    namespace = "io.github.davamix.i_am_ok"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
@@ -16,7 +16,7 @@ android {
 
     defaultConfig {
         // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
-        applicationId = "com.example.i_am_ok"
+        applicationId = "io.github.davamix.i_am_ok"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion

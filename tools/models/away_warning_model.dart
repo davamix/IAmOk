@@ -70,8 +70,17 @@ class Link {
 class DeviceState {
   AwayPeriod? cachedAway;
   Day? lastConfirmedDate;
-  Day? lastReconcileAt; // last SUCCESSFUL read of tier 1
   Set<Day> warningsShownFor = {};
+
+  /// Last SUCCESSFUL read of tier 1.
+  ///
+  /// In the real LocalStore this is a full **timestamp**, not a date — §10 step
+  /// 5 renders "offline since 10:14" from it (ADR-0002). It is modelled as a
+  /// `Day` here because the staleness rule is deliberately calendar-day
+  /// granular: the alarm attempts a reconcile once a day, so "verified within
+  /// 2 days" compares date components, not a 48-hour duration. The timestamp
+  /// exists for the message, not for the comparison.
+  Day? lastReconcileAt;
 
   DeviceState({this.cachedAway, this.lastConfirmedDate, this.lastReconcileAt});
 }

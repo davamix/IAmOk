@@ -37,7 +37,8 @@ That is the most useful review question to ask about any change here.
 
 **1. Time is injected, never read.** `DateTime.now()` does not appear in the domain layer, and does
 not appear in any policy or in the reconciler at any layer. The clock is a parameter; the real
-clock is read only at the platform edge, through `ClockService`, and passed in. Also flag
+clock is read only at the platform edge, through `Clock` — which is plugin-free and available in
+all three isolates, unlike `ClockService`, which is UI-only (ADR-0002). Also flag
 `DateTime.timestamp()`, `.toLocal()` — an implicit local-timezone read, a real hazard in a design
 where the timezone is always explicit — `Timer`, and `Stopwatch`. This is the rule most likely to
 be broken by a well-meaning shortcut, and it is worth failing a review over.

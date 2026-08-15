@@ -47,6 +47,13 @@ client clock and is what the family is shown; `receivedAt` is the server timesta
 **watched person's** timezone; the watcher's alarm fires watcher-local but asks about the last
 completed watched-local day. Clock skew is surfaced, never silently corrected.
 
+Per [ADR-0002](../../docs/architecture/decisions/0002-clock-split.md), flag: any use of
+`ClockService` (UI-only — device-zone discovery and skew detection) from an alarm or FCM path,
+where `Clock` is the plugin-free component that belongs there; **any `flutter_timezone` call from a
+background entry point** — the device zone is cached to `LocalStore` by the UI and read from disk;
+and any day computation that cannot be performed from `Clock` plus `LocalStore` alone, since §10's
+offline branch has to work with no network.
+
 **6. Push carries no authority.** Every FCM message is a data-only "reconcile now" nudge. Flag any
 code that takes state *from* a payload as truth rather than re-deriving it.
 

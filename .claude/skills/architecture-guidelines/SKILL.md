@@ -77,6 +77,15 @@ under `domain/` is a review failure, not a preference.
 - Clock skew is **detected and surfaced**, never silently corrected.
 - Scheduling uses `timezone` + `flutter_timezone` and `zonedSchedule`. Never raw UTC offsets — DST
   breaks them.
+- **`Clock` is not `ClockService`** (ADR-0002). `Clock` reads the current instant, is plugin-free,
+  and exists in **all three isolates** — it is the one sanctioned real-clock read, and the domain
+  layer still takes `now` as a parameter. `ClockService` does device-zone discovery via
+  `flutter_timezone` plus server skew detection, and is **UI-only**.
+- **Never call `flutter_timezone` from a background isolate.** The UI caches the device's IANA zone
+  to `LocalStore` on resume; the watched person's zone is already there, denormalized onto the
+  link. A bare isolate computes `D` from `Clock` + those strings + pure-Dart `package:timezone`,
+  with no plugin access at all. This is the canonical case of "what a background isolate needs is
+  on disk".
 - The day is defined in the **watched person's** timezone, carried on the link and in the payload.
   The watcher's alarm fires at *watcher-local* time but asks about the last completed
   *watched-local* day.

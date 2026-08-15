@@ -102,6 +102,11 @@ Consequences that shape the design:
 - Both background entry points are `@pragma('vm:entry-point')` **top-level functions** that
   bootstrap the minimum they need, call `reconcile()`, and exit.
 - The domain layer must have **zero Flutter dependencies** so it runs identically in all three.
+- **Timezones are read from disk, never from a plugin, in a background isolate**
+  ([ADR-0002](decisions/0002-clock-split.md)). The UI writes the device's IANA zone to `LocalStore`
+  on resume; the watched person's zone is already there, denormalized onto the link by §7. This is
+  the canonical instance of the rule above — the alternative is a plugin registrant on the alarm
+  path, to answer a question the UI already knows the answer to.
 
 ---
 
@@ -128,7 +133,7 @@ Consequences that shape the design:
 │  InviteService                                               │
 ├─ Platform edge ─────────────────────────────────────────────┤
 │  AlarmScheduler  NotificationService  FcmService             │
-│  PermissionService  ClockService  ConnectivityService        │
+│  PermissionService  Clock  ClockService  ConnectivityService │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -149,18 +154,31 @@ I/O. The layers above only supply inputs and execute the result.
 | `CheckInRepository` | Data | Write today's check-in; read a watched person's days | UI, Alarm |
 | `AwayRepository` | Data | Read / set / cancel the away period for a watched user | UI, FCM, Alarm |
 | `InviteService` | Data | Create invite; call `redeemInvite` | UI |
-| `LocalStore` | Data | SQLite. Per-link `lastConfirmedDate`, `warningsShownFor`, `activeFrom`, cached `awayPeriod`, `pendingAlarms`, `lastReconcileAt` | **All three** |
+| `LocalStore` | Data | SQLite. Per-link `lastConfirmedDate`, `warningsShownFor`, `activeFrom`, `watchedTimezone`, cached `awayPeriod`; plus `deviceTimezone`, `pendingAlarms`, `lastReconcileAt` (a **timestamp** — §10 renders "offline since 10:14") | **All three** |
 | `AlarmScheduler` | Platform | Schedule / cancel / enumerate alarms; `rescheduleOnReboot` | UI, Alarm |
 | `NotificationService` | Platform | Channels, display, cancel, replace-by-id, tap routing | All three |
 | `FcmService` | Platform | Token lifecycle → Firestore; route foreground + background messages | UI, FCM |
 | `PermissionService` | Platform | POST_NOTIFICATIONS, exact alarms, battery exemption, auto-revoke exemption | UI |
-| `ClockService` | Platform | Device tz; device-vs-server skew detection | UI |
+| `Clock` | Platform edge | The current instant. Trivial and **plugin-free**. | **All three** |
+| `ClockService` | Platform | Discover device IANA tz → `LocalStore` on resume; device-vs-server skew detection | UI |
 | `ConnectivityService` | Platform | Online state for the staleness banner | UI |
 | `Reconciler` | Domain | Pure desired-state calculation for both sides | All three |
 
 `Reconciler` appearing in all three isolates while depending on nothing is the payoff of the
 layering. It is the same code deciding, whether a human opened the app or an alarm woke a
 bare isolate at 10:00.
+
+`Clock` and `ClockService` are two components rather than one because their isolate requirements
+differ ([ADR-0002](decisions/0002-clock-split.md)). Reading the current instant is core Dart and is
+needed everywhere; discovering the device's zone is a **plugin** call, and skew detection needs a
+server round-trip that §11 scopes to app-open. Only the first belongs in a bare isolate.
+
+The consequence is worth stating plainly, because the intuitive reading is the opposite: **the
+alarm isolate computes `D` with no plugin access at all.** It needs the current instant
+(`DateTime.now()`, core Dart), the *watched person's* zone (denormalized onto the link by §7, so
+already on disk), and `package:timezone` (pure Dart, compiled-in database). `flutter_timezone` is
+only ever needed to discover the device's *own* zone, which is a UI-side question whose answer is
+cached to `LocalStore`.
 
 ---
 
@@ -394,7 +412,14 @@ Everything else about time stands:
 - The **day is defined in the watched person's timezone**, carried on the link and in the payload.
   Away dates use the same definition.
 - Scheduling uses `timezone` + `flutter_timezone` and `zonedSchedule` — never raw UTC offsets,
-  so DST is handled.
+  so DST is handled. `flutter_timezone` is a **plugin and is called only from the UI isolate**,
+  which caches the device's IANA zone to `LocalStore`; background isolates read it from there
+  ([ADR-0002](decisions/0002-clock-split.md)). `package:timezone` itself is pure Dart and runs
+  anywhere.
+- **A cached device zone can go stale** if someone travels without opening the app. Accepted: a
+  watcher's own zone cannot affect `D` — that uses the watched person's zone from the link — and
+  the watched person opens the app daily to tap, so the worst case is one boundary day after a
+  flight, which the soft-midnight rule below already tolerates.
 - The watcher's alarm fires at **watcher-local** time (default 10:00) but asks about the last
   completed **watched-local** day. This is why a watcher in another country is never woken at 03:00.
 - Midnight remains a soft boundary — a tap at 00:05 Monday and 23:55 Tuesday is ~48h of real

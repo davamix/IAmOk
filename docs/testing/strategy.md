@@ -40,16 +40,16 @@ flutter test
 
 `DateTime.now()` does not appear in the domain layer, and does not appear in a policy or the
 reconciler at any layer. **The clock is a parameter.** Reading the real clock happens only at the
-platform edge, through `ClockService`, and the value is then passed in.
+platform edge, through `Clock`, and the value is then passed in.
 
 This is the rule that makes the away-mode and day-boundary tests possible at all, and the one most
 likely to be broken by a well-meaning shortcut. It is worth failing a review over.
 
-> **Open, and owed a decision before Phase 3.** ARCHITECTURE.md §6 lists `ClockService` as a **UI**
-> isolate component, but §10 requires the alarm isolate to compute `D` — the most recently
-> completed watched-local day — which needs a clock in a bare isolate. Either §6's isolate column
-> widens, or the alarm entry point gets a sanctioned way to read the clock at its own edge. The
-> rule above is unaffected either way; only the location of the one legitimate read is open.
+`Clock` is deliberately separate from `ClockService`
+([ADR-0002](../architecture/decisions/0002-clock-split.md)): `Clock` is plugin-free and available
+in **all three isolates**, while `ClockService` — device-zone discovery via `flutter_timezone`, and
+server skew detection — is UI-only. Anything under test that reaches for `ClockService` from an
+alarm or FCM path is a finding, not a fixture problem.
 
 ## Give the policies their `away` argument from the first line
 
@@ -137,6 +137,12 @@ idempotent, boot recovery is a duplicate-notification bug.
 **The date is the document id** — a second tap on the same day is an *update*, so it does not fire
 `onDocumentCreated` and produces no duplicate push. §7 calls this load-bearing and says there is no
 dedupe logic anywhere, which makes it worth an explicit test rather than an assumption.
+
+**Timezones come from disk, not from a plugin** — [ADR-0002](../architecture/decisions/0002-clock-split.md).
+`D` must be computable with only `Clock`, the per-link `watchedTimezone`, and `package:timezone`.
+Assert that the day computation is driven entirely by injected values, and cover a **stale cached
+`deviceTimezone`** — a watched person who flies and does not open the app — so the accepted
+one-boundary-day error is a known outcome rather than a surprise.
 
 **Permissions and health** — the derivation from a set of permission booleans to an overall verdict
 and a remediation is pure logic and belongs in the unit level. The failure it guards against is a

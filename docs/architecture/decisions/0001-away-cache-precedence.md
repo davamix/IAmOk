@@ -1,6 +1,8 @@
 # ADR-0001 — Refresh Firestore before the away cache decides
 
-**Date:** 2026-08-15 · **Status:** Accepted
+**Date:** 2026-08-15 · **Status:** Accepted · refined by
+[ADR-0002](0002-clock-split.md) — `lastReconcileAt` is a timestamp, not a date, and the staleness
+test compares calendar days. The decision below is unchanged.
 **Phase:** 0 (found at the Phase 0 gate; implemented in Phases 3 and 6)
 **Affects:** [ARCHITECTURE.md](../ARCHITECTURE.md) §8, §10, §12
 **Model:** [`tools/models/away_warning_model.dart`](../../../tools/models/away_warning_model.dart) — 18 cases, runnable

@@ -170,9 +170,15 @@ self-contradictory on a 12h device.
    *truncate* rather than delete, and the cache may only be cleared by a read that **succeeded**,
    not merely by being online. §8, §10 and §12 amended; the model is now the executable
    specification for Phase 3.
-2. **§6 lists `ClockService` as a UI-isolate component**, but §10 requires the alarm isolate to
-   compute `D`, the last completed watched-local day. A bare isolate therefore has no sanctioned
-   clock. Flagged inline in `testing/strategy.md`; needs a decision before Phase 3.
+2. ~~**§6 lists `ClockService` as a UI-isolate component**, but §10 requires the alarm isolate to
+   compute `D`.~~ **RESOLVED — [ADR-0002](../architecture/decisions/0002-clock-split.md), 2026-08-15.**
+   The row was two responsibilities sharing a cell: reading the instant (core Dart, needed
+   everywhere) versus device-zone discovery and skew detection (a plugin and a server round-trip,
+   UI-only). Split into `Clock` (all three isolates) and `ClockService` (UI). The device's IANA
+   zone is now cached to `LocalStore` by the UI, so a bare isolate computes `D` with **no plugin
+   access at all**. `LocalStore` also gained `watchedTimezone` — without it `D` was not computable
+   from disk, which §10's offline branch requires — and `lastReconcileAt` was corrected to a
+   timestamp, a defect inherited from ADR-0001.
 3. **§1 still reads "`europe-west1` / `eur3`"** for a one-way door that §16 and PLAN.md settle as
    `europe-west1`. Stale text on a permanent decision.
 4. **§8's away validation omits `setBy == request.auth.uid` and `setByName`.** Both are sound

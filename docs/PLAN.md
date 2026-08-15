@@ -1,0 +1,247 @@
+# I Am Ok — Implementation Plan
+
+**Date:** 2026-08-15 · **Status:** Awaiting approval · No implementation started.
+
+Nine phases. Each ends with a summary document in `docs/phases/`, and a review gate before the
+next begins. Phases 1–3 need no backend at all.
+
+---
+
+## Decisions locked before planning
+
+| Decision | Value |
+|---|---|
+| Pairing | **Invite codes + Android share sheet.** No `READ_CONTACTS`, no address-book upload, works on day one. |
+| Onboarding screen 1 | "Who should know you're OK?" → people who watch **me** → I am **watched** → Tap + Away main screen |
+| Onboarding screen 2 | "Who are you looking after?" → people **I** watch → I am a **watcher** → list main screen |
+| Both selected | Tap + Away takes priority; a top action button opens the watcher list |
+| Firebase project | `i-am-ok-c74ca` ("I Am Ok"), project number `744276314021` |
+| Firebase CLI | Authenticated as `davamix@gmail.com` — I can drive rules, indexes, Functions, emulators |
+| Away start date | Always today. Calendar selects the **last away day** only. No future-dating. |
+
+### Firebase infrastructure — provisioned and verified 2026-08-15
+
+Independently verified from the CLI, not taken from a console summary.
+
+| Item | Value | Verified by |
+|---|---|---|
+| Firestore location | **`europe-west1`** — permanent | `firestore:databases:get` |
+| Firestore mode | **`FIRESTORE_NATIVE`** — permanent | `firestore:databases:get` |
+| Android app | `1:744276314021:android:304a9d901675e9ee748a4c` | `apps:list` |
+| Debug SHA-1 + SHA-256 | both registered | `apps:android:sha:list` |
+| Google sign-in provider | enabled | OAuth clients present in config |
+| `google-services.json` | at `android/app/`, 1327 bytes, both OAuth clients | file read |
+
+`europe-west1` was chosen over `eur3` for co-location with Functions, EU residency, and cost.
+Both were permanent at creation; this one is now settled.
+
+**Web OAuth client** — `744276314021-uour1dugadnlu0kf4atdmgs9bv00sd6n.apps.googleusercontent.com`.
+This is the `serverClientId` value `google_sign_in` needs on Android. Using the *Android* client ID
+instead causes a silent sign-in failure with no useful error.
+
+Still outstanding, all Phase 4: Blaze plan, the 2nd-gen Functions APIs, FCM v1 confirmation,
+App Check in monitoring mode, and confirming Analytics / RTDB / Storage remain off.
+
+See `docs/infrastructure/firebase-setup-prompt.md` for the full state and two CLI traps that cost
+time during setup (`--out` silently leaving a stale file; exit code 9 not meaning failure).
+
+---
+
+## Phase 0 — Foundations
+
+No app code. Sets up the documentation, constraint, and review machinery everything else runs on.
+One session with no functional progress, deliberately.
+
+**Deliverables**
+- `docs/` reorganised by topic (see below), with `docs/README.md` as the index
+- `CLAUDE.md` in failure-log form — project overview + build commands, **and no invented
+  constraints**. Entries get added as real failures occur.
+- `.claude/skills/` — project guidelines per topic, loadable during normal work
+- `.claude/agents/` — five reviewer agents
+- `.gitignore` hardened for secrets; `.local/` established as the private, never-committed area
+
+**Documentation layout**
+```
+docs/
+  README.md              index and reading order
+  PLAN.md                this file
+  HANDOVER.md            kept, marked historical
+  architecture/          ARCHITECTURE.md + decision records
+  security/              threat model, rules guidelines, secrets policy
+  ui-ux/                 guidelines, screen specs
+  testing/               strategy, device matrix
+  infrastructure/        Firebase setup runbook, deploy notes
+  legal/                 privacy policy, terms
+  phases/                one summary per completed phase
+```
+
+**Reviewers** (`.claude/agents/`) — `architecture-reviewer`, `security-reviewer`, `uiux-reviewer`,
+`testing-reviewer`, `infrastructure-reviewer`. Skills carry the rules; agents apply them.
+
+**Exit criteria** — docs navigable from `docs/README.md`; agents invocable; `git status` clean with
+no secret paths trackable.
+
+### On the public/private documentation split
+
+The split you asked for is real but **narrower than it looks**, and being precise about it matters
+more than being cautious about it.
+
+**Genuinely secret — never in the repo, `.local/` and a password manager:**
+- the release keystore and its passwords
+- any service-account JSON (Functions admin, Play publishing)
+
+**Not secret, despite intuition — these ship inside the APK and anyone can extract them:**
+- the Firebase project ID and project number
+- the API key in `google-services.json`
+- the Firestore security rules
+
+Treating an extractable API key as a secret buys nothing and creates false confidence. The actual
+control is **security rules plus App Check** (Play Integrity attestation), which is what stops a
+stranger with your API key from reading anything. App Check is proposed in Phase 4.
+
+---
+
+## Phase 1 — Domain layer
+
+Pure Dart. No Flutter, no Firebase, no `DateTime.now()`. This is the specification, expressed as
+testable code.
+
+**Deliverables** — `DayKey`, `AwayPeriod`, `ReminderPolicy`, `WarningPolicy`, `Reconciler`, and the
+`Link` / `CheckIn` / `WatchStatus` entities, with a full unit suite.
+
+**Non-negotiable:** the policies take their `away` argument from the first line, even while it is
+always null. Retrofitting it later means touching every call site and every test.
+
+**Exit criteria** — `flutter test` green, covering day boundaries across timezones, DST, away edges
+(`from`, `through`, the day after), the correction path, and warning suppression.
+
+**Review focus** — purity. Anything that reaches for a clock, a plugin, or I/O belongs in a layer above.
+
+---
+
+## Phase 2 — Watched side, on real hardware
+
+Fake data, no backend. Proves the mechanism that everything else assumes works.
+
+**Deliverables** — `LocalStore` (sqflite), `AlarmScheduler`, `NotificationService` + channels, the
+minimal Tap screen, and the debug harness (force date, fire alarm now, dump store, run reconcile).
+
+**Tap screen behaviour** — large target, high contrast, minimal chrome. Once tapped, the target is
+**disabled for the rest of the local day** and reads *"You already tapped today, at 09:14"* — the
+memory-safety idea, worth having even though the write is idempotent. Re-enables at local midnight.
+
+**Exit criteria** — on a **real phone**: 12:00/18:00/21:00 fire; a tap cancels the rest of the day;
+alarms survive a reboot; the window re-arms without opening the app.
+
+**Risk** — this is where OEM battery management either works or doesn't. It is the reason this phase
+is second rather than fifth.
+
+---
+
+## Phase 3 — Watcher side, on real hardware
+
+Still fake local data. Proves the one bug that would make this app harmful.
+
+**Deliverables** — the alarm isolate (`android_alarm_manager_plus`), the self-verifying dead man's
+switch, the false-warning suppression, and the late-arrival correction.
+
+**Exit criteria** — a warning fires when it should; is suppressed when a check-in is cached; is
+suppressed when away covers the day; is replaced by a correction when a late check-in arrives; and
+says something **different and honest** when the device cannot reach the network.
+
+---
+
+## Phase 4 — Firebase backbone
+
+**The irreversible step is already done** — Firestore exists in `europe-west1`, Native mode.
+What remains:
+
+1. Wire `firebase_core` + `google_sign_in` against the existing config, using the **Web** client ID
+   as `serverClientId`. Release SHA fingerprints get added at Phase 8, when the keystore exists.
+2. `users/{uid}` + token subcollection; check-in write with `deviceTappedAt` + `receivedAt`
+3. `firestore.rules` + emulator-based rules tests
+4. `onCheckInCreated` Function, `europe-west1`, data-only FCM fan-out
+5. FCM wiring in both the UI and background isolates
+6. **App Check** (Play Integrity), **monitoring mode only** — enforcing before the client sends
+   tokens would lock the app out of its own backend
+
+**Blaze plan** is required from step 4 onward, along with the 2nd-gen Functions APIs (Cloud
+Functions, Cloud Build, Artifact Registry, Eventarc, Cloud Run, Pub/Sub, Cloud Storage). Free
+allowances mean effectively €0 at this scale, but the card must be on the account.
+
+**Exit criteria** — a tap on one physical phone quietly updates a second physical phone.
+
+---
+
+## Phase 5 — Onboarding and pairing
+
+**Deliverables** — the three screens with both Skip options, identical for every user; invite
+creation and the `redeemInvite` callable; role routing from the two selections; the summary screen.
+
+**Exit criteria** — two phones pair from a cold install using only a shared code, and each lands on
+the correct main screen.
+
+---
+
+## Phase 6 — Away mode
+
+**Deliverables** — `users/{uid}/shared/away`, rules validation (30-day cap, no retroactive,
+`through >= from`), the `onAwayChanged` fan-out, the Away button on the Tap screen (which becomes
+*"I'm not away"* while active), and the away action on the watcher list.
+
+**Calendar copy** — the picker labels the chosen day unambiguously: *"Last day away: Saturday 22"*
+and *"Back on Sunday 23"*.
+
+**Exit criteria** — away set from either side silences both sides everywhere; cancelling restores
+both; and a device that was offline for the whole period still ends away on the right day.
+
+---
+
+## Phase 7 — UI/UX and the health panel
+
+**Deliverables** — the watcher list (multiple watched people, status per row, away action), the
+health panel, and cold-open state.
+
+**Cold open** — an *unresolved* warning if one stands, otherwise "Everything OK" with the last
+check-in time. Note this means the current state, not the most recent warning ever fired: a warning
+from three weeks ago that was followed by three weeks of check-ins is history, not status.
+
+---
+
+## Phase 8 — Release readiness
+
+**Deliverables** — release keystore + signing config, privacy policy and terms, the Play
+sensitive-permission justification for `USE_EXACT_ALARM`.
+
+**Signing** — `keytool` is available in the Android Studio JBR, so I can generate the keystore and
+wire `key.properties` + `build.gradle.kts`, with both gitignored. Two things are yours to decide:
+the password (I will not invent one and leave it in a file as the only copy), and whether to enable
+**Play App Signing** — strongly recommended, because it makes a lost *upload* key recoverable,
+whereas a lost app signing key means the app can never be updated again.
+
+**Legal** — I can draft a privacy policy and terms covering the actual data flows (Google account
+email and display name, a daily timestamp, away periods, links). It needs hosting at a public URL
+for Play; GitHub Pages under your existing namespace works. **This is a template grounded in the
+real data flows, not legal advice** — worth a lawyer's eye given vulnerable-person data and a Spanish
+establishment.
+
+---
+
+## Per-phase protocol
+
+1. Implement
+2. Run the relevant reviewer agents
+3. Write `docs/phases/phase-N-summary.md` — what was built, what was decided and **why**, what was
+   deferred, what to watch out for next
+4. Stop for your review before the next phase
+
+---
+
+## What this plan does not include
+
+- Contact-list discovery (replaced by invite codes)
+- Future-dated away periods (the field exists; the UI does not)
+- A per-link "mute just me"
+- A scheduled server-side missed-check-in Function — still the documented escape hatch if Phase 2
+  or 3 reveals that OEM alarm reliability is worse than the design assumes
+- iOS

@@ -1,6 +1,8 @@
 # I Am Ok — Implementation Plan
 
-**Date:** 2026-08-15 · **Status:** Awaiting approval · No implementation started.
+**Date:** 2026-08-15 · **Status:** Approved and in progress. **Phase 0 complete** — see
+[phases/phase-0-summary.md](phases/phase-0-summary.md). Next: Phase 1, the domain layer.
+No app code written yet.
 
 Nine phases. Each ends with a summary document in `docs/phases/`, and a review gate before the
 next begins. Phases 1–3 need no backend at all.

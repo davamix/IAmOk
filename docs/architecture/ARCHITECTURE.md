@@ -1,7 +1,7 @@
 # I Am Ok — Architecture
 
 **Date:** 2026-08-15 · **Status:** Design. No code written. · **Supersedes:** the *Architecture
-decisions* and *Open questions* sections of [HANDOVER.md](HANDOVER.md).
+decisions* and *Open questions* sections of [HANDOVER.md](../HANDOVER.md).
 
 The scope boundary in HANDOVER.md ("Explicit non-goals") still holds and is **not** re-opened
 here. This is a relay for one notification between two people. It is not a health monitor.

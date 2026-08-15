@@ -46,3 +46,48 @@ app.*.map.json
 
 # Widget Preview related
 .widget_preview/
+
+# ── Secrets ───────────────────────────────────────────────────────────────────
+# Rationale for every line here: docs/security/secrets-policy.md
+# Verify with: pwsh -File tools/check-secrets-ignored.ps1
+#
+# A .gitignore line protects the NEXT file, not the one you just deleted.
+# Never remove an entry because the thing it guarded is gone. (2026-08-15)
+#
+# NOT secret and committed ON PURPOSE: android/app/google-services.json
+# Its API key ships inside the APK and authorises nothing on its own; the real
+# controls are the security rules plus App Check. Never add a rule that would
+# match it, and never add a broad *.json rule here.
+
+# The private, never-committed working area for this repo
+.local/
+.credentials/
+
+# Signing
+*.jks
+*.keystore
+key.properties
+*.p12
+*.pem
+*.pepk
+
+# Service accounts — full admin, bypasses all security rules
+**/*-firebase-adminsdk-*.json
+**/service-account*.json
+**/serviceAccount*.json
+**/*-service-account.json
+client_secret_*.json
+credentials.json
+
+# Functions runtime config — where `firebase functions:config:get` output lands
+**/.runtimeconfig.json
+
+# Environment
+.env
+.env.*
+
+# Firebase CLI local state. Emulator exports can contain real check-in history,
+# which the threat model rates High by inference. (*.log is covered on line 3.)
+.firebase/
+firebase-export-*/
+emulator-data/

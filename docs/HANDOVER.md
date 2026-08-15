@@ -1,5 +1,20 @@
 # I Am Ok — Session Handover
 
+> **HISTORICAL — 2026-08-14. Kept for the parts still load-bearing, not as current design.**
+>
+> | Section | Standing |
+> |---|---|
+> | *Local environment*, *Build configuration*, *Commands* | **Current.** This is the authoritative toolchain record; nothing has replaced it. |
+> | *Explicit non-goals* | **Current and not re-opened.** [ARCHITECTURE.md](architecture/ARCHITECTURE.md) is built on top of this boundary. |
+> | *Where things stand* | **Stale.** "Nothing Firebase-related has been created" is no longer true — Firestore exists in `europe-west1`, Native mode, verified 2026-08-15. The commit list ends at `e279ddd`. |
+> | *What the app is* → "Exactly two notifications exist" | **Superseded.** ARCHITECTURE.md §1 replaces the per-tap notification with **quiet confirm, loud miss**: a check-in updates the watcher silently and only a *missed* day makes noise. The whole watcher design rests on this. |
+> | *Architecture decisions*, *Open questions*, *Data model — draft* | **Superseded** by [ARCHITECTURE.md](architecture/ARCHITECTURE.md). |
+> | *Risks to handle in implementation* → "Never trust device clocks" | **Wrong as written.** `serverTimestamp()` for `tappedAt` files an offline tap on the wrong day. Corrected in ARCHITECTURE.md §11. |
+> | *Blocker inventory* | Still useful, and **not** absorbed anywhere — ARCHITECTURE.md §17 is explicitly the *delta* against it, so read both. One row is wrong: "Wrong device clock → Server timestamps only" is the same error as the row above, corrected in §11. |
+> | *Suggested next step* | **Superseded** by ARCHITECTURE.md §19 and the phase plan in [PLAN.md](PLAN.md). |
+>
+> When this document and ARCHITECTURE.md disagree about design, ARCHITECTURE.md wins.
+
 **Date:** 2026-08-14 · **Repo:** https://github.com/davamix/IAmOk (public) · **Branch:** `main` @ `e279ddd`
 
 Context carried out of the setup session, for a new session that will plan the architecture.

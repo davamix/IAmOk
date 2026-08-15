@@ -236,8 +236,10 @@ correctness, which §3 explicitly refuses.
 
 Away is a **direct client write** rather than a callable Function, on purpose: it means a
 watcher can set away on a plane and have it queue offline like any other write. Validation
-lives in the rules (`through >= from`, `through <= request.time + 30d`, `from >= today`), which
-is enough — the cap is a guardrail, not a security boundary.
+lives in the rules — `through >= from` and `through <= request.time + 30d` on every write;
+`from >= today` **on create only**, with `from` immutable on update, so that cancelling an
+in-progress period by truncation is not rejected ([ADR-0001](decisions/0001-away-cache-precedence.md)).
+That is enough — the cap is a guardrail, not a security boundary.
 
 Invites are unreadable by clients on purpose — a readable invite collection is an enumerable
 list of codes.
@@ -285,26 +287,51 @@ Two kinds of alarm, chosen by what a *spurious* fire costs:
 
 ### The dead man's switch, self-verifying
 
-Cancellation alone is not trusted. When the watcher's alarm isolate wakes:
+Cancellation alone is not trusted. The alarm isolate **reconciles first, then decides** —
+amended by [ADR-0001](decisions/0001-away-cache-precedence.md), which found that the original
+ordering let a stale cached away silence a watcher for as long as the away period had left to
+run. A runnable model of what follows is at
+[`tools/models/away_warning_model.dart`](../../tools/models/away_warning_model.dart).
+
+**First, reconcile.** Attempt to read `checkins/{watchedUid}/days/{D}` **and**
+`users/{watchedUid}/shared/away`. If and only if the read **succeeds**, overwrite the cached
+away period with what Firestore returned — *including overwriting it with nothing* — refresh
+`lastConfirmedDate`, and stamp `lastReconcileAt`.
+
+> A read that **fails is not an answer.** A timeout, a permission denial, and an App Check
+> rejection all happen while the device is online, and none of them prove the away document is
+> gone. Only a read that succeeded and returned nothing may clear the cache. Keying this on
+> connectivity instead would wipe a legitimate away on a transient error and warn falsely.
+
+**Then decide**, against a cache that is now either fresh or knowably stale:
 
 1. Compute `D` = the most recently **completed** calendar day in the watched person's timezone.
 2. If `D < link.activeFrom` → silent. (Nothing to say about days before pairing.)
-3. If `D` falls inside the cached away period → silent. (§12)
-4. Read `LocalStore.lastConfirmedDate` for the link. If `>= D` → silent.
-5. Try Firestore `checkins/{watchedUid}/days/{D}` **and** `users/{watchedUid}/shared/away`.
-   Either a check-in or an away period covering `D` → update the cache, silent.
-6. If Firestore is **reachable** and neither exists → **warn**: *"No check-in from Mum yesterday."*
-7. If Firestore is **unreachable** → warn honestly: *"No check-in received from Mum yesterday —
-   your phone has been offline since HH:MM."* Different message, different meaning.
-8. Record `warningsShownFor += D`.
+3. If `LocalStore.lastConfirmedDate >= D` → silent. **Evidence outranks doubt:** a recorded
+   check-in settles the day before any away reasoning runs, because tapping during an away day
+   is allowed (§12).
+4. If `D` falls inside the cached away period:
+   - verified within the last **2 days** → silent;
+   - otherwise → warn, **distinctly**: *"Can't check on Mum — your phone has been offline since
+     Tuesday 10:14. She was marked away until Saturday 22 August."*
+5. Otherwise **warn**: *"No check-in from Mum yesterday."* if the read succeeded, or *"No
+   check-in received from Mum yesterday — your phone has been offline since HH:MM."* if it did
+   not. Different message, different meaning.
+6. Record `warningsShownFor += D`.
 
-Step 7 matters. Silence would be a silent failure; a flat "she didn't check in" would be a
-claim the device cannot support. The notification says what is actually known.
+Steps 4 and 5 matter for the same reason. Silence would be a silent failure; a flat "she didn't
+check in" would be a claim the device cannot support. The notification says what is actually
+known, and nothing more.
 
-Step 5 is why the warning alarm **keeps firing daily through an away period** rather than being
-cancelled: each fire re-verifies against Firestore, so an away that is cancelled remotely is
-picked up at the next fire even if every push was lost. Cancelling and re-arming would be
-cheaper and less correct.
+Step 4's staleness bound is what makes the warning alarm **keep firing daily through an away
+period** worth anything. The alarm is not cancelled during away, and each fire re-verifies
+against Firestore — so an away cancelled remotely is picked up at the next fire even if every
+push was lost. Cancelling and re-arming would be cheaper and less correct.
+
+Offline, the device **cannot** distinguish "the away was cancelled and I did not hear" from "the
+away is still on and I have not checked" — the inputs are identical. Step 4 therefore chooses
+which error to prefer, and prefers speaking. Silence is the one failure this app cannot detect in
+itself.
 
 Belt and braces: incoming taps still cancel the pending alarm (fast path), *and* the alarm
 re-derives the answer at fire time (correct path). Either alone would be a bug.
@@ -457,6 +484,20 @@ notification. It exists so the resumption of warnings is never a surprise.
   that the warning was for. Setting away from today forward is all that remains useful.
 - **Cancellation is symmetric with activation.** Anyone can cancel; the same document is written;
   the same fan-out and the same `reconcile()` run. There is no separate cancel path.
+- **Cancellation truncates; it does not delete** — [ADR-0001](decisions/0001-away-cache-precedence.md).
+  `through` is pulled back to the last genuinely-away day, so the days already spent away stay
+  covered. Deleting the document would retroactively un-cover them, and a device that then
+  refreshed its cache would warn about a day the person was legitimately away — a false claim,
+  which is the worst thing this app can do. The exception is cancelling on the day the period
+  *starts*: nothing has elapsed, and truncating would write `through = from - 1` and violate
+  `through >= from`, so that case deletes.
+  ```
+  cancel(a, day) = null                       if day <= a.from
+                 = {a.from, day - 1}          otherwise
+  ```
+- **`from` is immutable once written.** It follows from the rule above: truncating an in-progress
+  period rewrites a document whose `from` is already in the past, so §8's `from >= today` can only
+  be a *create* rule. On update, `from` must equal what is already stored.
 - **Last write wins.** Two people setting away simultaneously is a single-document conflict at
   family scale. `setByName` makes the outcome legible.
 - **UI: a calendar picker, with the selected day labelled unambiguously** — *"Last day away:

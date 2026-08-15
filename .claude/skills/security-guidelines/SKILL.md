@@ -61,10 +61,14 @@ rules and that table disagree, one of them is a bug.
 - **Links are Function-written**, except that either party may set `status: "revoked"` and nothing
   else. Creation goes through `redeemInvite` so single-use and expiry are enforced server-side.
 - **Away is a direct client write**, on purpose, so it queues offline like any other write.
-  Validation therefore lives in the rules. From ARCHITECTURE.md §8: `through >= from`,
-  `through <= request.time + 30d` (**against `request.time`, not `from`** — they differ the moment
-  future-dated away is exposed), `from >= today`. Proposed additions, not in §8:
-  `setBy == request.auth.uid` and `setByName` present.
+  Validation therefore lives in the rules. From ARCHITECTURE.md §8 as amended by ADR-0001:
+  `through >= from` and `through <= request.time + 30d` on every write (**against `request.time`,
+  not `from`** — they differ the moment future-dated away is exposed); `from >= today`
+  **on create only**, with `from` immutable on update. That split is load-bearing: cancelling an
+  away truncates `through` on a document whose `from` is already in the past, so a blanket
+  `from >= today` would reject the very write that stops a cancellation retroactively un-covering
+  elapsed away days. Proposed additions, not in §8: `setBy == request.auth.uid` and `setByName`
+  present.
 - The `get()` on `checkins` reads is **accepted cost**, not something to optimise away. Removing it
   would force the watcher to trust FCM for correctness, which the design refuses.
 

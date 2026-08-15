@@ -1,6 +1,12 @@
 # Decision records
 
-**Date:** 2026-08-15 · **Status:** Established in Phase 0. No records yet, deliberately.
+**Date:** 2026-08-15 · **Status:** Established in Phase 0.
+
+## Index
+
+| ADR | Title | Status | Affects |
+|---|---|---|---|
+| [0001](0001-away-cache-precedence.md) | Refresh Firestore before the away cache decides | Accepted | ARCHITECTURE.md §8, §10, §12 |
 
 ## What belongs here
 
@@ -33,8 +39,10 @@ better than a retro-fitted template would be:
 | Everything superseded from the setup session | [HANDOVER.md](../../HANDOVER.md) — marked historical |
 
 Converting those into ADRs would produce a second, lower-quality copy of the same reasoning and a
-new opportunity for the two to drift. They are not retro-fitted. **ADR-0001 will be the first
-decision taken from Phase 1 onward.**
+new opportunity for the two to drift. They are not retro-fitted.
+
+ADR-0001 is therefore not a pre-existing decision written up late — it is the first genuinely
+*new* one, forced by a defect the Phase 0 review found in ARCHITECTURE.md §10.
 
 ## Format
 

@@ -160,15 +160,16 @@ self-contradictory on a 12h device.
 
 ### Owed before Phase 1
 
-**Four defects in ARCHITECTURE.md, surfaced by review. I did not edit them** — Phase 0's brief was
-not to contradict the design doc, not to change it, and one of these is a genuine design question
-rather than a typo. They need your ruling:
+**Four defects in ARCHITECTURE.md, surfaced by review.** They need your ruling:
 
-1. **§10 steps 3 and 5 contradict each other.** Step 3 goes silent on a *cached* away period, which
-   short-circuits before step 5 ever runs — yet §10 claims step 5 is what picks up an away
-   cancelled remotely "even if every push was lost". As written, a cancelled away is never noticed
-   by a device whose cache still says away. This is the "app goes quiet and stays quiet" failure
-   mode in §17. **Substantive, and Phase 3 implements it.**
+1. ~~**§10 steps 3 and 5 contradict each other.**~~ **RESOLVED — [ADR-0001](../architecture/decisions/0001-away-cache-precedence.md), 2026-08-15.**
+   Confirmed executably: the sequence was modelled in
+   [`tools/models/away_warning_model.dart`](../../tools/models/away_warning_model.dart) and the
+   original ordering failed 4 of 18 cases, silencing a watcher for 16 days in the modelled
+   scenario. The model also surfaced two defects invisible to a prose reading — cancellation must
+   *truncate* rather than delete, and the cache may only be cleared by a read that **succeeded**,
+   not merely by being online. §8, §10 and §12 amended; the model is now the executable
+   specification for Phase 3.
 2. **§6 lists `ClockService` as a UI-isolate component**, but §10 requires the alarm isolate to
    compute `D`, the last completed watched-local day. A bare isolate therefore has no sanctioned
    clock. Flagged inline in `testing/strategy.md`; needs a decision before Phase 3.

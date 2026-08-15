@@ -89,24 +89,44 @@ under `domain/` is a review failure, not a preference.
 | Mechanism | `flutter_local_notifications.zonedSchedule`, display only | `android_alarm_manager_plus`, wakes a Dart isolate |
 | Verifies before speaking | No | **Yes** — five checks, in order |
 
-When the watcher's alarm isolate wakes it computes `D`, the most recently **completed** day in the
-watched person's timezone, then works down ARCHITECTURE.md §10 **in this order**:
+The alarm isolate **reconciles first, then decides** — ARCHITECTURE.md §10, as amended by
+ADR-0001. A runnable model of the whole thing, with 18 cases, is at
+`tools/models/away_warning_model.dart`; run it before changing any of this.
 
-1. `D < link.activeFrom` → silent. Never warn about days before the link existed. **This step is
-   easy to omit and it is its own §17 risk — do not drop it.**
-2. `D` inside the cached away period → silent.
-3. `LocalStore.lastConfirmedDate >= D` → silent.
-4. Firestore `checkins/{watchedUid}/days/{D}` **and** `users/{watchedUid}/shared/away` — either one
-   covering `D` → update the cache, silent.
-5. Firestore reachable and neither exists → **warn**.
-   Firestore **unreachable** → warn *differently and honestly*: *"No check-in received from Mum
-   yesterday — your phone has been offline since HH:MM."* Silence would be a silent failure; a flat
-   "she didn't check in" is a claim the device cannot support. **The two messages are distinct, and
-   that is a correctness requirement, not copy polish.**
+**First, reconcile.** Attempt the read of `checkins/{watchedUid}/days/{D}` **and**
+`users/{watchedUid}/shared/away`. If and only if it **succeeds**, overwrite the cached away with
+what Firestore returned — *including overwriting it with nothing* — refresh `lastConfirmedDate`,
+stamp `lastReconcileAt`.
+
+> **A failed read is not an answer.** Timeouts, permission denials and App Check rejections all
+> happen while online. Gate the cache overwrite on *the read succeeded*, never on connectivity —
+> getting this wrong wipes a legitimate away on a transient error and warns falsely.
+
+**Then decide**, computing `D` = the most recently **completed** day in the watched person's tz:
+
+1. `D < link.activeFrom` → silent. Never warn about days before the link existed. **Easy to omit,
+   and its own §17 risk — do not drop it.**
+2. `lastConfirmedDate >= D` → silent. **Evidence outranks doubt** — this comes *before* the away
+   check, because tapping during an away day is allowed.
+3. `D` inside the cached away period → silent if verified within **2 days**; otherwise the
+   distinct *"Can't check on Mum — your phone has been offline since … She was marked away
+   until …"*.
+4. Otherwise **warn**: the plain message if the read succeeded, the offline message if it did not.
+
+**Three distinct outcomes, never two.** Silence would be a silent failure; a flat "she didn't check
+in" is a claim the device cannot support; and an unverifiable away is neither of those. Which one
+fires is a correctness requirement, not copy polish.
 
 The warning alarm **keeps firing daily through an away period** rather than being cancelled, so
 each fire re-verifies against Firestore and an away cancelled remotely is picked up even if every
-push was lost.
+push was lost. That only works because the refresh happens *before* the away cache is consulted —
+the pre-ADR-0001 ordering short-circuited on the stale cache and silenced the watcher for as long
+as the away had left to run.
+
+**Cancelling an away truncates `through`; it does not delete the document** — except when nothing
+has elapsed yet, where truncating would violate `through >= from` and it deletes instead. Deleting
+mid-period retroactively un-covers days the person was legitimately away, and the next refresh
+then warns about one of them.
 
 Alarms are maintained as a **7-day rolling window** by `reconcile()`, not armed one day at a time —
 nothing runs at midnight. **During an away period the window extends to `through` + 7 days, with

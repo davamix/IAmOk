@@ -45,25 +45,33 @@ family scale and is recorded so it is never a surprise.
 and have it queue offline like any other Firestore write. Validation therefore has to live in the
 rules.
 
-From [ARCHITECTURE.md](../architecture/ARCHITECTURE.md) §8, verbatim:
+From [ARCHITECTURE.md](../architecture/ARCHITECTURE.md) §8, as amended by
+[ADR-0001](../architecture/decisions/0001-away-cache-precedence.md):
 
-- `through >= from`
-- `through <= request.time + 30d` — the cap
-- `from >= today` — no retroactive away
+| Rule | On create | On update |
+|---|---|---|
+| `through >= from` | ✓ | ✓ |
+| `through <= request.time + 30d` — the cap | ✓ | ✓ |
+| `from >= today` — no retroactive away | ✓ | — |
+| `from` unchanged from the stored value | — | ✓ |
+| delete allowed | — | ✓ (cancelling before any day has elapsed) |
+
+> **`from >= today` is a create-only rule, and this is load-bearing.** Cancellation truncates
+> rather than deletes (§12), which rewrites an in-progress period whose `from` is already in the
+> past. A blanket `from >= today` would reject exactly the write that keeps a cancelled away from
+> retroactively un-covering the days already spent away. Enforcing immutability on update is what
+> replaces it.
+
+> **The cap is against `request.time`, not against `from`.** Identical only while `from` is always
+> today, which is true in v1. §12 keeps `from` as a real field so future-dated away becomes a UI
+> change with no migration — at which point the two diverge: `from + 30d` would cap the *duration*,
+> while `request.time + 30d` caps how far ahead the period may *extend*.
 
 **Additions**, not in §8 and proposed here. They are hardening, not corrections — adopt or reject
 them deliberately when the rules are written in Phase 4:
 
 - `setBy == request.auth.uid` — you cannot attribute an away period to someone else
 - `setByName` is a string and present, so every device can render *who* did this
-
-> **Note the cap is against `request.time`, not against `from`.** They are identical only while
-> `from` is always today, which is true in v1. §12 keeps `from` as a real field precisely so
-> future-dated away becomes a UI change with no migration — and at that point the two forms
-> diverge: `from + 30d` would cap the *duration*, while `request.time + 30d` caps how far ahead the
-> period may *extend*, so a start date 30 days out would buy zero away days. §8 is the
-> specification; if the intent changes, change §8 and record it in
-> [decisions/](../architecture/decisions/), rather than letting the rules drift from it.
 
 The 30-day cap is a **guardrail, not a security boundary**. Someone determined to stay away for 60
 days can set it twice, and that is the intended behaviour — the cap exists to force a deliberate
@@ -102,7 +110,9 @@ Cover at minimum:
 
 - Each matrix row, allowed and denied.
 - A watcher with a `revoked` link — must be denied everywhere an accepted link would be allowed.
-- Away validation: `through < from`; 31 days; `from` yesterday; `setBy` spoofed to another uid.
+- Away validation: `through < from`; 31 days; `from` yesterday on create; `setBy` spoofed to
+  another uid; **`from` mutated on update** (must be denied); and the truncation write that
+  cancels an in-progress period (must be **allowed**, even though its `from` is in the past).
 - A write to `links/` from a client that changes anything other than `status: "revoked"`.
 - Any read of `invites/`, by anyone, including the invite's creator.
 

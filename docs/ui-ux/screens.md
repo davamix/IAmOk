@@ -118,6 +118,7 @@ The full set. Everything the app says out loud is here.
 | Check-in arrives | Watcher | **Nothing.** Status updates silently — quiet confirm, loud miss. |
 | No check-in yesterday, device online | Watcher | *"No check-in from Mum yesterday."* |
 | No check-in yesterday, device offline | Watcher | *"No check-in received from Mum yesterday — your phone has been offline since 22:10."* |
+| Away cached, but unverified for over 2 days | Watcher | *"Can't check on Mum — your phone has been offline since Tuesday 10:14. She was marked away until Saturday 22 August."* |
 | Late check-in after a warning was shown | Watcher | *"Correction: Mum did check in yesterday, at 23:40."* Replaces the warning by id. |
 | Away set by a watcher | All other watchers, and the watched person | *"Ana marked Mum away until Sat 22 Aug."* |
 | Away set by the watched person | All watchers | *"Mum is away until Sat 22 Aug."* |
@@ -126,3 +127,9 @@ The full set. Everything the app says out loud is here.
 
 Away transitions happen a handful of times a year, so these can be ordinary notifications rather
 than silent ones — alarm fatigue is not a risk at that frequency.
+
+The third row is [ADR-0001](../architecture/decisions/0001-away-cache-precedence.md). Offline, the
+device cannot tell "the away was cancelled and I did not hear" from "the away is still on and I
+have not checked" — so it says both of the things it actually knows and asserts neither. It is a
+third distinct string on purpose: reusing the plain offline warning would claim a missed check-in
+the device has no basis for.

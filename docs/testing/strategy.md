@@ -104,11 +104,26 @@ must be *replaced* by the correction, `lastConfirmedDate` updated, and `D` remov
 leave the other's notification and its `warningsShownFor` entry untouched.
 
 **Warning suppression** — before `link.activeFrom`; inside an away period; when the local cache
-already has the day; when Firestore has the day but the cache does not. And the inverse, which is
-the mode where the app goes quiet and stays quiet: **cache says away, Firestore says cancelled.**
+already has the day; when Firestore has the day but the cache does not.
+
+**The away-cache precedence rules** — [ADR-0001](../architecture/decisions/0001-away-cache-precedence.md),
+and the reason it exists. The runnable model at
+[`tools/models/away_warning_model.dart`](../../tools/models/away_warning_model.dart) carries all 18
+cases; port them, they are the specification:
+
+- cache says away, Firestore says **cancelled**, online → **warn** (the defect the ADR fixed)
+- cache says away, Firestore says **shortened**, online → warn for the days now outside
+- cache says away, offline, verified **within** 2 days → silent
+- cache says away, offline, **stale** → the distinct unverifiable-away message
+- cache says away, stale, **but `lastConfirmedDate >= D`** → silent. Evidence outranks doubt
+- **online but the read FAILED** (timeout, permission denied, App Check) → the cache must **not**
+  be cleared, and a live away must still silence. This is the trap: connectivity is not success
+- cancelling truncates — the elapsed away days stay covered and must not produce a warning
+- cancelling on the day the period *starts* deletes instead, and `through >= from` never breaks
 
 **The offline warning** — when Firestore is unreachable the message is *different*, and honest.
-Assert on which message, not merely that something fired.
+There are now **three** distinct outcomes and the test must assert on which one fired, never
+merely that something did: plain warning, offline warning, and unverifiable-away.
 
 **The push carries no authority** — reconcile with a synthetic FCM payload for `D`, Firestore
 unreachable and the cache empty, must leave `lastConfirmedDate` unchanged. The payload carries

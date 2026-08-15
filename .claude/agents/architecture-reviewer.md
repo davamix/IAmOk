@@ -50,13 +50,23 @@ completed watched-local day. Clock skew is surfaced, never silently corrected.
 **6. Push carries no authority.** Every FCM message is a data-only "reconcile now" nudge. Flag any
 code that takes state *from* a payload as truth rather than re-deriving it.
 
-**7. The warning path verifies before it speaks.** The five §10 checks, in order: `activeFrom`,
-cached away, `lastConfirmedDate`, a live Firestore read of both the check-in and the away document,
-then warn. Flag a missing **`activeFrom` guard** specifically — it is the easiest of the five to
-omit and it is its own §17 risk (warnings about days before the link existed). Flag any path that
-can emit a warning without having verified; any path where the offline case produces the same
-message as the online case, or goes silent instead; and any attempt to cancel the warning alarm
-during an away period rather than letting it re-verify daily.
+**7. The warning path reconciles before it decides.** §10 as amended by
+[ADR-0001](../../docs/architecture/decisions/0001-away-cache-precedence.md): attempt the Firestore
+read *first*; only a **successful** read overwrites the cached away (including overwriting it with
+nothing); then check `activeFrom` → `lastConfirmedDate` → cached away with its 2-day staleness
+bound → warn. `tools/models/away_warning_model.dart` is the runnable specification — if the code
+and the model disagree, say so.
+
+Flag specifically:
+- a missing **`activeFrom` guard** — the easiest check to omit, and its own §17 risk;
+- the cached away being consulted **before** the refresh is attempted, or before
+  `lastConfirmedDate` — that ordering is the exact defect ADR-0001 exists to prevent;
+- the cache overwrite gated on **connectivity rather than on the read succeeding** — a timeout or
+  an App Check rejection would then wipe a live away and warn falsely;
+- **three** outcomes collapsed into two: plain warning, offline warning, and unverifiable-away are
+  distinct, and which one fires is a correctness requirement;
+- a cancellation that **deletes** the away document mid-period instead of truncating `through`;
+- any attempt to cancel the warning alarm during an away period rather than letting it re-verify.
 
 Check the rolling window too: 7 days, extending to **`through` + 7** during an away period with the
 away days absent from the desired set. A window that only adds alarms and never cancels, or that

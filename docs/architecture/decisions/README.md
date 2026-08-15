@@ -8,6 +8,7 @@
 |---|---|---|---|
 | [0001](0001-away-cache-precedence.md) | Refresh Firestore before the away cache decides | Accepted | ARCHITECTURE.md §8, §10, §12 |
 | [0002](0002-clock-split.md) | Split the clock, and cache the device timezone on disk | Accepted | ARCHITECTURE.md §4, §5, §6, §11 |
+| [0003](0003-away-attribution.md) | Enforce away attribution; stop treating the name as authenticated | Accepted | ARCHITECTURE.md §8, §17 |
 
 ## What belongs here
 

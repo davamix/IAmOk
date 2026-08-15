@@ -93,8 +93,9 @@ guard was then **proved to fail** by temporarily adding `*.json` — it does, an
 **The 30-day away cap had drifted from ARCHITECTURE.md §8.** I had written `through <= from + 30d`;
 §8 says `through <= request.time + 30d`. Identical while `from` is always today, divergent the
 moment future-dated away is exposed — which §12 deliberately leaves the door open for. Corrected to
-§8's form everywhere, with the divergence explained. `setBy` and `setByName` validation are now
-marked as **proposed additions** rather than presented as §8 content.
+§8's form everywhere, with the divergence explained. `setBy` and `setByName` validation were marked
+as **proposed additions** rather than presented as §8 content — and were subsequently adopted into
+§8 by [ADR-0003](../architecture/decisions/0003-away-attribution.md), see open item 4 below.
 
 **Missing secret patterns** added to both `.gitignore` and the guard: `.runtimeconfig.json`
 (`functions:config:get` output), emulator export directories (an `--export-on-exit` of real data
@@ -186,9 +187,27 @@ self-contradictory on a 12h device.
    no location column at all and therefore could never have confirmed the setting it claimed to.
    Fixed in four places. This is the CLAUDE.md "assert on content, not on the command" constraint
    paying for itself a second time.
-4. **§8's away validation omits `setBy == request.auth.uid` and `setByName`.** Both are sound
-   hardening, currently marked as proposed additions in the rules guidelines. Adopt into §8, or
-   reject.
+4. ~~**§8's away validation omits `setBy == request.auth.uid` and `setByName`.**~~
+   **RESOLVED — [ADR-0003](../architecture/decisions/0003-away-attribution.md), 2026-08-15.**
+   Sharper than it first looked: §17 named `setByName` as the *entire* mitigation for an accepted
+   risk, so leaving it unvalidated meant that mitigation ran on client goodwill. Adopted three
+   free checks (`setBy == request.auth.uid` on create *and* update, `setByName` present/typed/
+   bounded, `setAt`/`updatedAt == request.time`) and **explicitly rejected** the tempting
+   display-name cross-check — users own their own `displayName`, so it costs a `get()` and proves
+   nothing. §17 restated: `setBy` is the enforced identity, `setByName` is a label.
+
+**All four are now closed**, as ADR-0001 through ADR-0003 plus a CLI verification. Two new items
+surfaced while closing them:
+
+- **Firestore has no delete protection and no point-in-time recovery.** Read off
+  `firestore:databases:get` on 2026-08-15 while confirming the location:
+  `DELETE_PROTECTION_DISABLED`, `POINT_IN_TIME_RECOVERY_DISABLED`, version retention 3600s. A
+  one-command hardening on a database holding data about vulnerable people. Queued for Phase 4,
+  not done unilaterally.
+- **Cancelled versus expired away periods.** Cancel-as-truncate (ADR-0001) makes a cancelled
+  period look identical to one that ran its course, but §12 has a distinct cancellation message.
+  Derivable from the cache diff, so no schema change — but it needs a test or the wrong message
+  ships. Recorded in the testing strategy.
 
 ### Owed before Phase 2
 

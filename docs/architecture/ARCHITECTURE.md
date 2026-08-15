@@ -254,10 +254,24 @@ correctness, which §3 explicitly refuses.
 
 Away is a **direct client write** rather than a callable Function, on purpose: it means a
 watcher can set away on a plane and have it queue offline like any other write. Validation
-lives in the rules — `through >= from` and `through <= request.time + 30d` on every write;
+lives in the rules, in two groups.
+
+**The period** — `through >= from` and `through <= request.time + 30d` on every write;
 `from >= today` **on create only**, with `from` immutable on update, so that cancelling an
 in-progress period by truncation is not rejected ([ADR-0001](decisions/0001-away-cache-precedence.md)).
-That is enough — the cap is a guardrail, not a security boundary.
+The cap here is a guardrail, not a security boundary.
+
+**The attribution** ([ADR-0003](decisions/0003-away-attribution.md)) — `setBy == request.auth.uid`
+on create **and** update; `setByName` present, a string, 1–100 chars; `setAt`/`updatedAt ==
+request.time`. All three are pure `request.resource.data` checks costing no extra reads. Unlike
+`from`, `setBy` and `setByName` are deliberately **mutable** — §12 is last-write-wins, so extending
+someone else's away period must re-attribute it to whoever wrote last.
+
+> **`setBy` is the identity; `setByName` is only a label.** The name cannot be authenticated —
+> §8 grants `users/{uid}` write-to-self, so anyone can rename themselves before writing, and a
+> rules `get()` comparing the two would cost a read and prove nothing. Enforcing the uid is what
+> makes a forged name recoverable after the fact. Do not add the display-name check in Phase 4;
+> ADR-0003 records why.
 
 Invites are unreadable by clients on purpose — a readable invite collection is an enumerable
 list of codes.
@@ -447,7 +461,11 @@ staying with family, and precisely when the watched person is least able to answ
 Requiring approval would block the feature in its main use case.
 
 `setByName` is denormalized onto the document so this is never mysterious: every device can
-show *"Ana marked Mum away until Sat 22 Aug."*
+show *"Ana marked Mum away until Sat 22 Aug."* It has to be denormalized — links are
+`(watched, watcher)` pairs, so a watcher has no path from a *peer* watcher's uid to their name,
+and §7 deliberately keeps watchers out of other users' documents. The label is what makes the
+message renderable offline; `setBy` is what makes it accountable
+([ADR-0003](decisions/0003-away-attribution.md)).
 
 ### Effects
 
@@ -646,7 +664,7 @@ New relative to HANDOVER.md's inventory.
 | An away period outliving its purpose — the app goes quiet and stays quiet | Medium — indistinguishable from working | 30-day cap; "ends tomorrow" notice; away state always visible in-app (§12) |
 | Warnings for days before the link existed | Medium | `link.activeFrom` (§7) |
 | Watcher offline at alarm time — cannot distinguish "no check-in" from "no network" | Medium | Distinct, honest message (§10, step 7) |
-| One watcher silences the whole family by setting away | Low — accepted by design | `setByName` on every surface; anyone can cancel (§12) |
+| One watcher silences the whole family by setting away | Low — accepted by design | `setBy` is **rules-enforced** to be the writer, so a forged name stays recoverable; `setByName` is a display label and is **not** authenticated ([ADR-0003](decisions/0003-away-attribution.md)). Shown on every surface; anyone can cancel (§12) |
 | High-priority data-only FCM is quota-limited for backgrounded apps | Low | A few messages per person per day. Far under quota. |
 | Firestore rules `get()` on every checkin read costs a read | Low | Negligible at this scale; noted so it isn't a surprise |
 

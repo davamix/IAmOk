@@ -97,6 +97,11 @@ All Phase 4, all from [firebase-setup-prompt.md](firebase-setup-prompt.md):
 - **FCM v1 confirmed**, legacy server key confirmed unused.
 - **App Check** with Play Integrity, registered and set to **monitoring only**. Enforcing before
   the client sends App Check tokens locks the app out of its own backend.
+- **Delete protection and point-in-time recovery are both OFF.** Read from
+  `firestore:databases:get` on 2026-08-15: `DELETE_PROTECTION_DISABLED`,
+  `POINT_IN_TIME_RECOVERY_DISABLED`, version retention 3600s. Cheap hardening on a database
+  holding data about vulnerable people, and delete protection in particular has no downside at
+  this scale. Decide both before the first real data lands.
 - **Confirm Analytics, Realtime Database, and Cloud Storage *for Firebase* remain off** — data
   minimisation is a deliberate choice for an app holding data about vulnerable people. Note this is
   the *product*, and is not the same thing as the Cloud Storage GCP API above, which 2nd-gen

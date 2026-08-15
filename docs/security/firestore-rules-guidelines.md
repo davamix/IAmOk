@@ -67,11 +67,25 @@ From [ARCHITECTURE.md](../architecture/ARCHITECTURE.md) §8, as amended by
 > change with no migration — at which point the two diverge: `from + 30d` would cap the *duration*,
 > while `request.time + 30d` caps how far ahead the period may *extend*.
 
-**Additions**, not in §8 and proposed here. They are hardening, not corrections — adopt or reject
-them deliberately when the rules are written in Phase 4:
+**Attribution**, adopted into §8 by
+[ADR-0003](../architecture/decisions/0003-away-attribution.md). All three are pure
+`request.resource.data` checks and cost no extra reads:
 
-- `setBy == request.auth.uid` — you cannot attribute an away period to someone else
-- `setByName` is a string and present, so every device can render *who* did this
+| Rule | On create | On update |
+|---|---|---|
+| `setBy == request.auth.uid` | ✓ | ✓ |
+| `setByName` present, string, 1–100 chars | ✓ | ✓ |
+| `setAt` / `updatedAt == request.time` | ✓ | ✓ |
+
+Note `setBy` and `setByName` are **mutable** on update, deliberately unlike `from`: §12 is
+last-write-wins, so extending someone else's away period must re-attribute it to whoever wrote
+last.
+
+> **Do not add a rule cross-checking `setByName` against `users/{uid}.displayName`.** It looks
+> like the obvious hardening and it is worth nothing: §8 grants `users/{uid}` write-to-self, so
+> anyone can rename themselves before writing, and the check costs a `get()` per write. `setBy`
+> is the enforceable identity; `setByName` is a display label. ADR-0003 records the reasoning so
+> this is not re-proposed.
 
 The 30-day cap is a **guardrail, not a security boundary**. Someone determined to stay away for 60
 days can set it twice, and that is the intended behaviour — the cap exists to force a deliberate
@@ -110,9 +124,13 @@ Cover at minimum:
 
 - Each matrix row, allowed and denied.
 - A watcher with a `revoked` link — must be denied everywhere an accepted link would be allowed.
-- Away validation: `through < from`; 31 days; `from` yesterday on create; `setBy` spoofed to
-  another uid; **`from` mutated on update** (must be denied); and the truncation write that
-  cancels an in-progress period (must be **allowed**, even though its `from` is in the past).
+- Away period validation: `through < from`; 31 days; `from` yesterday on create; **`from` mutated
+  on update** (must be denied); and the truncation write that cancels an in-progress period (must
+  be **allowed**, even though its `from` is in the past).
+- Away attribution validation: `setBy` spoofed to another uid (denied); `setByName` absent, empty,
+  non-string, or over 100 chars (denied); `setAt`/`updatedAt` backdated (denied); and a second
+  writer **extending** an existing period, which must be **allowed** and must re-attribute — a
+  test that only asserts denial here would freeze `setBy` and break §12's last-write-wins.
 - A write to `links/` from a client that changes anything other than `status: "revoked"`.
 - Any read of `invites/`, by anyone, including the invite's creator.
 

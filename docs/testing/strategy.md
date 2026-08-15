@@ -153,6 +153,17 @@ health panel reporting green while `POST_NOTIFICATIONS` is revoked, i.e. the app
 "everyone **except** whoever cancelled". Easy to notify the actor, or to miss the watched person.
 The "ends tomorrow" notice is scheduled locally from `through` with no server involved.
 
+**Cancelled versus expired** — a loose end from cancel-as-truncate
+([ADR-0001](../architecture/decisions/0001-away-cache-precedence.md)). A truncated period looks
+exactly like one that ran its course, but §12 has a *distinct* cancellation message. The device
+tells them apart from the cache diff — cached `through` later than Firestore `through` means
+shortened or cancelled — so no extra field is needed, but it needs a test or the wrong message
+ships.
+
+**Away attribution** — [ADR-0003](../architecture/decisions/0003-away-attribution.md). `setBy`
+re-attributes when a second person extends a period (§12 last-write-wins), so assert it *changes*;
+a test that only checks it cannot be spoofed would happily pass an implementation that froze it.
+
 **`redeemInvite`** — expired code rejected; already-consumed code rejected; redeeming twice is
 idempotent via the deterministic link id; and `activeFrom` set to today **in the watched person's
 timezone, not the redeemer's** — the `activeFrom` suppression above depends on that being right.

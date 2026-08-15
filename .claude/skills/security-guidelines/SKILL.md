@@ -67,8 +67,14 @@ rules and that table disagree, one of them is a bug.
   **on create only**, with `from` immutable on update. That split is load-bearing: cancelling an
   away truncates `through` on a document whose `from` is already in the past, so a blanket
   `from >= today` would reject the very write that stops a cancellation retroactively un-covering
-  elapsed away days. Proposed additions, not in §8: `setBy == request.auth.uid` and `setByName`
-  present.
+  elapsed away days.
+- **Away attribution** (ADR-0003, now in §8): `setBy == request.auth.uid` on create *and* update;
+  `setByName` present, string, 1–100; `setAt`/`updatedAt == request.time`. All free — no extra
+  reads. `setBy`/`setByName` are **mutable** on update, unlike `from`, because §12 is
+  last-write-wins and extending someone else's period must re-attribute it.
+  **Never cross-check `setByName` against `users/{uid}.displayName`** — users can rename
+  themselves at will, so it proves nothing and costs a `get()`. `setBy` is the identity;
+  `setByName` is a label. Do not let any surface imply the name is authenticated.
 - The `get()` on `checkins` reads is **accepted cost**, not something to optimise away. Removing it
   would force the watcher to trust FCM for correctness, which the design refuses.
 

@@ -54,9 +54,14 @@ rules and the table disagree, one of them is a bug — say which.
   specification: `through >= from` and `through <= request.time + 30d` — **against `request.time`,
   not `from`** — on every write; `from >= today` **on create only**; `from` immutable on update.
   Flag a blanket `from >= today` as a defect: it rejects the truncation write that cancels an
-  in-progress away. `setBy == request.auth.uid` and `setByName` present are proposed additions in
-  `docs/security/firestore-rules-guidelines.md`, not §8 content; treat their absence as a
-  question, not a defect.
+  in-progress away.
+- Away **attribution** present in the rules (ADR-0003, now §8 content — treat absence as a
+  defect): `setBy == request.auth.uid` on create *and* update; `setByName` present, string,
+  1–100 chars; `setAt`/`updatedAt == request.time`. Also flag the opposite error — `setBy` or
+  `setByName` made **immutable** on update, which breaks §12's last-write-wins re-attribution.
+- Flag any rule cross-checking `setByName` against `users/{uid}.displayName`, and any doc or UI
+  text implying the name is authenticated. Users can rename themselves, so the check proves
+  nothing and costs a `get()`; ADR-0003 rejected it explicitly. `setBy` is the identity.
 - Writes validated by **shape**, not just writer identity — field set, types, and immutability of
   `watchedUid`, `watcherUid`, `activeFrom`.
 - No authorisation decision made on a client-supplied timestamp.

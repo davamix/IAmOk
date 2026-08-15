@@ -17,7 +17,7 @@ flutter test
 flutter build apk --debug
 flutter run                                         # device must be in File transfer (MTP) mode
 pwsh -File tools/check-secrets-ignored.ps1          # after any .gitignore change
-firebase firestore:databases:list --project i-am-ok-c74ca
+firebase firestore:databases:get "(default)" --project i-am-ok-c74ca   # :list has no Location column
 ```
 
 `flutter doctor` reports Chrome and Visual Studio missing. Both are web/desktop-only targets that

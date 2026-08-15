@@ -35,10 +35,14 @@ Independently verified, never read off a console summary:
 
 ```powershell
 firebase projects:list
-firebase firestore:databases:list --project i-am-ok-c74ca   # expect europe-west1 / FIRESTORE_NATIVE
+firebase firestore:databases:get "(default)" --project i-am-ok-c74ca   # Location + Type
 firebase apps:list --project i-am-ok-c74ca
 firebase apps:android:sha:list <appId> --project i-am-ok-c74ca
 ```
+
+**`databases:get`, not `databases:list`.** `:list` prints Database Name, Edition and Type only —
+it has **no location column**, so it cannot confirm the one setting that is permanent. Verified
+2026-08-15: `Location │ europe-west1`, `Type │ FIRESTORE_NATIVE`, created 2026-08-15T15:32:35Z.
 
 > **On Windows, `firebase apps:*` prints `√ success` and then exits 9** with a libuv assertion in
 > `src\win\async.c`. The work has already completed. **Read stdout — it is printed before the

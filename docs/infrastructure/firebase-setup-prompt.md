@@ -7,7 +7,7 @@
 | 1 — Android app registered | **Done** · App ID `1:744276314021:android:304a9d901675e9ee748a4c` | Firebase CLI |
 | 1 — Debug SHA-1 + SHA-256 | **Done** · both verified via `apps:android:sha:list` | Firebase CLI |
 | 1 — `google-services.json` | **Done** · 1327 bytes, both OAuth clients present | Firebase CLI |
-| 2 — Firestore | **Done** · `europe-west1`, `FIRESTORE_NATIVE`, verified | Console |
+| 2 — Firestore | **Done** · `europe-west1`, `FIRESTORE_NATIVE` · created 2026-08-15T15:32:35Z · **CLI-verified via `databases:get`** | Console |
 | 3 — Google auth provider | **Done** · verified via OAuth clients appearing in config | Console |
 | 4 — Blaze + Functions APIs | Not done | — |
 | 5 — FCM v1 confirm | Not done | — |
@@ -164,9 +164,15 @@ FINAL — Summarise back to me:
 1. Put the downloaded `google-services.json` at `android/app/google-services.json`.
 2. Verify the location independently — do not rely on the summary:
    ```powershell
-   firebase firestore:databases:list --project i-am-ok-c74ca
+   firebase firestore:databases:get "(default)" --project i-am-ok-c74ca
    ```
-   The output must show `locationId: europe-west1` and `type: FIRESTORE_NATIVE`.
+   The output must show `Location │ europe-west1` and `Type │ FIRESTORE_NATIVE`.
+
+   > **Use `:get`, not `:list`.** `firestore:databases:list` prints only Database Name, Edition and
+   > Type — **no location column at all**, so it cannot verify the one setting that is permanent
+   > and most worth checking. This runbook said `:list` until 2026-08-15, when running it against
+   > the real project showed the location was simply absent from the output. Asserting on content
+   > rather than trusting the command is what caught it.
 3. Confirm the Android app registered:
    ```powershell
    firebase apps:list --project i-am-ok-c74ca

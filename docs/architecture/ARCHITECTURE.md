@@ -24,7 +24,7 @@ Derived from those, decided here:
 | FCM is **data-only**, never notification-payload | The app must run code on arrival (update cache, cancel alarm, correct a false warning). A notification-payload message displays without waking app code, which would leave the dead man's switch armed. "Quiet confirm" makes this free — there is nothing to display anyway. |
 | Firestore is the **source of truth**; FCM is a hint | See §3. Removes FCM from the correctness path entirely. |
 | Warning fires from a **logic-bearing alarm**, not a display-only one | See §10. A false "she didn't check in" is the worst bug this app can have; the alarm must verify before it speaks. |
-| Firestore + Functions in **`europe-west1` / `eur3`** | Owner in Spain. Latency, and GDPR data residency. **Irreversible** — see §16. |
+| Firestore + Functions in **`europe-west1`** | Owner in Spain. Latency, and GDPR data residency. **Irreversible** — see §16. `eur3` was the alternative and is not what was created; confirmed from the CLI 2026-08-15. |
 | Pairing is **invite-code, watched-side originated**, redeemed through a callable Function | The watched person's device generating and sharing the code *is* the consent record. One step, no approval round-trip. |
 
 ---

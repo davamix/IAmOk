@@ -25,9 +25,13 @@ claim can be checked, check it:
 
 ```powershell
 firebase projects:list
-firebase firestore:databases:list --project i-am-ok-c74ca   # expect europe-west1 / FIRESTORE_NATIVE
+firebase firestore:databases:get "(default)" --project i-am-ok-c74ca   # Location + Type
 firebase apps:list --project i-am-ok-c74ca
 ```
+
+**`databases:get`, not `databases:list`, for the location.** `:list` prints only Database Name,
+Edition and Type — no location column — so it cannot verify the one permanent setting. Expect
+`Location │ europe-west1` and `Type │ FIRESTORE_NATIVE`, CLI-verified 2026-08-15.
 
 **Two Windows traps apply to your own commands.** `firebase apps:*` prints `√ success` then exits 9
 with a libuv assertion — the exit code is not the result; read the output. And `--out` has crashed

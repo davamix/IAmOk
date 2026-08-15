@@ -47,10 +47,14 @@ provider is enabled. An empty `oauth_client: []` immediately afterwards is expec
 
 ```powershell
 firebase projects:list
-firebase firestore:databases:list --project i-am-ok-c74ca   # expect europe-west1 / FIRESTORE_NATIVE
+firebase firestore:databases:get "(default)" --project i-am-ok-c74ca   # Location + Type
 firebase apps:list --project i-am-ok-c74ca
 firebase apps:android:sha:list <appId> --project i-am-ok-c74ca
 ```
+
+**Use `databases:get`, never `databases:list`, to check the location.** `:list` prints only
+Database Name, Edition and Type — there is no location column, so it silently cannot answer the
+question. Verified 2026-08-15: `europe-west1`, `FIRESTORE_NATIVE`.
 
 ## Deploying
 

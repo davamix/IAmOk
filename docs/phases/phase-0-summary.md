@@ -179,8 +179,13 @@ self-contradictory on a 12h device.
    access at all**. `LocalStore` also gained `watchedTimezone` — without it `D` was not computable
    from disk, which §10's offline branch requires — and `lastReconcileAt` was corrected to a
    timestamp, a defect inherited from ADR-0001.
-3. **§1 still reads "`europe-west1` / `eur3`"** for a one-way door that §16 and PLAN.md settle as
-   `europe-west1`. Stale text on a permanent decision.
+3. ~~**§1 still reads "`europe-west1` / `eur3`"**~~ **RESOLVED — 2026-08-15, CLI-verified.**
+   `firestore:databases:get "(default)"` reports `Location │ europe-west1`,
+   `Type │ FIRESTORE_NATIVE`, created 2026-08-15T15:32:35Z. §1 corrected. Verifying it also
+   exposed a defect in our own runbook: the documented check used `databases:list`, which prints
+   no location column at all and therefore could never have confirmed the setting it claimed to.
+   Fixed in four places. This is the CLAUDE.md "assert on content, not on the command" constraint
+   paying for itself a second time.
 4. **§8's away validation omits `setBy == request.auth.uid` and `setByName`.** Both are sound
    hardening, currently marked as proposed additions in the rules guidelines. Adopt into §8, or
    reject.

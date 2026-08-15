@@ -209,14 +209,32 @@ surfaced while closing them:
   Derivable from the cache diff, so no schema change — but it needs a test or the wrong message
   ships. Recorded in the testing strategy.
 
-### Owed before Phase 2
+### Owed before Phase 2 — closed
 
-**The physical device rows in [device-matrix.md](../testing/device-matrix.md).** The two that
-matter are the handset the watched person will actually use and the one the watcher will actually
-use — the design's two riskiest assumptions are about those specific phones, and Phase 2's exit
-criteria cannot be met on an emulator. Also worth covering **one device at API 33 or below**: the
-permission model changes at API 30, 31, 33 and 34, the only device available today is API 36, and
-the watched person's phone is likely to be old.
+~~**The physical device rows in [device-matrix.md](../testing/device-matrix.md).**~~
+**RESOLVED — 2026-08-15, confirmed over adb.** The primary device is the owner's own **POCO F3**
+(`M2012K11AG`, `alioth`, arm64), Android **13 / API 33**, Xiaomi **HyperOS 1.0**, MIUI build
+`V816.0.6.0.TKHEUXM`.
+
+It satisfies both priority-1 rows at once — a handset in real daily use, which is also the
+watcher's phone where the auto-revoke risk lands — *and* the priority-2 vendor the matrix names as
+the most aggressive killer of background work. It also lands exactly on the API level that was
+owed: `POST_NOTIFICATIONS` became a runtime permission at 33, auto-revoke at 30, revocable exact
+alarms at 31, all now exercised on hardware. Phases 2 and 3 can proceed.
+
+Two gaps are recorded rather than closed:
+
+- **API 34+ is untested on hardware.** The app targets SDK 36 but the device runs 33, and the
+  exact-alarm tightening that `USE_EXACT_ALARM` exists to satisfy — the permission Play review will
+  question at Phase 8 — is gated on the *device's* API level. The API 36 AVD covers the framework
+  side; nothing covers "does it survive an OEM power manager at API 34+".
+- **Phase 4 needs a second endpoint.** Its exit criterion is two physical phones. With one, the
+  choice is a second handset or the AVD — the latter proves the functional path and nothing about
+  delivery reliability. To be decided and recorded before Phase 4, not substituted quietly.
+
+The watched person's handset is still unidentified. Not blocking, since the POCO is a harsher
+environment than most, but it should be known before Phase 4 so pairing is exercised on the
+hardware it will really run on.
 
 ### Later
 

@@ -104,7 +104,14 @@ Test stock settings first; only then repeat with battery optimisation disabled, 
 whether a failure is fixable by onboarding guidance or not at all.
 
 Per-phase checklists are in `docs/testing/device-matrix.md`. **The physical device rows there are
-still unfilled and are owed before Phase 2.**
+a **POCO F3, Android 13 / API 33, Xiaomi HyperOS 1.0** — the owner's own phone, and the harshest
+mainstream OEM for background work.**
+
+**Test stock settings first.** On MIUI/HyperOS, Autostart is off and per-app battery saving is
+restricted by default for a sideloaded app, and that default state is what real users are in.
+Record what breaks stock, *then* relax the settings and re-run; the difference between the two
+passes is the finding, and it decides whether onboarding must walk a family through Autostart or
+whether ARCHITECTURE.md §9's scheduled-function escape hatch has to be un-deferred.
 
 Record one row per device per phase in that phase's summary: Android version, OEM skin and version,
 whether power settings were stock, and what actually happened. A checklist that only records passes

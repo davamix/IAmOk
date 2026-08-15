@@ -1,7 +1,7 @@
 # Device matrix
 
-**Date:** 2026-08-15 · **Status:** Incomplete — the physical device rows are unfilled and are
-**owed before Phase 2**, whose exit criteria cannot be met on an emulator.
+**Date:** 2026-08-15 · **Status:** Primary physical device confirmed. Sufficient for Phases 2–3;
+**Phase 4 needs a second handset** and two coverage gaps are named below.
 
 ## Build targets
 
@@ -18,13 +18,20 @@ minSdk 24 matters here more than usual: the watched user's phone is likely to be
 
 | Device | Kind | Android | Notes |
 |---|---|---|---|
+| **POCO F3** — `M2012K11AG`, codename `alioth`, arm64 | **Physical** — the owner's own phone | **13 (API 33)** | Xiaomi **HyperOS 1.0**, MIUI build `V816.0.6.0.TKHEUXM`, security patch 2024-03-01. Confirmed over adb 2026-08-15. |
 | `Medium_Phone_API_36.0` | Emulator AVD | 36 | Verified present. Useless for the questions that matter — see below. |
-| *(none recorded)* | Physical | — | **Owed.** |
+
+**This is the best possible primary device for this project, and that is not a compliment to the
+phone.** It satisfies both priority-1 rows at once — it is a handset in real daily use — while
+also being the priority-2 vendor the matrix singles out as the most aggressive killer of
+background work. If the design survives here with stock settings, the OEM risk that Phases 2 and 3
+exist to retire is largely retired.
 
 ```powershell
-flutter emulators --launch Medium_Phone_API_36.0
 flutter devices
-& "D:\Android\Sdk\platform-tools\adb.exe" devices     # when a device will not appear
+& "D:\Android\Sdk\platform-tools\adb.exe" devices -l          # when a device will not appear
+& "D:\Android\Sdk\platform-tools\adb.exe" shell getprop ro.build.version.sdk
+flutter emulators --launch Medium_Phone_API_36.0
 ```
 
 ## What the emulator cannot answer
@@ -41,36 +48,67 @@ stock power settings?**
 
 Priority order, by how much they threaten the design rather than by market share.
 
-| Priority | Vendor | Why |
+| Priority | Vendor | Status |
 |---|---|---|
-| 1 | **Whatever the watched person will actually use** | The only device that has to work. Everything else is generalisation. |
-| 1 | **Whatever the watcher will actually use** | The auto-revoke risk lands here — a watcher may not open the app for weeks. |
-| 2 | Xiaomi / Redmi / POCO (MIUI / HyperOS) | The most aggressive killer of background work. Also needs "Install via USB" enabled to sideload at all. |
-| 2 | Samsung (One UI) | Largest install base; "Put unused apps to sleep" is on by default. |
-| 3 | Huawei (EMUI) | Aggressive, and no Play Services — **FCM does not work at all**. Would need a decision, not a fix. |
-| 4 | A stock-Android device (Pixel or similar) | The control. Distinguishes "our bug" from "their power manager". |
+| 1 | **Whatever the watched person will actually use** | **Not yet identified.** The only device that has to work. |
+| 1 | **Whatever the watcher will actually use** | **Covered** — the POCO F3 above is the owner's phone. Auto-revoke risk lands here. |
+| 2 | Xiaomi / Redmi / POCO (MIUI / HyperOS) | **Covered by the same device.** Also needs "Install via USB" to sideload at all. |
+| 2 | Samsung (One UI) | Not covered. Largest install base; "Put unused apps to sleep" is on by default. |
+| 3 | Huawei (EMUI) | Not covered, and probably never — no Play Services, so **FCM does not work at all**. That is a decision, not a fix. |
+| 4 | A stock-Android device (Pixel or similar) | Not covered. The control that distinguishes "our bug" from "their power manager". |
 
-> **Fill in rows 1 and 1 before Phase 2 starts.** The design's two riskiest assumptions are about
-> those two specific handsets, and testing a phone nobody in this family owns proves less than
-> testing the one that matters.
+> **The watched person's handset is still unidentified**, and it is the one device that genuinely
+> has to work. Not blocking Phases 2–3 — the POCO is a harsher environment than most, so passing
+> there is strong evidence — but it should be identified before Phase 8, and ideally before Phase 4
+> so the pairing flow is exercised on the hardware it will actually run on.
 
 ### The API-level axis, which the vendor axis does not cover
 
 Vendor spread alone is not enough, because the permission model this app depends on changes by API
 level, and the watched person's phone is likely to be old — minSdk is 24 for a reason.
 
-| API | What changes |
-|---|---|
-| 24–29 | The floor. No runtime notification permission at all. |
-| 30 (11) | **Auto-revoke of permissions for unused apps** begins — the silent watcher-killer. |
-| 31 (12) | `SCHEDULE_EXACT_ALARM` becomes revocable; `canScheduleExactAlarms()` starts mattering. |
-| 33 (13) | `POST_NOTIFICATIONS` becomes a runtime permission. Without it the app is inert. |
-| 34+ (14+) | Exact alarms no longer auto-granted; `USE_EXACT_ALARM` is the route, and Play review asks about it. |
+| API | What changes | Covered? |
+|---|---|---|
+| 24–29 | The floor. No runtime notification permission at all. | No |
+| 30 (11) | **Auto-revoke of permissions for unused apps** begins — the silent watcher-killer. | **Yes** — POCO F3 |
+| 31 (12) | `SCHEDULE_EXACT_ALARM` becomes revocable; `canScheduleExactAlarms()` starts mattering. | **Yes** — POCO F3 |
+| 33 (13) | `POST_NOTIFICATIONS` becomes a runtime permission. Without it the app is inert. | **Yes** — POCO F3 |
+| 34+ (14+) | Exact alarms no longer auto-granted; `USE_EXACT_ALARM` is the route, and Play review asks about it. | **No — real gap** |
 
-The only device available today is API 36. Two modern handsets on Android 14+ would leave the
-permission behaviour on an old phone — the app's actual target — completely unexercised. **Cover at
-least one device at API 33 or below** alongside the vendor spread, or state explicitly that the
-low-API path is untested and accept that risk.
+**The API 34+ gap is the one to keep in view.** The app sets `targetSdk 36` but the only physical
+device runs API 33, and several of these behaviours are gated on the *device's* API level rather
+than on targetSdk. So the exact-alarm tightening that `USE_EXACT_ALARM` exists to satisfy — the
+permission Play review will question at Phase 8 — is not exercised on hardware at all.
+
+The `Medium_Phone_API_36.0` AVD covers the *framework* side of that gap (permission prompts, exact
+alarm gating, auto-revoke) and is worth running for it. What it cannot cover is whether any of it
+survives an OEM power manager, and no emulator ever will. Treat the emulator as the API-level
+check and the POCO as the reliability check; neither substitutes for the other.
+
+## HyperOS / MIUI — what makes this device the hard case
+
+Xiaomi layers its own background management on top of Android's, and it is stricter. These are the
+settings that decide whether this app works at all, and the reason the POCO is the right primary
+target rather than a bad one.
+
+| Setting | MIUI default for a sideloaded app | Effect if left alone |
+|---|---|---|
+| **Autostart** | **Off** | The app cannot be woken by an alarm or a broadcast after being swiped away or rebooted. This is separate from Android's battery optimisation and is the single most common cause of "my alarm app stopped working" on Xiaomi. |
+| **Battery saver** (per-app) | "Battery saver" — restricted | Background work is throttled or killed. "No restrictions" is the permissive setting. |
+| **Lock in recents** | Off | Swiping the app from recents kills it and its alarms. |
+| **Install via USB** | Off | Cannot sideload at all until enabled. |
+| **MIUI Optimization** (developer options) | On | Changes permission and notification behaviour in ways that do not match stock Android. |
+
+**Test stock first, and record it.** The default state is the state real users are in, and the
+design's actual question — from ARCHITECTURE.md §14 — is whether alarms and data-only FCM survive
+*with stock power settings*. Only after recording what breaks should the settings be relaxed and
+the run repeated. The difference between the two passes is the finding: it tells us whether the
+onboarding needs to walk a family through Autostart, or whether the escape hatch in §9 (the
+scheduled server-side function) has to be un-deferred.
+
+This is also what the health panel and the dontkillmyapp.com link in onboarding exist for. If the
+stock pass fails here, that is not a bug to fix — it is a documented platform reality, and the
+product answer is guidance plus the §9 fallback.
 
 ## Per-device checklist
 
@@ -98,11 +136,17 @@ fixable by onboarding guidance or not at all.
 - [ ] A *different and honest* message when the device cannot reach the network
 - [ ] The alarm isolate survives the app being swiped away from recents
 
-**Phase 4 — end to end**
+**Phase 4 — end to end.** PLAN.md's exit criterion is *"a tap on one physical phone quietly updates
+a second physical phone"*, and only one physical phone exists today. Either a second handset is
+found, or the criterion is met with the POCO plus the API 36 AVD as the second endpoint — which
+proves the *functional* path but proves nothing about delivery reliability, since the emulator has
+no OEM power manager. **Decide which before Phase 4, and record the choice**; quietly substituting
+the emulator would weaken the exit criterion without saying so.
 
-- [ ] A tap on one physical phone quietly updates a second physical phone
+- [ ] A tap on one device quietly updates the other
 - [ ] Data-only FCM wakes the background isolate with the app closed
-- [ ] Delivery still works after the device has been idle overnight (real Doze)
+- [ ] Delivery still works after the device has been idle overnight (real Doze) — **POCO only;
+      the emulator cannot answer this**
 
 **Phase 5 — pairing**
 
@@ -138,3 +182,9 @@ findings.
 Enable Developer options (tap Build number 7×), enable USB debugging, connect as **File transfer
 (MTP)** — not charging-only — and accept the on-device prompt. Xiaomi / Redmi / POCO additionally
 require "Install via USB". Device must run Android 7.0 or later.
+
+The POCO F3 is already set up and was confirmed connected on 2026-08-15:
+
+```
+M2012K11AG (mobile) • 1720f883 • android-arm64 • Android 13 (API 33)
+```

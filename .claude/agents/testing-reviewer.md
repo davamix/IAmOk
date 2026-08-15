@@ -89,7 +89,10 @@ emulator only.
 `docs/phases/` actually records results: device, Android version, OEM skin and version, whether
 power settings were stock, and what happened. A checklist recording only passes is not evidence —
 the failures are the findings. Note that the physical device rows in `docs/testing/device-matrix.md`
-are still unfilled and owed before Phase 2.
+records the primary device: a **POCO F3, Android 13 / API 33, Xiaomi HyperOS 1.0**. Two gaps are
+open and should be treated as known rather than re-reported — API 34+ is untested on hardware, and
+Phase 4's two-physical-phone exit criterion has only one physical phone. Do flag it if Phase 4
+quietly substitutes the emulator without recording the choice.
 
 ## Reporting
 

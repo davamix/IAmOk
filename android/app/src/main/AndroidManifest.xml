@@ -31,6 +31,14 @@
         android:name="android.permission.SCHEDULE_EXACT_ALARM"
         android:maxSdkVersion="32"/>
 
+    <!-- Merged in by flutter_local_notifications and declared here explicitly
+         so it is a decision rather than an inheritance. The reminder channels
+         use default vibration, so it is used; the header rule above ("every
+         permission here is a health-panel row") is why an undeclared one that
+         still appears in the Play listing was worth naming. Drop it with
+         tools:node="remove" if the channels ever go silent-only. -->
+    <uses-permission android:name="android.permission.VIBRATE"/>
+
     <!-- REQUEST_IGNORE_BATTERY_OPTIMIZATIONS is deliberately ABSENT until
          Phase 7. It is the one §13 item Phase 2 does not measure, nothing in
          lib/ calls it, and a permission with no code behind it cannot be
@@ -42,7 +50,7 @@
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
         android:allowBackup="false"
-        android:fullBackupContent="false">
+        android:dataExtractionRules="@xml/data_extraction_rules">
         <!-- allowBackup=false, and the reason is INTEGRITY rather than privacy.
              Android's default is true, so without this the whole LocalStore is
              copied to Drive and restored onto a new device — including
@@ -59,7 +67,14 @@
              Nothing here is user-authored and from Phase 4 the durable truth is
              Firestore, so there is nothing worth preserving. It also keeps the
              check-in history and link graph off Drive, which has no relationship
-             to the europe-west1 residency the threat model relies on. -->
+             to the europe-west1 residency the threat model relies on.
+
+             allowBackup covers API 30 and below. On API 31+ it does NOT cover
+             device-to-device transfer, which needs the <device-transfer> block
+             in @xml/data_extraction_rules — see that file. The earlier
+             fullBackupContent="false" was valid but inert: it is only consulted
+             when allowBackup is true, and is superseded by dataExtractionRules
+             on the API levels that matter here. -->
         <activity
             android:name=".MainActivity"
             android:exported="true"

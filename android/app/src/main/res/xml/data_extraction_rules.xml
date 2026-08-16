@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Android 12+ (API 31+). `android:allowBackup="false"` stops CLOUD backup, but
+  it does NOT stop device-to-device transfer — opting out of that needs the
+  <device-transfer> block below. Without it, the exact failure this exists to
+  prevent is still reachable by the new-phone transfer path, on the API levels
+  this app targets.
+
+  What it prevents: `pending_alarms` being restored onto a device where nothing
+  is actually armed. Scheduled notifications do not survive a transfer, so the
+  restored store would insist a full 7-day window exists while AlarmManager
+  holds none — the "believing more is armed than really is" direction that
+  LocalStore names as the one that must never occur.
+
+  `reconcile()` now re-asserts the whole desired set, so this is belt and braces
+  rather than the sole defence. It is still worth having: the store has nothing
+  worth preserving — from Phase 4 the durable truth is Firestore, and after any
+  restore the user must re-grant POST_NOTIFICATIONS and sign in again anyway, so
+  backup could not carry a working state across even if it were safe.
+
+  OEM tools (Mi Mover, MIUI Backup) copy app data outside this mechanism
+  entirely. The re-assertion in AlarmScheduler is the only durable defence
+  against those, which is a point in favour of the app-layer fix rather than a
+  substitute for it.
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="root" />
+        <exclude domain="database" />
+        <exclude domain="sharedpref" />
+        <exclude domain="file" />
+        <exclude domain="external" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="root" />
+        <exclude domain="database" />
+        <exclude domain="sharedpref" />
+        <exclude domain="file" />
+        <exclude domain="external" />
+    </device-transfer>
+</data-extraction-rules>

@@ -1,6 +1,8 @@
 @TestOn('vm')
 library;
 
+import 'dart:io';
+
 import 'package:i_am_ok/data/local_store.dart';
 import 'package:i_am_ok/domain/domain.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
@@ -116,6 +118,39 @@ void main() {
 
       expect(await store.watcherCache('mum_ana'), cache,
           reason: 'every field survives a link rewrite');
+    });
+
+    test('upsert uses no SQL newer than the oldest Android it supports',
+        () async {
+      // `ON CONFLICT ... DO UPDATE` needs SQLite 3.24, which Android ships only
+      // from API 29. minSdk here is 24 — deliberately, because the device
+      // matrix says the watched person's phone is likely to be old — so on
+      // API 24-28 that syntax is a PARSE ERROR and the app cannot write a link
+      // at all.
+      //
+      // No test can catch that by running: `sqflite_common_ffi` binds a modern
+      // desktop SQLite, and the only physical device is API 33. So this asserts
+      // the source instead, which is the level the mistake lives at.
+      //
+      // Comments are stripped first — this file explains at length why the
+      // banned syntax is banned, and matching its own documentation is how the
+      // check first failed.
+      final code = (await File('lib/data/local_store.dart').readAsString())
+          .split('\n')
+          .map((line) {
+            final comment = line.indexOf('//');
+            return comment == -1 ? line : line.substring(0, comment);
+          })
+          .join('\n')
+          .toUpperCase();
+
+      expect(code, isNot(contains('ON CONFLICT')),
+          reason: 'UPSERT syntax requires SQLite 3.24 / API 29; use an UPDATE '
+              'then INSERT in a transaction');
+      expect(code, isNot(contains('RETURNING')),
+          reason: 'RETURNING requires SQLite 3.35 / API 34');
+      expect(code, contains('CREATE TABLE'),
+          reason: 'the premise: this really is reading the schema source');
     });
 
     test('an updated link keeps its changed fields', () async {

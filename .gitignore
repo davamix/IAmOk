@@ -49,6 +49,7 @@ app.*.map.json
 # real Android build.
 /android/build/
 /android/.gradle/
+/android/.kotlin/
 
 # Widget Preview related
 .widget_preview/

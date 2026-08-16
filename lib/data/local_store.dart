@@ -246,39 +246,56 @@ class LocalStore {
   /// silence a watcher indefinitely — and reset ADR-0004's cadence anchor, so
   /// the access-lost reminder would never advance past day 0.
   ///
-  /// The uids are not in the SET list: they are what the id is derived from, so
-  /// a row whose uids changed is a different link.
-  Future<void> upsertLink(Link link) => _db.rawInsert(
-        '''
-        INSERT INTO links (
-          id, watched_uid, watcher_uid, status, watched_name, watcher_name,
-          watched_timezone, active_from, warning_local_time, created_at,
-          accepted_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(id) DO UPDATE SET
-          status             = excluded.status,
-          watched_name       = excluded.watched_name,
-          watcher_name       = excluded.watcher_name,
-          watched_timezone   = excluded.watched_timezone,
-          active_from        = excluded.active_from,
-          warning_local_time = excluded.warning_local_time,
-          created_at         = excluded.created_at,
-          accepted_at        = excluded.accepted_at
-        ''',
-        [
-          link.id,
-          link.watchedUid,
-          link.watcherUid,
-          link.status.name,
-          link.watchedName,
-          link.watcherName,
-          link.watchedTimezone,
-          link.activeFrom.toString(),
-          link.warningLocalTime.toString(),
-          link.createdAt.toUtc().millisecondsSinceEpoch,
-          link.acceptedAt?.toUtc().millisecondsSinceEpoch,
-        ],
+  /// **UPDATE, then INSERT if it changed nothing** — deliberately not SQLite's
+  /// `ON CONFLICT … DO UPDATE`.
+  ///
+  /// UPSERT syntax needs **SQLite 3.24** (June 2018), which Android ships from
+  /// **API 29**. This app's minSdk is 24, and `docs/testing/device-matrix.md`
+  /// says why in terms: *"the watched user's phone is likely to be old"*. On
+  /// API 24–28 the UPSERT form is a **parse error**, not a subtle
+  /// misbehaviour — the app simply cannot write a link.
+  ///
+  /// It passed every test because `sqflite_common_ffi` binds a modern desktop
+  /// `sqlite3` library, and the only physical device is API 33. That is the
+  /// shape of hazard the device matrix's API-level axis exists for, and the one
+  /// axis a single handset cannot cover.
+  ///
+  /// The two statements run in one transaction so a concurrent writer cannot
+  /// land between them. The uids are not in the UPDATE set: they are what the
+  /// id is derived from, so a row whose uids changed is a different link.
+  Future<void> upsertLink(Link link) {
+    final values = <String, Object?>{
+      'status': link.status.name,
+      'watched_name': link.watchedName,
+      'watcher_name': link.watcherName,
+      'watched_timezone': link.watchedTimezone,
+      'active_from': link.activeFrom.toString(),
+      'warning_local_time': link.warningLocalTime.toString(),
+      'created_at': link.createdAt.toUtc().millisecondsSinceEpoch,
+      'accepted_at': link.acceptedAt?.toUtc().millisecondsSinceEpoch,
+    };
+
+    return _db.transaction((txn) async {
+      // An UPDATE leaves the row in place, so nothing cascades — which is the
+      // whole point. `INSERT OR REPLACE` deletes first, and `watcher_cache`
+      // and `warnings_shown` cascade on delete, so a link rewrite would take
+      // every standing warning and the access-lost cadence anchor with it.
+      final changed = await txn.update(
+        'links',
+        values,
+        where: 'id = ?',
+        whereArgs: [link.id],
       );
+      if (changed > 0) return;
+
+      await txn.insert('links', {
+        'id': link.id,
+        'watched_uid': link.watchedUid,
+        'watcher_uid': link.watcherUid,
+        ...values,
+      });
+    });
+  }
 
   Future<List<Link>> allLinks() async =>
       (await _db.query('links', orderBy: 'id')).map(_linkFrom).toList();

@@ -16,6 +16,7 @@ class WatchedState {
     required this.notificationsEnabled,
     required this.armed,
     this.tapFailed = false,
+    this.remindersAreExact = true,
   });
 
   /// Today in the **device's** zone. The watched person's own zone is the
@@ -46,10 +47,11 @@ class WatchedState {
   /// is inert without it.
   final bool notificationsEnabled;
 
-  /// How many reminders the platform actually holds.
+  /// How many reminders the **notification plugin** has a record of.
   ///
-  /// Surfaced for the debug harness, where the interesting number is the one
-  /// that disagrees with the store.
+  /// Not the platform's answer — no public API can give that. Surfaced for the
+  /// debug harness, where a disagreement with `LocalStore` means the two
+  /// app-local records have drifted. See `AlarmScheduler`.
   final int armed;
 
   /// The last tap did not save.
@@ -62,6 +64,11 @@ class WatchedState {
   /// and the check-in did not save.
   final bool tapFailed;
 
+  /// False when exact alarms were refused and the reminders were armed
+  /// **inexactly** — §13's documented degradation ("reminders degrade to
+  /// inexact"), which Doze can then defer. A §13 health-panel row in Phase 7.
+  final bool remindersAreExact;
+
   bool get hasTappedToday => todayCheckIn != null;
 
   WatchedState copyWith({bool? tapFailed}) => WatchedState(
@@ -73,6 +80,7 @@ class WatchedState {
         notificationsEnabled: notificationsEnabled,
         armed: armed,
         tapFailed: tapFailed ?? this.tapFailed,
+        remindersAreExact: remindersAreExact,
       );
 
   bool get isAway => away != null && away!.covers(today);
@@ -138,7 +146,7 @@ class WatchedReconcileService {
     // force-stop clears every platform alarm without touching this store, so a
     // diff computed against the store would re-arm nothing and leave the app
     // permanently inert. Measured on hardware — see `AlarmScheduler.apply`.
-    await alarms.apply(
+    final exact = await alarms.apply(
       toCancel: result.toCancel,
       desired: result.desired,
     );
@@ -157,7 +165,8 @@ class WatchedReconcileService {
       todayCheckIn: await store.checkInOn(today),
       away: null,
       notificationsEnabled: await notificationsEnabled(),
-      armed: await alarms.armedOnPlatform(),
+      armed: await alarms.armedAccordingToPlugin(),
+      remindersAreExact: exact,
     );
   }
 

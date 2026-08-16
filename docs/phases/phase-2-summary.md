@@ -8,7 +8,7 @@ it and made the app real: `LocalStore`, `AlarmScheduler`, `NotificationService` 
 `Clock`, the Tap screen, and the debug harness. It also landed the **two decisions carried in from
 the Phase 1 gate**, which are the parts most worth reading.
 
-**521 tests**, up from 328. `flutter analyze` clean. `flutter build apk --debug` succeeds.
+**524 tests**, up from 328. `flutter analyze` clean. `flutter build apk --debug` succeeds.
 
 ---
 
@@ -165,12 +165,11 @@ into the service and watching it go red.
 
 ## Review, and what it changed
 
-Four reviewers ran to completion — `architecture-reviewer`, `testing-reviewer`, `uiux-reviewer` and
-`security-reviewer`. **`infrastructure-reviewer` did not report**: it was launched and stopped
-before producing findings, so **the Android build changes below are unreviewed** and should be the
-first thing looked at when the phase is picked up again.
+All five reviewers ran to completion. `infrastructure-reviewer` stopped without reporting on its
+first launch and was re-run after the device pass, which turned out to be the right order — it had
+the hardware results to review as well as the build.
 
-**Between them the four found twenty-three defects. All are fixed.** Two were introduced by fixes
+**Between the five they found thirty-two defects. All are fixed.** Two were introduced by fixes
 made earlier in this same phase, which is the honest summary: the Stack that fixed the tap target
 *moving* introduced it being *overlapped*, and the widened purity guard covered files by name in a
 way that would have left Phase 3's alarm callback unguarded.
@@ -280,6 +279,60 @@ A second guard came with it — a named list of files that must be **bare-isolat
 Flutter, Riverpod and `flutter_timezone` imports. Nothing otherwise stopped the reconcile service
 importing `package:flutter` tomorrow and throwing in the isolate that cannot report anything.
 
+### Infrastructure — the build, reviewed last and worth the wait
+
+It found the two most serious latent defects in the phase, both invisible to every test and to the
+device pass.
+
+**SQLite UPSERT does not exist on the devices this app targets.** The `ON CONFLICT … DO UPDATE`
+written to fix the cascade defect above needs **SQLite 3.24**, which Android ships from **API 29**.
+minSdk here is 24 — deliberately, because the device matrix says the watched person's phone is
+likely to be old — so on API 24–28 it is a **parse error** and the app cannot write a link at all.
+
+Every test passed because `sqflite_common_ffi` binds a modern desktop SQLite, and the only physical
+device is API 33. This is the clearest example yet of the matrix's API-level axis being a real gap
+rather than a formality, and it is a defect introduced *while fixing another defect* — the third
+time that has happened across two phases. Replaced with an UPDATE-then-INSERT in one transaction,
+which is portable to 24 and cascades nothing. A source-level guard now bans both `ON CONFLICT` and
+`RETURNING`, since no runnable test on this machine can catch either.
+
+**Exact alarms are refusable, and the refusal took the whole screen down.** §13 promises *"reminders
+degrade to inexact"*; nothing implemented that. The plugin throws `exact_alarms_not_permitted`, the
+exception propagated through `apply` and `reconcile()` into the provider's error channel, replacing
+the screen with *"this phone could not get ready"* and skipping the store write. Unreachable on the
+API 33 test device — `USE_EXACT_ALARM` makes the check unconditionally true there — but live on
+API 31–32, and **the default everywhere if Play refuses `USE_EXACT_ALARM` at Phase 8**, since the
+fallback permission is denied by default when targeting Android 14+. Now falls back per reminder to
+`inexactAllowWhileIdle` and reports the degradation on `WatchedState` for §13's Phase 7 row.
+
+**`allowBackup="false"` did not close the restore vector.** On Android 12+ it stops cloud backup but
+not device-to-device transfer; that needs a `<device-transfer>` block. Added as
+`res/xml/data_extraction_rules.xml`. The old `fullBackupContent="false"` was valid but inert and is
+removed. Worth noting the limit: OEM tools (Mi Mover, MIUI Backup) copy app data outside this
+mechanism entirely, so the whole-set re-assertion remains the only durable defence — an argument for
+the app-layer fix rather than against it.
+
+Also fixed: `/android/.kotlin/` was unignored and one `git add -A` from being committed; `VIBRATE`
+was arriving merged-in from the notification plugin and undeclared, which is exactly the rule this
+phase used to *remove* `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`, so it is now declared with its reason.
+
+**The three build workarounds were challenged and all three stand**, with one correction worth
+recording: **`platforms;android-37` does not exist and never did.** From API 37 Google publishes
+minor-versioned platforms only (`android-37.0`, `37.1`, `37.2-beta`), so "install the missing SDK
+platform instead" was never an available option — dropping `permission_handler` was the only route.
+`kotlin.incremental=false` is a stock Flutter 3.47 toolchain defect rather than a local artefact, so
+it reproduces anywhere; the root cause is still unidentified and the flag hides it. Desugaring is
+correct and does not raise minSdk.
+
+And the reviewer's answer to the question this phase turned on: **there is no manifest-side fix for
+the force-stop case.** The boot receiver cannot help — a stopped app receives no broadcasts at all.
+WorkManager is cancelled by the same force-stop. A foreground service would work and costs a
+permanent notification, which contradicts "the family are updated quietly". So the app-layer
+re-assertion is correct *and complete for Phase 2* — **precisely because the watched person opens the
+app daily to tap, which is the repair trigger.** Phase 3 does not have that: its alarm is
+logic-bearing and belongs to a watcher who §13 argues never opens the app. That is now the first
+thing in *What to watch out for next*.
+
 ### Not acted on, deliberately
 
 - **`AppServices` is reachable as a service locator** from any widget. §14 sanctions the debug
@@ -290,6 +343,12 @@ importing `package:flutter` tomorrow and throwing in the isolate that cannot rep
   lands the alarm isolate — reminders are display-only and run no Dart — but it becomes so then.
 - **`WatchedState.away` is hard-wired null**, so `TapCopy.away` is unreachable. The `away` parameter
   is correctly threaded through the domain per the from-the-first-line rule; only the UI is deferred.
+- **`kotlin.incremental=false`'s root cause.** A stock-toolchain defect, unidentified. Narrower knobs
+  (`kotlin.incremental.useClasspathSnapshot=false`, `kotlin.compiler.execution.strategy=in-process`)
+  were suggested and not tried; the removal check belongs on the Phase 8 list, since KGP only moves
+  when someone edits `settings.gradle.kts`.
+- **An API 28 AVD run**, which is now the only way to exercise the SQLite floor. Owed before Phase 4,
+  when `upsertLink` starts running on every reconcile rather than only from the harness.
 
 ---
 
@@ -423,9 +482,21 @@ reopen + reconcile        →  21 armed        ← repaired
 ```
 
 It is also the answer to the security review's `allowBackup` finding, which is the same shape
-arriving by restore rather than by force-stop, and it is what the harness's *"Compare store against
-platform"* control exists to surface — it reported `store says 21 / platform has 24 / DIVERGED`
-during the session, which is what prompted the investigation.
+arriving by restore rather than by force-stop.
+
+**A correction to how that was first written up.** The harness's compare control reported
+`store says 21 / platform has 24 / DIVERGED`, and this summary originally credited it with surfacing
+the defect. The infrastructure review showed the label was wrong: `pendingNotificationRequests()`
+reads the notification plugin's own `SharedPreferences`, **not `AlarmManager`**, and no public
+Android API can enumerate an app's pending alarms. So that control compares `LocalStore` against a
+*second app-local record of the same intent* — genuinely useful, and a different question from "what
+does the OS hold". SharedPreferences survive a force-stop, so it would have reported 21 while nothing
+was armed.
+
+What actually surfaced the defect was `dumpsys alarm`, which is the only ground truth. The control is
+renamed *"Compare store against plugin record"*, `armedOnPlatform()` is now
+`armedAccordingToPlugin()`, and the comment that claimed otherwise is corrected — it was the kind of
+false confidence Phase 3 would have inherited.
 
 ### Boot recovery is delayed, not free
 
@@ -437,6 +508,13 @@ Nothing in this design depends on sub-minute boot recovery — the earliest remi
 this costs nothing today. It is recorded because it is the kind of number that quietly becomes
 load-bearing later, and because **a check made too early reads as a failure**. Anyone re-running
 this should poll for several minutes before concluding anything.
+
+**Criteria 3 and 4 do not compose with the force-stop finding, and this table can be misread as
+saying they do.** A force-stopped app is in the stopped state and receives **no broadcasts at all,
+including `BOOT_COMPLETED`**, until a human launches it — and that state survives a reboot. Both
+reboot results were measured on an app that had *not* been force-stopped; force-stop then reboot
+still leaves zero alarms until the app is opened. The boot receiver is not a repair path for the
+force-stop case, and only the daily tap is.
 
 ### Found and not fixed
 
@@ -466,11 +544,49 @@ scheduled second to retire, and it is substantially retired for display-only ala
 
 ---
 
+## What to watch out for next
+
+**PHASE 3 DOES NOT INHERIT THE FORCE-STOP REPAIR, and this is the most important line in this
+document.** Phase 2's whole-desired-set re-assertion works because the watched person opens the app
+daily to tap — that *is* the repair trigger. Phase 3's alarm is logic-bearing, uses
+`android_alarm_manager_plus`, and belongs to a watcher who §13 argues never opens the app. A
+force-stop there is silent, self-perpetuating, and has no user action to recover it: the alarms are
+gone, the boot receiver cannot help because a stopped app receives no broadcasts at all, and nobody
+opens the app to notice. The watcher goes permanently deaf and the family are told nothing.
+
+**Decide that before writing the watcher alarm, not after.** It is the reason this phase's result
+"substantially retires the OEM risk" for display-only alarms and does *not* retire it for Phase 3.
+
+**Nothing in the app can tell you what the OS actually holds.** `pendingNotificationRequests()` is
+the plugin's own SharedPreferences; there is no public API to enumerate pending alarms. Ground truth
+is `adb shell dumpsys alarm`, written to a file and pulled — piping it truncates, and that produced a
+false OEM finding once already. The recipe is in `docs/testing/device-matrix.md`.
+
+**The API-level axis is a real gap, not a formality.** Phase 2 shipped SQL that cannot parse below
+API 29 and it passed 500+ tests, because the test binding uses desktop SQLite and the only handset is
+API 33. Anything touching SQL, `java.time`, or a permission model needs the API 28 AVD before it is
+believed. An API 28 run is owed before Phase 4.
+
+**A defect fixed is a defect to re-review.** Three times across two phases, a fix introduced the next
+defect: the away clamp, the Stack that stopped the target moving and let text overlap it, and the
+UPSERT that fixed a cascade and broke Android 8. The reviewers caught all three; none was caught by
+the person writing the fix.
+
+**`upsertLink` is only reachable from the debug harness today.** From Phase 4 it runs on every
+reconcile that refreshes links from Firestore, which is when both its cascade behaviour and its SQL
+floor start to matter in production.
+
+**Phase 3's `redundant` delivery state now has a real producer.** `PermissionService.delivery(
+appInForeground:)` exists and `NotificationDelivery.from` decides; the watcher reconcile has to pass
+the app's actual foreground state rather than defaulting it.
+
+---
+
 ## Verification
 
 ```
 flutter analyze                                   No issues found!
-flutter test                                      All tests passed!  (521 tests)
+flutter test                                      All tests passed!  (524 tests)
 dart run tools/models/away_warning_model.dart     superseded: 4 failure(s)   decided: 0 failure(s)
 flutter build apk --debug                         Built app-debug.apk
   └─ GeneratedPluginRegistrant.java               3 registrations, timezone absent (ADR-0002 holds)

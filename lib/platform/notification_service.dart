@@ -1,3 +1,4 @@
+import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:timezone/timezone.dart' as tz;
 
@@ -152,27 +153,56 @@ class NotificationService {
   ///
   /// `zonedSchedule` with a [tz.TZDateTime], never a raw UTC offset — an offset
   /// captured today is wrong after the next DST transition (§11).
-  Future<void> scheduleReminder(ScheduledReminder reminder) =>
-      _plugin.zonedSchedule(
-        id: AlarmIds.reminder(reminder.day, reminder.slot),
-        title: NotificationCopy.reminderTitle,
-        body: NotificationCopy.reminderBody(reminder.slot),
-        scheduledDate: reminder.at,
-        notificationDetails: NotificationDetails(
-          android: AndroidNotificationDetails(
-            remindersChannel.id,
-            remindersChannel.name,
-            channelDescription: remindersChannel.description,
-            importance: Importance.high,
-            priority: Priority.high,
-            category: AndroidNotificationCategory.reminder,
+  /// Returns false when the reminder had to be armed **inexactly**.
+  ///
+  /// Exact first, because a reminder deferred by Doze into the middle of the
+  /// night is worse than useless. §13 declares `USE_EXACT_ALARM` and notes it
+  /// needs justifying in Play review.
+  ///
+  /// **But exact scheduling can be refused, and §13 promises it degrades rather
+  /// than fails**: *"Deep-link to settings. Reminders degrade to inexact."*
+  /// The plugin throws `exact_alarms_not_permitted` when the permission is
+  /// absent, and nothing caught it — the exception propagated through
+  /// `AlarmScheduler.apply` and `reconcile()` into the provider's error
+  /// channel, replacing the whole screen with *"this phone could not get
+  /// ready"* and skipping `replacePendingReminders` entirely.
+  ///
+  /// Unreachable on the API 33 test device, because `USE_EXACT_ALARM` makes
+  /// `canScheduleExactAlarms()` unconditionally true there. Reachable **today**
+  /// on API 31–32, where `SCHEDULE_EXACT_ALARM` is user-revocable via *Alarms &
+  /// reminders* — and it becomes the default everywhere if Play refuses
+  /// `USE_EXACT_ALARM` at Phase 8, since the fallback permission is denied by
+  /// default when targeting Android 14+. A degraded reminder is worth far more
+  /// than a screen that will not load.
+  Future<bool> scheduleReminder(ScheduledReminder reminder) async {
+    Future<void> schedule(AndroidScheduleMode mode) => _plugin.zonedSchedule(
+          id: AlarmIds.reminder(reminder.day, reminder.slot),
+          title: NotificationCopy.reminderTitle,
+          body: NotificationCopy.reminderBody(reminder.slot),
+          scheduledDate: reminder.at,
+          notificationDetails: NotificationDetails(
+            android: AndroidNotificationDetails(
+              remindersChannel.id,
+              remindersChannel.name,
+              channelDescription: remindersChannel.description,
+              importance: Importance.high,
+              priority: Priority.high,
+              category: AndroidNotificationCategory.reminder,
+            ),
           ),
-        ),
-        // Exact, because a reminder deferred by Doze into the middle of the
-        // night is worse than useless. §13 declares USE_EXACT_ALARM, and
-        // ARCHITECTURE.md notes this needs justifying in Play review.
-        androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
-      );
+          androidScheduleMode: mode,
+        );
+
+    try {
+      await schedule(AndroidScheduleMode.exactAllowWhileIdle);
+      return true;
+    } on PlatformException catch (error) {
+      if (error.code != 'exact_alarms_not_permitted') rethrow;
+      // Still `allowWhileIdle`, so Doze defers it rather than dropping it.
+      await schedule(AndroidScheduleMode.inexactAllowWhileIdle);
+      return false;
+    }
+  }
 
   Future<void> cancelReminder(DayKey day, ReminderSlot slot) =>
       _plugin.cancel(id: AlarmIds.reminder(day, slot));

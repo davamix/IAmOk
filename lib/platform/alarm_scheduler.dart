@@ -23,7 +23,9 @@ abstract interface class AlarmScheduler {
   /// [NotificationAlarmScheduler.apply] for why the order is load-bearing, and
   /// for why the second argument is the whole desired set rather than the
   /// diff; every implementation owes both guarantees.
-  Future<void> apply({
+  /// Returns false when any reminder had to be armed **inexactly** — §13's
+  /// documented degradation, which the health panel reports in Phase 7.
+  Future<bool> apply({
     required Set<ScheduledReminder> toCancel,
     required Set<ScheduledReminder> desired,
   });
@@ -31,8 +33,11 @@ abstract interface class AlarmScheduler {
   /// Tears down every reminder.
   Future<void> cancelAll();
 
-  /// How many alarms the **platform** believes are armed.
-  Future<int> armedOnPlatform();
+  /// How many reminders the **notification plugin's own record** holds.
+  ///
+  /// Read [NotificationAlarmScheduler.armedAccordingToPlugin] before trusting
+  /// this number for anything: it is not the platform's answer.
+  Future<int> armedAccordingToPlugin();
 }
 
 /// The real one, over `flutter_local_notifications`.
@@ -80,16 +85,20 @@ class NotificationAlarmScheduler implements AlarmScheduler {
   /// The diff is still needed for [toCancel], because a reminder that should no
   /// longer exist cannot be removed by re-asserting the ones that should.
   @override
-  Future<void> apply({
+  Future<bool> apply({
     required Set<ScheduledReminder> toCancel,
     required Set<ScheduledReminder> desired,
   }) async {
     for (final reminder in toCancel) {
       await _notifications.cancelReminder(reminder.day, reminder.slot);
     }
+    var exact = true;
     for (final reminder in desired) {
-      await _notifications.scheduleReminder(reminder);
+      // Per reminder, so one refusal degrades that alarm rather than aborting
+      // the loop and leaving the rest of the window unarmed.
+      exact = await _notifications.scheduleReminder(reminder) && exact;
     }
+    return exact;
   }
 
   /// Tears down every reminder. Used when the store is wiped in debug builds,
@@ -97,13 +106,28 @@ class NotificationAlarmScheduler implements AlarmScheduler {
   @override
   Future<void> cancelAll() => _notifications.cancelAll();
 
-  /// How many alarms the platform believes are armed.
+  /// How many reminders `flutter_local_notifications` has a record of.
   ///
-  /// Deliberately asks the **platform**, not the store. The store is what the
-  /// reconciler diffs against; this is what actually exists, and the difference
-  /// between the two is the finding the debug harness is for. On a HyperOS
-  /// handset that has silently dropped scheduled alarms, the store will insist
-  /// everything is armed and only this will disagree.
+  /// **This is NOT the platform's answer, and an earlier version of this
+  /// comment claimed it was.** `pendingNotificationRequests()` reads the
+  /// plugin's own `SharedPreferences` file — it does not enumerate
+  /// `AlarmManager`, and no public Android API can: an app cannot list its own
+  /// pending alarms. So this is a *second app-local record of the same intent*,
+  /// sitting beside `LocalStore`.
+  ///
+  /// That matters for the failure this project cares about. A force-stop
+  /// cancels every `AlarmManager` alarm but leaves SharedPreferences intact, so
+  /// after exactly the scenario the Phase 2 device pass measured, this still
+  /// returns 21 while nothing is armed. Comparing it against `LocalStore`
+  /// detects the two bookkeeping copies disagreeing — useful, and not the same
+  /// question.
+  ///
+  /// **The only ground truth is `adb shell dumpsys alarm`**, written to a file
+  /// on the device and pulled; see `docs/testing/device-matrix.md`. The
+  /// compensating design is that detection is not needed for correctness:
+  /// [apply] re-asserts the whole desired set every reconcile, so the platform
+  /// is repaired whether or not anything noticed it had drifted.
   @override
-  Future<int> armedOnPlatform() async => (await _notifications.pending()).length;
+  Future<int> armedAccordingToPlugin() async =>
+      (await _notifications.pending()).length;
 }

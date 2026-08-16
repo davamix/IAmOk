@@ -21,8 +21,10 @@ class _RecordingScheduler implements AlarmScheduler {
   final List<String> calls = [];
   final Set<ScheduledReminder> armed = {};
 
+  bool exact = true;
+
   @override
-  Future<void> apply({
+  Future<bool> apply({
     required Set<ScheduledReminder> toCancel,
     required Set<ScheduledReminder> desired,
   }) async {
@@ -34,6 +36,7 @@ class _RecordingScheduler implements AlarmScheduler {
       calls.add('schedule ${reminder.day} ${reminder.slot.name}');
       armed.add(reminder);
     }
+    return exact;
   }
 
   /// What a force-stop does: every platform alarm is cancelled, and nothing
@@ -47,7 +50,7 @@ class _RecordingScheduler implements AlarmScheduler {
   }
 
   @override
-  Future<int> armedOnPlatform() async => armed.length;
+  Future<int> armedAccordingToPlugin() async => armed.length;
 }
 
 void main() {

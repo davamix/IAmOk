@@ -142,15 +142,15 @@ class _DebugHarnessScreenState extends ConsumerState<DebugHarnessScreen> {
                   'tapped today     ${state.hasTappedToday}\n'
                   'audience         ${state.audience.names}\n'
                   'notifications    ${state.notificationsEnabled}\n'
-                  'armed (platform) ${state.armed}';
+                  'armed (plugin)   ${state.armed}';
             }),
             _Action('Run reconcile() twice — idempotence', () async {
               await services.watchedReconcile
                   .reconcile(selfUid: services.selfUid);
-              final before = await services.alarms.armedOnPlatform();
+              final before = await services.alarms.armedAccordingToPlugin();
               await services.watchedReconcile
                   .reconcile(selfUid: services.selfUid);
-              final after = await services.alarms.armedOnPlatform();
+              final after = await services.alarms.armedAccordingToPlugin();
               return 'armed after 1st  $before\n'
                   'armed after 2nd  $after\n'
                   '${before == after ? "IDEMPOTENT" : "NOT IDEMPOTENT"}';
@@ -171,16 +171,18 @@ class _DebugHarnessScreenState extends ConsumerState<DebugHarnessScreen> {
                 );
                 return 'posted ${slot.name} on the reminders channel';
               }),
-            // The store is what the reconciler diffs against; the platform is
-            // what actually exists. A divergence is the finding — on a HyperOS
-            // handset that silently dropped alarms, only the platform count
-            // will have changed.
-            _Action('Compare store against platform', () async {
+            // Compares LocalStore against the notification plugin's own
+            // record. Both are app-local: `pendingNotificationRequests()` reads
+            // SharedPreferences, not AlarmManager, and no public API can list
+            // an app's pending alarms. A divergence means the two bookkeeping
+            // copies drifted — real, and NOT the same as the OS having dropped
+            // an alarm. Ground truth is `adb shell dumpsys alarm`.
+            _Action('Compare store against plugin record', () async {
               final stored = await services.store.pendingReminders();
               final armed = await services.notifications.pending();
               final buffer = StringBuffer()
                 ..writeln('store says   ${stored.length}')
-                ..writeln('platform has ${armed.length}')
+                ..writeln('plugin says  ${armed.length}')
                 ..writeln(
                     stored.length == armed.length ? 'AGREE' : 'DIVERGED')
                 ..writeln();

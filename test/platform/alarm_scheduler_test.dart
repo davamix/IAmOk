@@ -24,9 +24,13 @@ class _RecordingNotifications extends NotificationService {
 
   final List<String> calls = [];
 
+  /// Set to false to simulate `exact_alarms_not_permitted`.
+  bool exact = true;
+
   @override
-  Future<void> scheduleReminder(ScheduledReminder reminder) async {
+  Future<bool> scheduleReminder(ScheduledReminder reminder) async {
     calls.add('schedule ${reminder.day} ${reminder.slot.name}');
+    return exact;
   }
 
   @override
@@ -111,16 +115,53 @@ void main() {
         reason: 'a no-op reconcile must be a no-op at the platform too');
   });
 
+  group('exact alarms refused', () {
+    // ARCHITECTURE.md §13 promises "reminders degrade to inexact". Before this,
+    // the plugin's `exact_alarms_not_permitted` propagated out of `apply`,
+    // through `reconcile()`, into the provider's error channel — replacing the
+    // whole screen with "this phone could not get ready" and skipping the store
+    // write entirely. A degraded reminder beats a screen that will not load.
+    //
+    // Unreachable on the API 33 test device (USE_EXACT_ALARM makes
+    // canScheduleExactAlarms() always true) but live on API 31-32, and the
+    // default everywhere if Play refuses USE_EXACT_ALARM at Phase 8.
+
+    test('the whole window is still armed', () async {
+      notifications.exact = false;
+      final desired = {
+        for (final slot in ReminderSlot.values)
+          reminderOn('2026-08-17', slot),
+      };
+
+      final exact = await scheduler.apply(toCancel: const {}, desired: desired);
+
+      expect(exact, isFalse, reason: 'the degradation is reported, not hidden');
+      expect(notifications.calls.where((c) => c.startsWith('schedule')),
+          hasLength(3),
+          reason: 'one refusal must not abort the loop and leave the rest of '
+              'the window unarmed');
+    });
+
+    test('reports exact when nothing was refused', () async {
+      final exact = await scheduler.apply(
+        toCancel: const {},
+        desired: {reminderOn('2026-08-17', ReminderSlot.midday)},
+      );
+      expect(exact, isTrue);
+    });
+  });
+
   test('cancelAll goes straight through', () async {
     await scheduler.cancelAll();
     expect(notifications.calls, ['cancelAll']);
   });
 
-  test('armedOnPlatform asks the PLATFORM, not the store', () async {
-    // The store is what the reconciler diffs against; this is what actually
-    // exists. On a handset that silently dropped scheduled alarms, only this
-    // number changes — which is the finding the debug harness is built to
-    // surface.
-    expect(await scheduler.armedOnPlatform(), 0);
+  test('armedAccordingToPlugin reports the PLUGIN record, not AlarmManager',
+      () async {
+    // Named for what it can actually answer. `pendingNotificationRequests()`
+    // reads the plugin's SharedPreferences; no public API enumerates an app's
+    // pending alarms, so nothing in-process is ground truth. Correctness does
+    // not depend on it — `apply` re-asserts the whole desired set regardless.
+    expect(await scheduler.armedAccordingToPlugin(), 0);
   });
 }

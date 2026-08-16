@@ -70,11 +70,17 @@ level, and the watched person's phone is likely to be old — minSdk is 24 for a
 
 | API | What changes | Covered? |
 |---|---|---|
-| 24–29 | The floor. No runtime notification permission at all. | No |
+| 24–29 | The floor. No runtime notification permission at all. **Also: SQLite is older than 3.24 below API 29, so UPSERT (`ON CONFLICT … DO UPDATE`) is a parse error — and the test suite cannot see it, because `sqflite_common_ffi` binds a modern desktop SQLite.** A source-level guard is in `test/data/local_store_test.dart`; an API 28 AVD run is owed before Phase 4. | No |
 | 30 (11) | **Auto-revoke of permissions for unused apps** begins — the silent watcher-killer. | **Yes** — POCO F3 |
 | 31 (12) | `SCHEDULE_EXACT_ALARM` becomes revocable; `canScheduleExactAlarms()` starts mattering. | **Yes** — POCO F3 |
 | 33 (13) | `POST_NOTIFICATIONS` becomes a runtime permission. Without it the app is inert. | **Yes** — POCO F3 |
 | 34+ (14+) | Exact alarms no longer auto-granted; `USE_EXACT_ALARM` is the route, and Play review asks about it. | **No — real gap** |
+
+One further known property, recorded so it is not a surprise: `flutter_local_notifications` computes
+the fire instant in Java with `java.time`, which on API 24/25 is the **desugared** implementation
+reading the *device's* tzdata — not `package:timezone`'s compiled-in database. On a phone that never
+received a tz update the two can disagree around a DST-rule change, putting a reminder an hour out.
+Low risk for Europe/Madrid, whose rules are stable.
 
 **The API 34+ gap is the one to keep in view.** The app sets `targetSdk 36` but the only physical
 device runs API 33, and several of these behaviours are gated on the *device's* API level rather
@@ -130,6 +136,25 @@ Full evidence in [phase-2-summary.md](../phases/phase-2-summary.md).
 - [x] The debug harness works on-device: force date, fire alarm now, dump `LocalStore`, run
       `reconcile()`. Without it every later item on this page costs a day to verify.
 
+### How to read the alarms — the only ground truth
+
+**`dumpsys alarm` piped through adb truncates.** It returned 3 of 21 once and looked exactly like
+HyperOS silently trimming alarms; it was a cut-off buffer. Write it to the device and pull it:
+
+```powershell
+& "D:\Android\Sdk\platform-tools\adb.exe" shell "dumpsys alarm > /sdcard/alarm.txt"
+& "D:\Android\Sdk\platform-tools\adb.exe" pull /sdcard/alarm.txt .
+```
+
+Then count `origWhen <13 digits> whenElapsed <n> io.github.davamix.i_am_ok`.
+
+**Nothing inside the app can answer this.** `pendingNotificationRequests()` reads the notification
+plugin's own `SharedPreferences`, and no public Android API enumerates an app's pending alarms — so
+the harness's *"Compare store against plugin record"* compares two app-local copies of the same
+intent, which is a useful check and a different question. `dumpsys` is the only ground truth.
+
+To poll for boot recovery, loop the above every 15 s for several minutes.
+
 > **Two things this run established that anyone repeating it needs.**
 >
 > **A force-stop cancels every alarm the app has registered**, and nothing tells the app. Before the
@@ -141,6 +166,13 @@ Full evidence in [phase-2-summary.md](../phases/phase-2-summary.md).
 >
 > **Boot recovery is delayed.** Checking at 60 s reads zero and looks like a hard failure; the alarms
 > arrive at ~76 s. Poll for several minutes before concluding anything.
+>
+> **These two results do NOT compose, and the checklist above can be misread as saying they do.**
+> A force-stopped app is in the stopped state and receives **no broadcasts at all, including
+> `BOOT_COMPLETED`**, until the user launches it by hand — and that state survives a reboot. So
+> "alarms survive a reboot" holds for an app that was *not* force-stopped, and force-stop + reboot
+> still leaves zero alarms until the app is opened. Both rows were measured on a non-force-stopped
+> app and both are true; the conjunction is not.
 
 **Phase 3 — watcher side**
 

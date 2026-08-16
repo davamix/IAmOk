@@ -8,7 +8,7 @@ non-goals in [HANDOVER.md](HANDOVER.md), which the whole design is built on top 
 
 | | |
 |---|---|
-| Current phase | **Phase 2 — Watched side · complete, reviewed, and verified on hardware.** All exit criteria pass on the POCO F3 with stock HyperOS power settings — see [phases/phase-2-summary.md](phases/phase-2-summary.md). Next: the owner's review, then Phase 3. |
+| Current phase | **Phase 2 — Watched side · complete, reviewed, and verified on hardware.** All exit criteria pass on the POCO F3 with stock HyperOS power settings — see [phases/phase-2-summary.md](phases/phase-2-summary.md). Next: the owner's review, then Phase 3 — start from [phases/phase-3-brief.md](phases/phase-3-brief.md). |
 | Phase history | [phases/](phases/) — one summary per completed phase |
 | Firebase project | `i-am-ok-c74ca` · Firestore `europe-west1` · Native mode · all permanent |
 | Repo | https://github.com/davamix/IAmOk (public) |

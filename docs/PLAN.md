@@ -154,6 +154,10 @@ is second rather than fifth.
 
 ## Phase 3 — Watcher side, on real hardware
 
+**Start from [phases/phase-3-brief.md](phases/phase-3-brief.md)** — it carries the force-stop
+exposure Phase 2 found and could not close on this side, plus the copy owed before any warning
+ships.
+
 Still fake local data. Proves the one bug that would make this app harmful.
 
 **Deliverables** — the alarm isolate (`android_alarm_manager_plus`), the self-verifying dead man's

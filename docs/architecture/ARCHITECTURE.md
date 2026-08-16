@@ -1,7 +1,8 @@
 # I Am Ok — Architecture
 
-**Date:** 2026-08-15 · **Status:** Design. No code written. · **Supersedes:** the *Architecture
-decisions* and *Open questions* sections of [HANDOVER.md](../HANDOVER.md).
+**Date:** 2026-08-15 · **Status:** Design. **Phase 1 built §5's Domain layer**; everything below
+that line is still design. · **Supersedes:** the *Architecture decisions* and *Open questions*
+sections of [HANDOVER.md](../HANDOVER.md).
 
 The scope boundary in HANDOVER.md ("Explicit non-goals") still holds and is **not** re-opened
 here. This is a relay for one notification between two people. It is not a health monitor.
@@ -154,7 +155,7 @@ I/O. The layers above only supply inputs and execute the result.
 | `CheckInRepository` | Data | Write today's check-in; read a watched person's days | UI, Alarm |
 | `AwayRepository` | Data | Read / set / cancel the away period for a watched user | UI, FCM, Alarm |
 | `InviteService` | Data | Create invite; call `redeemInvite` | UI |
-| `LocalStore` | Data | SQLite. Per-link `lastConfirmedDate`, `warningsShownFor`, `activeFrom`, `watchedTimezone`, cached `awayPeriod`; plus `deviceTimezone`, `pendingAlarms`, `lastReconcileAt` (a **timestamp** — §10 renders "offline since 10:14") | **All three** |
+| `LocalStore` | Data | SQLite. Per-link `lastConfirmedDate`, `warningsShownFor` (day → **which** warning is standing, [ADR-0004](decisions/0004-refused-is-not-unreachable.md)), `activeFrom`, `watchedTimezone`, cached `awayPeriod`, `accessLostSince` + `accessLostCause` + `accessLostNotifiedOn`; plus `deviceTimezone`, `pendingAlarms`, `lastReconcileAt` (a **timestamp** — §10 renders "offline since 10:14") | **All three** |
 | `AlarmScheduler` | Platform | Schedule / cancel / enumerate alarms; `rescheduleOnReboot` | UI, Alarm |
 | `NotificationService` | Platform | Channels, display, cancel, replace-by-id, tap routing | All three |
 | `FcmService` | Platform | Token lifecycle → Firestore; route foreground + background messages | UI, FCM |
@@ -256,10 +257,21 @@ Away is a **direct client write** rather than a callable Function, on purpose: i
 watcher can set away on a plane and have it queue offline like any other write. Validation
 lives in the rules, in two groups.
 
-**The period** — `through >= from` and `through <= request.time + 30d` on every write;
+**The period** — `through >= from` and `through <= request.time + 32d` on every write;
 `from >= today` **on create only**, with `from` immutable on update, so that cancelling an
 in-progress period by truncation is not rejected ([ADR-0001](decisions/0001-away-cache-precedence.md)).
-The cap here is a guardrail, not a security boundary.
+
+The cap here is a guardrail, not a security boundary, and the clause is **deliberately slack**.
+`through` is a date in the watched person's zone; `request.time` is a UTC instant and the rules
+engine cannot convert between them, so the comparison is inexact by a day or two either way
+depending on time of day, DST, and how far the zone sits from UTC. Two days of slack is chosen so
+the rule never rejects a legitimate write — a rejected away write queues offline and resurfaces
+later with no visible cause. **The exact 31-day cap is `AwayRules` in the domain layer**, which is
+given a `today` already resolved in the watched person's zone; and because the rules bound only
+what can be *written*, `AwayPeriod.clampedToSanityBound()` independently bounds what may be *honoured* on
+read — otherwise a ten-year document arriving by any other route would silence a family for a
+decade, with nothing stale for §10's staleness bound to catch. Full reasoning in
+[security/firestore-rules-guidelines.md](../security/firestore-rules-guidelines.md).
 
 **The attribution** ([ADR-0003](decisions/0003-away-attribution.md)) — `setBy == request.auth.uid`
 on create **and** update; `setByName` present, a string, 1–100 chars; `setAt`/`updatedAt ==
@@ -338,30 +350,49 @@ away period with what Firestore returned — *including overwriting it with noth
 **Then decide**, against a cache that is now either fresh or knowably stale:
 
 1. Compute `D` = the most recently **completed** calendar day in the watched person's timezone.
-2. If `D < link.activeFrom` → silent. (Nothing to say about days before pairing.)
-3. If `LocalStore.lastConfirmedDate >= D` → silent. **Evidence outranks doubt:** a recorded
+2. If `link.status != "accepted"` → silent, **and cancel the warning alarm**. Nothing to say about
+   someone no longer watched, and revocation is final, so the alarm is torn down rather than left
+   armed and mute. Any standing warning is **withdrawn** — cancelled outright, never
+   corrected, because nothing disproves it and *"Mum did check in yesterday"* is a claim the device
+   cannot support; and nothing later could ever clear it, since every subsequent read is refused ([ADR-0004](decisions/0004-refused-is-not-unreachable.md)).
+3. If `D < link.activeFrom` → silent. (Nothing to say about days before pairing.)
+4. If `LocalStore.lastConfirmedDate >= D` → silent. **Evidence outranks doubt:** a recorded
    check-in settles the day before any away reasoning runs, because tapping during an away day
    is allowed (§12).
-4. If `D` falls inside the cached away period:
+5. If the read was **refused** rather than merely unreachable → warn, **distinctly**: *"Can't check
+   on Mum — I Am Ok has lost access to her check-ins. Open the app to see what to do. Your phone
+   last saw a check-in on Saturday 15 August."* The device is online and working, so the offline
+   wording would be false about it; and a refusal is no evidence about the watched person, so the
+   plain wording would be false about her ([ADR-0004](decisions/0004-refused-is-not-unreachable.md)).
+   Note *"your phone last saw"*, not *"last confirmed"* — the date is the newest check-in **this
+   device has managed to read**, and she may well have tapped every day since.
+6. If `D` falls inside the cached away period:
    - verified within the last **2 days** → silent;
    - otherwise → warn, **distinctly**: *"Can't check on Mum — your phone has been offline since
      Tuesday 10:14. She was marked away until Saturday 22 August."*
-5. Otherwise **warn**: *"No check-in from Mum yesterday."* if the read succeeded, or *"No
-   check-in received from Mum yesterday — your phone has been offline since HH:MM."* if it did
-   not. Different message, different meaning.
-6. Record `warningsShownFor += D`.
+7. Otherwise **warn**: *"No check-in from Mum yesterday."* if the read succeeded, or *"No
+   check-in received from Mum yesterday — your phone has been offline since HH:MM."* if the server
+   could not be reached. Different message, different meaning.
+8. Record `warningsShownFor[D] = the outcome shown` — **except step 5**, whose outcome is not a claim about the watched person and is recorded as `accessLostSince` + `accessLostCause` instead. Putting it in `warningsShownFor` would make the watcher list report a missed check-in nothing supports ([ADR-0004](decisions/0004-refused-is-not-unreachable.md)).
 
-Steps 4 and 5 matter for the same reason. Silence would be a silent failure; a flat "she didn't
-check in" would be a claim the device cannot support. The notification says what is actually
-known, and nothing more.
+Steps 5, 6 and 7 matter for the same reason. Silence would be a silent failure; a flat "she didn't
+check in" would be a claim the device cannot support; and "your phone has been offline" is a claim
+about the *device* that is false whenever the server was reached and said no. The notification says
+what is actually known, and nothing more.
 
-Step 4's staleness bound is what makes the warning alarm **keep firing daily through an away
-period** worth anything. The alarm is not cancelled during away, and each fire re-verifies
-against Firestore — so an away cancelled remotely is picked up at the next fire even if every
-push was lost. Cancelling and re-arming would be cheaper and less correct.
+**Step 5 sits above step 6 deliberately.** Step 6's staleness bound is calibrated for transient
+network failure — a phone in a pocket — and a refusal is neither transient nor self-healing, so
+letting a cached away silence it would mean days of a dead man's switch that is definitively dead.
+It sits *below* step 4 just as deliberately: evidence already held is not unsettled by losing access.
+
+Step 6's staleness bound is what makes the warning alarm **keep firing daily through an away
+period** worth anything. The alarm is not cancelled during away — nor on a refused read, for the
+same reason — and each fire re-verifies against Firestore, so an away cancelled remotely is picked
+up at the next fire even if every push was lost. Cancelling and re-arming would be cheaper and less
+correct.
 
 Offline, the device **cannot** distinguish "the away was cancelled and I did not hear" from "the
-away is still on and I have not checked" — the inputs are identical. Step 4 therefore chooses
+away is still on and I have not checked" — the inputs are identical. Step 6 therefore chooses
 which error to prefer, and prefers speaking. Silence is the one failure this app cannot detect in
 itself.
 
@@ -413,6 +444,19 @@ Resolution:
 
 - **The day is decided on the device, at tap time.** The document id `YYYY-MM-DD` comes from the
   device clock in the device's timezone. There is no alternative that works offline.
+
+> **"Why not store everything in UTC and let each phone convert?"** — asked periodically, and
+> right about **instants**, which is why `deviceTappedAt`, `receivedAt` and `lastReconcileAt` are
+> exactly that. It does not work for the **day**, because a calendar day is a *label*, not a
+> moment: storing it as UTC means inventing a time for it, after which different devices render it
+> as different dates. A tap at 00:30 on the 16th in **Madrid** is 15 August in UTC — so a
+> UTC-keyed check-in would file taps at 23:30 on the 15th and 00:30 on the 16th under the *same*
+> document, leave the 16th empty, and fire *"No check-in from Mum yesterday"* about someone who
+> tapped twice. No travel and no DST required. The promise "one tap a day" is itself local — Mum's
+> midnight, where she is — and has no UTC formulation. The design instead carries the **zone
+> alongside the date** (`timezone` on each check-in, `watchedTimezone` on each link), which is what
+> makes a local date unambiguous. `DayKey` does use UTC internally for day arithmetic, where it is
+> exact and DST-free; that is the same instinct applied where it holds.
 - `deviceTappedAt` = client clock. This is what the contact is shown ("checked in at 23:40"),
   because it is what actually happened.
 - `receivedAt` = `serverTimestamp()`. Audit trail, and the only skew signal available.
@@ -520,8 +564,11 @@ notification. It exists so the resumption of warnings is never a surprise.
 
 ### Rules
 
-- **Cap: 30 days.** To go longer, set it again. An away that outlives its purpose is how this app
-  silently dies, and a short cap forces a deliberate renewal.
+- **Cap: 31 days.** `through` may be at most **30 days after** `from`, which is 31 days counting the
+  first — the arithmetic §8 has always specified, stated here as a count so the two cannot drift.
+  The number is a place to put the limit, not a derived quantity: an away that outlives its purpose
+  is how this app silently dies, and a short cap forces a deliberate renewal. To go longer, set it
+  again.
 - **No retroactive away.** `from` is today at the earliest. Owner's call, and it costs nothing —
   if a warning already fired before anyone remembered, the family has already made the phone call
   that the warning was for. Setting away from today forward is all that remains useful.
@@ -574,6 +621,7 @@ and surfaced in a **health panel** that is always reachable, showing green/red p
 | Auto-revoke exemption | `isAutoRevokeWhitelisted` | Prompt. Critical for low-usage watchers. |
 | Last sync | app state | "Last update: 3 days ago" banner |
 | Clock skew | §11 | Warn, deep-link to settings |
+| **Backend access** | last reconcile was **refused**, not merely unreachable ([ADR-0004](decisions/0004-refused-is-not-unreachable.md)) | Red, with the remediation the refusal reason implies — "sign in again" for an expired token, "update the app" for an App Check rejection. Distinct from "offline", which is not a fault and not actionable. |
 
 `USE_EXACT_ALARM` is available to apps whose core purpose is alarms and reminders. This app
 plausibly qualifies but **expect to justify it in Play review** — write the justification before
@@ -661,9 +709,10 @@ New relative to HANDOVER.md's inventory.
 | `serverTimestamp()` + offline sync files a check-in on the **wrong day** | **High** — silently wrong data | Device-side day id + dual timestamps (§11) |
 | Android auto-revokes permissions for **unused** apps — kills inactive watchers silently | **High** — silent failure, exactly the mode this app can't afford | Request auto-revoke exemption; health panel (§13) |
 | Background isolates can't see UI state; a naive design puts the alarm's decision data in memory | High — false warnings | SQLite as the cross-isolate contract (§4) |
-| An away period outliving its purpose — the app goes quiet and stays quiet | Medium — indistinguishable from working | 30-day cap; "ends tomorrow" notice; away state always visible in-app (§12) |
+| An away period outliving its purpose — the app goes quiet and stays quiet | Medium — indistinguishable from working | 31-day cap; "ends tomorrow" notice; away state always visible in-app (§12) |
 | Warnings for days before the link existed | Medium | `link.activeFrom` (§7) |
 | Watcher offline at alarm time — cannot distinguish "no check-in" from "no network" | Medium | Distinct, honest message (§10, step 7) |
+| A **refused** read reported as "your phone has been offline" — false about the device, and reached by revocation, App Check, an expired token, account deletion, or **a bad rules deploy, which would hit every family at once** | **High** — a config error becomes a fleet-wide false alarm about people's relatives | Verification is three-state, not a bool; §10 step 5's distinct message; §13 health item ([ADR-0004](decisions/0004-refused-is-not-unreachable.md)) |
 | One watcher silences the whole family by setting away | Low — accepted by design | `setBy` is **rules-enforced** to be the writer, so a forged name stays recoverable; `setByName` is a display label and is **not** authenticated ([ADR-0003](decisions/0003-away-attribution.md)). Shown on every surface; anyone can cancel (§12) |
 | High-priority data-only FCM is quota-limited for backgrounded apps | Low | A few messages per person per day. Far under quota. |
 | Firestore rules `get()` on every checkin read costs a read | Low | Negligible at this scale; noted so it isn't a surprise |

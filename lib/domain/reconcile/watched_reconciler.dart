@@ -1,0 +1,100 @@
+import 'package:timezone/timezone.dart' as tz;
+
+import '../away/away_period.dart';
+import '../policy/reminder_policy.dart';
+import '../time/day_key.dart';
+
+/// What the watched side's alarms should be, and how to get there from what
+/// they are.
+class WatchedReconcileResult {
+  const WatchedReconcileResult({
+    required this.desired,
+    required this.toSchedule,
+    required this.toCancel,
+  });
+
+  /// Every reminder that should exist across the window.
+  final Set<ScheduledReminder> desired;
+
+  /// Missing, so create them.
+  final Set<ScheduledReminder> toSchedule;
+
+  /// Present and unwanted, so cancel them. A window that only ever creates
+  /// leaves reminders armed through a holiday.
+  final Set<ScheduledReminder> toCancel;
+
+  /// Reality already matches. The second of two consecutive reconciles must
+  /// report this, or boot recovery is a duplicate-notification bug.
+  bool get isNoOp => toSchedule.isEmpty && toCancel.isEmpty;
+
+  @override
+  String toString() => 'WatchedReconcileResult(${desired.length} desired, '
+      '+${toSchedule.length} / -${toCancel.length})';
+}
+
+/// The watched side's desired-state calculator.
+///
+/// **Nothing runs at midnight to arm tomorrow.** So alarms are not armed a day
+/// at a time — `reconcile()` maintains a rolling window and makes reality match,
+/// on app open, on check-in, on FCM, on alarm fire, and on boot. Idempotent by
+/// construction, which is what makes boot recovery ordinary rather than a
+/// special case (§10).
+abstract final class WatchedReconciler {
+  /// Days of reminders kept armed ahead, counting today.
+  static const int windowDays = 7;
+
+  /// Diffs the desired window against [currentlyScheduled].
+  ///
+  /// **During an away period the window extends to `through` + [windowDays]**,
+  /// with the away days themselves simply absent from the desired set. That
+  /// extension is load-bearing: it means the reminders for the first days back
+  /// are already scheduled before the person leaves, so the app re-arms itself
+  /// without anyone opening it — which is the entire reason the watched side
+  /// can stay display-only and needs no logic-bearing alarm. A window that
+  /// stops at `through` leaves nothing armed after a holiday.
+  ///
+  /// [away] is a parameter from the first line even though away mode is not
+  /// built until Phase 6 (PLAN.md, Phase 1, non-negotiable).
+  static WatchedReconcileResult reconcile({
+    required DateTime now,
+    required tz.Location watchedZone,
+    required AwayPeriod? away,
+    required Set<DayKey> checkedInDays,
+    required Set<ScheduledReminder> currentlyScheduled,
+  }) {
+    final today = DayKey.fromInstant(now, watchedZone);
+
+    // Clamped before `through` is read. The window end is derived from a
+    // REMOTE document, and `DayKey.through()` materialises the span eagerly:
+    // an away period ending in 9999 would allocate ~2.9 million DayKeys inside
+    // a bare alarm isolate with seconds to live. Measured, not theorised. The
+    // clamp also stops such a document suppressing this person's own reminders
+    // for a decade — the watcher side was defended first, and defending only
+    // one side produces the worst state of all: she is never nudged to tap, and
+    // her family is warned every day.
+    final honoured = away?.clampedToSanityBound();
+
+    var lastDay = today.plusDays(windowDays - 1);
+    if (honoured != null) {
+      final firstWeekBack = honoured.through.plusDays(windowDays);
+      if (firstWeekBack > lastDay) lastDay = firstWeekBack;
+    }
+
+    final desired = <ScheduledReminder>{
+      for (final day in today.through(lastDay))
+        ...ReminderPolicy.remindersFor(
+          day: day,
+          away: honoured,
+          checkedIn: checkedInDays.contains(day),
+          now: now,
+          watchedZone: watchedZone,
+        ),
+    };
+
+    return WatchedReconcileResult(
+      desired: desired,
+      toSchedule: desired.difference(currentlyScheduled),
+      toCancel: currentlyScheduled.difference(desired),
+    );
+  }
+}

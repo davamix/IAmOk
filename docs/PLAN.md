@@ -1,8 +1,9 @@
 # I Am Ok — Implementation Plan
 
-**Date:** 2026-08-15 · **Status:** Approved and in progress. **Phase 0 complete** — see
-[phases/phase-0-summary.md](phases/phase-0-summary.md). Next: Phase 1, the domain layer.
-No app code written yet.
+**Date:** 2026-08-15 · **Status:** Approved and in progress. **Phases 0 and 1 complete** — see
+[phases/phase-0-summary.md](phases/phase-0-summary.md) and
+[phases/phase-1-summary.md](phases/phase-1-summary.md). The domain layer exists and is the only app
+code so far.
 
 Nine phases. Each ends with a summary document in `docs/phases/`, and a review gate before the
 next begins. Phases 1–3 need no backend at all.
@@ -160,7 +161,13 @@ What remains:
 
 1. Wire `firebase_core` + `google_sign_in` against the existing config, using the **Web** client ID
    as `serverClientId`. Release SHA fingerprints get added at Phase 8, when the keystore exists.
-2. `users/{uid}` + token subcollection; check-in write with `deviceTappedAt` + `receivedAt`
+2. `users/{uid}` + token subcollection; check-in write with `deviceTappedAt` + `receivedAt`.
+   **The watcher's reconcile read must use `Source.server`, or check
+   `metadata.isFromCache`** — offline persistence is on by default and `get()` does *not* throw when
+   offline, it serves the local cache. Treating that as a successful read stamps `lastReconcileAt`
+   and silently disables ADR-0001's staleness bound on every reconcile. Map `permission-denied` /
+   `unauthenticated` to **refused** and `unavailable` / `deadline-exceeded` to **unreachable**
+   ([ADR-0004](architecture/decisions/0004-refused-is-not-unreachable.md)).
 3. `firestore.rules` + emulator-based rules tests
 4. `onCheckInCreated` Function, `europe-west1`, data-only FCM fan-out
 5. FCM wiring in both the UI and background isolates
@@ -187,7 +194,7 @@ the correct main screen.
 
 ## Phase 6 — Away mode
 
-**Deliverables** — `users/{uid}/shared/away`, rules validation (30-day cap, no retroactive,
+**Deliverables** — `users/{uid}/shared/away`, rules validation (31-day cap — **deliberately slack in the rules, see `security/firestore-rules-guidelines.md`; the exact check is `AwayRules`**, no retroactive,
 `through >= from`), the `onAwayChanged` fan-out, the Away button on the Tap screen (which becomes
 *"I'm not away"* while active), and the away action on the watcher list.
 

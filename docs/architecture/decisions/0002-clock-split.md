@@ -60,8 +60,10 @@ string to `LocalStore` on every resume; background isolates read it from disk, t
 read the per-link `watchedTimezone`.
 
 **3. `LocalStore` gains three things:** `deviceTimezone`, per-link `watchedTimezone`, and
-`lastReconcileAt` **as a full timestamp**, not a date — §10 step 5 renders *"offline since
-10:14"* and a date cannot produce that.
+`lastReconcileAt` **as a full timestamp**, not a date — §10 renders *"offline since
+10:14"* and a date cannot produce that. (Written as "step 5" when this ADR was accepted;
+[ADR-0004](0004-refused-is-not-unreachable.md) renumbered §10, and the timestamp is now rendered by
+the two offline branches. The claim is unchanged.)
 
 **4. The staleness comparison stays calendar-day granular.** ADR-0001's "verified within 2 days"
 compares the *date component* of `lastReconcileAt` against today, not a 48-hour duration. The
@@ -88,9 +90,26 @@ exposure is small and asymmetric:
 
 **Reversing** costs a `LocalStore` migration for the two new fields. Nothing else.
 
-**Rests on one assumption:** that `package:timezone` is pure Dart and needs no plugin registrant.
-Confirm this when the dependency lands in Phase 1 — if it were a plugin, decision 2 would need
-rework, though decision 1 would still stand.
+**Rested on one assumption:** that `package:timezone` is pure Dart and needs no plugin registrant.
+~~Confirm this when the dependency lands in Phase 1~~ — **CONFIRMED 2026-08-16, Phase 1**, on
+`timezone` 0.11.1. Four independent checks, the last of which is the one that settles it:
+
+- the package declares no `flutter:` section and does not depend on `flutter` — it is a plain Dart
+  package, not a Flutter plugin;
+- it ships no `android/` or `ios/` directory, and references neither `package:flutter` nor
+  `MethodChannel` anywhere in `lib/`;
+- adding it generated no `.flutter-plugins-dependencies` file;
+- **after a full `flutter build apk --debug`, `GeneratedPluginRegistrant.java` contains zero
+  registrations.** There is no registrant to be missing, so decision 2 stands as written.
+
+One condition this ADR did not state, found while confirming it: **purity is a property of the
+entry point, not of the package.** Only `timezone/timezone.dart` and `timezone/data/latest.dart`
+are pure — the database is a compiled-in `dart:typed_data` blob. `timezone/standalone.dart` imports
+`dart:io` and `dart:isolate` and reads tzdata from a *file*; `timezone/browser.dart` pulls
+`package:http`. Importing `standalone.dart` would put `dart:io` on the alarm path and silently
+re-open the failure this ADR closed. Both are named and banned in
+`test/domain/domain_purity_test.dart`, which fails the build rather than relying on anyone
+remembering.
 
 ## Alternatives considered
 

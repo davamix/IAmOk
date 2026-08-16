@@ -62,7 +62,7 @@ rules and that table disagree, one of them is a bug.
   else. Creation goes through `redeemInvite` so single-use and expiry are enforced server-side.
 - **Away is a direct client write**, on purpose, so it queues offline like any other write.
   Validation therefore lives in the rules. From ARCHITECTURE.md §8 as amended by ADR-0001:
-  `through >= from` and `through <= request.time + 30d` on every write (**against `request.time`,
+  `through >= from` and `through <= request.time + 32d` on every write — **deliberately slack, see the rules guidelines** (**against `request.time`,
   not `from`** — they differ the moment future-dated away is exposed); `from >= today`
   **on create only**, with `from` immutable on update. That split is load-bearing: cancelling an
   away truncates `through` on a document whose `from` is already in the past, so a blanket

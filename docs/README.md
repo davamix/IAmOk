@@ -8,7 +8,7 @@ non-goals in [HANDOVER.md](HANDOVER.md), which the whole design is built on top 
 
 | | |
 |---|---|
-| Current phase | **Phase 0 — Foundations · complete.** Next gate: Phase 1, domain layer. |
+| Current phase | **Phase 1 — Domain layer · complete and reviewed.** Next gate: Phase 2, watched side on real hardware. |
 | Phase history | [phases/](phases/) — one summary per completed phase |
 | Firebase project | `i-am-ok-c74ca` · Firestore `europe-west1` · Native mode · all permanent |
 | Repo | https://github.com/davamix/IAmOk (public) |

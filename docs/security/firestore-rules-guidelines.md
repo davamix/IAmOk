@@ -51,7 +51,7 @@ From [ARCHITECTURE.md](../architecture/ARCHITECTURE.md) §8, as amended by
 | Rule | On create | On update |
 |---|---|---|
 | `through >= from` | ✓ | ✓ |
-| `through <= request.time + 30d` — the cap | ✓ | ✓ |
+| `through <= request.time + 32d` — the cap, **deliberately slack**; see below | ✓ | ✓ |
 | `from >= today` — no retroactive away | ✓ | — |
 | `from` unchanged from the stored value | — | ✓ |
 | delete allowed | — | ✓ (cancelling before any day has elapsed) |
@@ -64,8 +64,9 @@ From [ARCHITECTURE.md](../architecture/ARCHITECTURE.md) §8, as amended by
 
 > **The cap is against `request.time`, not against `from`.** Identical only while `from` is always
 > today, which is true in v1. §12 keeps `from` as a real field so future-dated away becomes a UI
-> change with no migration — at which point the two diverge: `from + 30d` would cap the *duration*,
-> while `request.time + 30d` caps how far ahead the period may *extend*.
+> change with no migration — at which point the two diverge: anchoring at `from` would cap the
+> *duration*, while anchoring at `request.time` caps how far ahead the period may *extend*. The
+> domain enforces **both**, at different points — see *The absurd case is defended twice*.
 
 **Attribution**, adopted into §8 by
 [ADR-0003](../architecture/decisions/0003-away-attribution.md). All three are pure
@@ -87,9 +88,74 @@ last.
 > is the enforceable identity; `setByName` is a display label. ADR-0003 records the reasoning so
 > this is not re-proposed.
 
-The 30-day cap is a **guardrail, not a security boundary**. Someone determined to stay away for 60
+The 31-day cap is a **guardrail, not a security boundary**. Someone determined to stay away for 60
 days can set it twice, and that is the intended behaviour — the cap exists to force a deliberate
 renewal so an away period cannot silently outlive its purpose.
+
+> ### The rules cannot enforce this cap exactly, and must not try
+>
+> `through` is a calendar date **in the watched person's timezone**. `request.time` is a UTC
+> instant, and the rules engine has no timezone conversion — it cannot know that zone. So any
+> `through <= request.time + Nd` clause compares two things that are not exactly comparable, and is
+> loose in two independent ways:
+>
+> - **Adding a duration to an instant is not calendar arithmetic.** 720 hours after 23:30 on a day
+>   preceding a spring-forward lands on day + 31; after 00:30 before a fall-back, on day + 29. The
+>   same rule therefore admits 30, 31 or 32 days depending on the *time of day the write happened*
+>   and whether a DST transition falls inside the window.
+> - **UTC is not the watched person's day.** For a watched person in Auckland the local date runs
+>   ahead of UTC for much of each day, so a UTC-derived bound rejects writes that are legitimately
+>   inside the cap.
+>
+> **So write it as `+32d`**, on create and on update, with a comment saying it is approximate and
+> why. Two days of slack absorbs the DST swing, the time-of-day swing, and the UTC-versus-local-date
+> offset for every inhabited zone. The slack is deliberately biased to be **generous enough never to
+> reject a legitimate write**: a rejected away write queues offline and surfaces minutes or hours
+> later with no visible cause, which is far worse than admitting a period a day or two over a cap
+> that is a guardrail in the first place.
+>
+> **The exact cap lives in `AwayRules` in the domain layer**, which is given `today` as a `DayKey`
+> already resolved in the watched person's zone. That is the only place the question is
+> well-posed. The rules stop the absurd case — a ten-year away period that silences a family
+> forever — which is the whole of what they are for. Travel is *not* the cause of any of this and
+> does not need special handling: the mismatch bites a watched person who never leaves their house.
+
+### The absurd case is defended twice, deliberately
+
+The rules bound what can be **written**. They do not bound what a device may **read** — and
+[ADR-0001](../architecture/decisions/0001-away-cache-precedence.md) says a read that *succeeds* is
+trusted. A ten-year away document that reaches a watcher any other way — written before these rules
+were deployed, admitted through a rules-deploy mistake, or produced by a buggy client — would
+silence that family for ten years, and **the staleness bound could not save them**, because nothing
+is stale: the read works perfectly, every day, and returns the same absurd answer.
+
+So the domain clamps as well. `AwayPeriod.clampedToSanityBound()` bounds the period, and `covers()`
+applies it by default so no caller can forget — the first version clamped at one of three call
+sites and left the watched person's own reminders suppressed for a decade.
+
+**The sanity bound is 60 days, deliberately far above the 31-day cap, and it must stay that way.**
+Sizing it *to* the cap looks tidier and is wrong: the rules are slack at `+32d`, so they legitimately
+admit periods of up to ~34 local days, and a read-time bound at the exact cap would un-honour
+periods the server had accepted — telling a family *"No check-in from Mum yesterday"* for days they
+really did mark away. That trades a rare absurd-document failure for a routine false claim, which is
+the worse deal by this project's own ordering. The bound answers only *"can this possibly be
+real?"*; `AwayRules` is where the exact number lives.
+
+| | Number | Enforced where | Answers |
+|---|---|---|---|
+| The cap | 31 days | `AwayRules`, client-side, exact | "is this a legal away period?" |
+| The rules clause | `+32d` | Firestore, slack | "is this obviously not one?" |
+| The sanity bound | 60 days | `AwayPeriod`, on read | "can this possibly be real?" |
+
+Note the two bounds are anchored differently, and that is not an inconsistency:
+
+| | Anchor | Bounds |
+|---|---|---|
+| `AwayRules` — write time | **today** | how far ahead a period may reach |
+| `clampedToSanityBound` — read time | **`from`** | how long a family can be silenced (60 days) |
+
+They coincide while `from` is always today, and separate the moment future-dated away is exposed —
+at which point each is still bounding the thing it was written to bound.
 
 **Links are Function-written, with one exception.** Creation goes through `redeemInvite` so
 single-use and expiry are enforced server-side. Revocation is a client write because either party
@@ -124,7 +190,7 @@ Cover at minimum:
 
 - Each matrix row, allowed and denied.
 - A watcher with a `revoked` link — must be denied everywhere an accepted link would be allowed.
-- Away period validation: `through < from`; 31 days; `from` yesterday on create; **`from` mutated
+- Away period validation: `through < from`; a 32-day period (31 days is the longest **allowed**); `from` yesterday on create; **`from` mutated
   on update** (must be denied); and the truncation write that cancels an in-progress period (must
   be **allowed**, even though its `from` is in the past).
 - Away attribution validation: `setBy` spoofed to another uid (denied); `setByName` absent, empty,

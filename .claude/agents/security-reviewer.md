@@ -51,7 +51,7 @@ rules and the table disagree, one of them is a bug — say which.
 - `invites/` unreadable by **every** client, including the creator.
 - `links/` Function-written, except either party setting `status: "revoked"` and nothing else.
 - Away validation present in the rules. ARCHITECTURE.md §8 as amended by ADR-0001 is the
-  specification: `through >= from` and `through <= request.time + 30d` — **against `request.time`,
+  specification: `through >= from` and `through <= request.time + 32d` (deliberately slack) — **against `request.time`,
   not `from`** — on every write; `from >= today` **on create only**; `from` immutable on update.
   Flag a blanket `from >= today` as a defect: it rejects the truncation write that cancels an
   in-progress away.

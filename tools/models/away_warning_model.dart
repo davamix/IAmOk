@@ -17,6 +17,20 @@
 // calendar-day ordinal, which is what DayKey reduces to once the watched
 // person's tz has been applied. The late-arrival correction path (§10) is a
 // separate handler and is not modelled.
+//
+// PARTIALLY SUPERSEDED by ADR-0004 (docs/architecture/decisions/0004-refused-
+// is-not-unreachable.md). `readOk` below covers "a timeout, a permission
+// denial, or an App Check rejection" alike, and ADR-0004 splits those: a
+// timeout means the phone really is offline, a refusal means it is online and
+// working, and only one of those sentences can be true at a time. A refusal now
+// produces a FOURTH outcome, warnAccessLost, which this model cannot express.
+//
+// All 18 cases below remain correct READ AS THE UNREACHABLE INTERPRETATION, and
+// are ported that way in test/domain/policy/away_warning_model_cases_test.dart,
+// where S15 and S16 gain refused-interpretation counterparts. The model is left
+// runnable and unchanged on purpose: its job is the ADR-0001 ordering question,
+// and its `superseded: 4 / decided: 0` result is still the regression guard for
+// that. Do not extend it without deciding that invariant's fate first.
 // =============================================================================
 
 // ─────────────────────────────────────────────────────────────── primitives ──
@@ -74,8 +88,8 @@ class DeviceState {
 
   /// Last SUCCESSFUL read of tier 1.
   ///
-  /// In the real LocalStore this is a full **timestamp**, not a date — §10 step
-  /// 5 renders "offline since 10:14" from it (ADR-0002). It is modelled as a
+  /// In the real LocalStore this is a full **timestamp**, not a date — §10
+  /// renders "offline since 10:14" from it (ADR-0002). It is modelled as a
   /// `Day` here because the staleness rule is deliberately calendar-day
   /// granular: the alarm attempts a reconcile once a day, so "verified within
   /// 2 days" compares date components, not a 48-hour duration. The timestamp

@@ -128,7 +128,7 @@ design decision, not an oversight — requiring approval would break the feature
 case, when someone is in hospital and least able to answer a prompt.
 
 **Controls, all visibility rather than prevention:** `setByName` is denormalized onto the away
-document so every surface can say *who* set it; anyone can cancel; a 30-day cap forces deliberate
+document so every surface can say *who* set it; anyone can cancel; a 31-day cap forces deliberate
 renewal; and an "ends tomorrow" notice goes to all watchers, scheduled locally from `through` so it
 needs no server. The residual risk is accepted and recorded in
 [ARCHITECTURE.md](../architecture/ARCHITECTURE.md) §17.

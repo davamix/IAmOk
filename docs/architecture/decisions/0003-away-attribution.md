@@ -12,7 +12,7 @@
 
 §12 builds on the same field — *"every device can show 'Ana marked Mum away until Sat 22 Aug'"* —
 and uses it again to make last-write-wins legible. But §8's validation list covered only the
-shape of the *period* (`through >= from`, the 30-day cap, `from >= today`) and declared itself
+shape of the *period* (`through >= from`, the 31-day cap, `from >= today`) and declared itself
 "enough". Nothing constrained **who** the document said had acted.
 
 An accepted risk was therefore mitigated by client goodwill. Three ways that breaks:

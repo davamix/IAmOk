@@ -60,7 +60,7 @@ proves things fire proves nothing about this app's worst bug.
 - The day id from the **device clock**, not `serverTimestamp()`; dual timestamps; skew surfaced.
 - Away edges — the day `from` starts; the day `through` ends; the day *after* `through`; away set
   mid-period; away cancelled while offline; away expiring on a device that has not been online
-  since it started; `through < from`, 31 days, and a retroactive `from` all rejected; tapping
+  since it started; `through < from`, a 32-day period, and a retroactive `from` all rejected — note a **31-day period is the longest ALLOWED**, not a denied case; tapping
   during away still allowed.
 - The rolling window — 7 days, extending to `through` + 7 during away with away days absent; and it
   **cancels** as well as creates.

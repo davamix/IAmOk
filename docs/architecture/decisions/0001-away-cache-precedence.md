@@ -129,4 +129,4 @@ Truncation preserves the history the decision depends on.
 
 **A shorter staleness bound (0 or 1 day).** Would speak sooner, but a single failed
 reconcile is common on a phone in a pocket. Two days tolerates ordinary patchy signal while
-still bounding the silence far below the 30-day away cap.
+still bounding the silence far below the 31-day away cap.

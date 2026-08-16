@@ -30,10 +30,29 @@ again and worry. The screen answering that question is the whole point.
 day makes noise. Daily "everything is fine" notifications train a family to swipe away the one
 notification that matters, and that training cannot be undone.
 
-**Never claim more than the device knows.** When the watcher's phone cannot reach Firestore, the
-message is *different*: *"No check-in received from Mum yesterday — your phone has been offline
-since 22:10."* Silence would be a silent failure; a flat "she didn't check in" is a claim the
-device cannot support. This is a correctness requirement, not copy polish.
+**Never claim more than the device knows.** There are **four** warning messages, not one, and which
+one fires is a correctness requirement rather than copy polish:
+
+| The device | Says |
+|---|---|
+| verified, and she did not check in | *"No check-in from Mum yesterday."* |
+| could not **reach** the server | *"No check-in received from Mum yesterday — your phone has been offline since 22:10."* |
+| has a cached away it cannot re-verify | *"Can't check on Mum — your phone has been offline since Tuesday 10:14. She was marked away until Saturday 22 August."* |
+| was **refused** by the server (ADR-0004) | *"Can't check on Mum — I Am Ok has lost access to her check-ins. Open the app to see what to do. Your phone last saw a check-in on Saturday 15 August."* |
+
+Silence would be a silent failure; a flat "she didn't check in" is a claim the device cannot
+support; and **"your phone has been offline" is a claim about the *device* that is false whenever
+the server was reached and said no** — which is what a revoked link, an expired token, App Check, or
+a bad rules deploy all produce.
+
+Two conventions the set depends on, worth keeping deliberately:
+
+- ***"No check-in…"* is a claim about her. *"Can't check on Mum —…"* is a claim about us.** The
+  opening tells the reader which kind of message this is before they read the detail. Do not mix
+  them.
+- **Every interpolated value can be null.** A watcher whose device has never had a successful read
+  has no "offline since" and no "last saw"; the variants are in `screens.md` and are not optional —
+  rendering "offline since null" to a worried family is the failure mode here.
 
 **State, not history.** Cold open shows what is true **now** — an unresolved warning if one stands,
 otherwise "Everything OK" with the last check-in time. A warning from three weeks ago followed by
@@ -78,7 +97,7 @@ user-visible copy without adding it to that file.
 
 Away picker copy is exact and load-bearing: **"Last day away: Saturday 22" / "Back on Sunday 23"**.
 "Until Saturday" alone is ambiguous about whether Saturday still needs a tap. Start date is always
-today; no future-dating in v1; 30-day maximum.
+today; no future-dating in v1; 31-day maximum (the last selectable day is 30 days after today).
 
 ## Health is state, not a gate
 

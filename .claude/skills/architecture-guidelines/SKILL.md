@@ -96,11 +96,12 @@ under `domain/` is a review failure, not a preference.
 |---|---|---|
 | A false fire costs | Nothing | **Everything** — a false claim to a family |
 | Mechanism | `flutter_local_notifications.zonedSchedule`, display only | `android_alarm_manager_plus`, wakes a Dart isolate |
-| Verifies before speaking | No | **Yes** — five checks, in order |
+| Verifies before speaking | No | **Yes** — six checks, in order |
 
 The alarm isolate **reconciles first, then decides** — ARCHITECTURE.md §10, as amended by
-ADR-0001. A runnable model of the whole thing, with 18 cases, is at
-`tools/models/away_warning_model.dart`; run it before changing any of this.
+ADR-0001 and **ADR-0004**. A runnable model of the whole thing, with 18 cases, is at
+`tools/models/away_warning_model.dart`; run it before changing any of this. Note the model predates
+ADR-0004 and reads as the *unreachable* interpretation only — see its header.
 
 **First, reconcile.** Attempt the read of `checkins/{watchedUid}/days/{D}` **and**
 `users/{watchedUid}/shared/away`. If and only if it **succeeds**, overwrite the cached away with
@@ -110,21 +111,40 @@ stamp `lastReconcileAt`.
 > **A failed read is not an answer.** Timeouts, permission denials and App Check rejections all
 > happen while online. Gate the cache overwrite on *the read succeeded*, never on connectivity —
 > getting this wrong wipes a legitimate away on a transient error and warns falsely.
+>
+> **But "failed" is two things, and only one of them is "offline"** (ADR-0004). *Unreachable* —
+> offline, timeout — means the phone really is out of contact. *Refused* — permission denied,
+> unauthenticated, App Check — means it is online and talking to the server, so saying it is
+> offline is a false claim about the device. Same rule for the cache; different sentence.
 
 **Then decide**, computing `D` = the most recently **completed** day in the watched person's tz:
 
-1. `D < link.activeFrom` → silent. Never warn about days before the link existed. **Easy to omit,
+1. `link.status != "accepted"` → silent, **and cancel the warning alarm**. Withdraw any standing
+   warning rather than correcting it — nothing disproves it, it is simply no longer this watcher's
+   business, and no later read can ever clear it because every read is now refused.
+2. `D < link.activeFrom` → silent. Never warn about days before the link existed. **Easy to omit,
    and its own §17 risk — do not drop it.**
-2. `lastConfirmedDate >= D` → silent. **Evidence outranks doubt** — this comes *before* the away
+3. `lastConfirmedDate >= D` → silent. **Evidence outranks doubt** — this comes *before* the away
    check, because tapping during an away day is allowed.
-3. `D` inside the cached away period → silent if verified within **2 days**; otherwise the
+4. The read was **refused** → *"Can't check on Mum — I Am Ok has lost access to her check-ins. Open
+   the app to see what to do. Your phone last saw a check-in on …"* Above the away check, because
+   ADR-0001's 2-day bound is calibrated for a phone in a pocket and a refusal is neither transient
+   nor self-healing.
+5. `D` inside the cached away period → silent if verified within **2 days**; otherwise the
    distinct *"Can't check on Mum — your phone has been offline since … She was marked away
    until …"*.
-4. Otherwise **warn**: the plain message if the read succeeded, the offline message if it did not.
+6. Otherwise **warn**: the plain message if the read succeeded, the offline message if the server
+   could not be reached.
 
-**Three distinct outcomes, never two.** Silence would be a silent failure; a flat "she didn't check
-in" is a claim the device cannot support; and an unverifiable away is neither of those. Which one
-fires is a correctness requirement, not copy polish.
+**Four distinct outcomes, never fewer.** Silence would be a silent failure; a flat "she didn't check
+in" is a claim the device cannot support; an unverifiable away is neither of those; and an app that
+has been *refused* is not offline and must not say it is. Which one fires is a correctness
+requirement, not copy polish.
+
+**An access failure is never recorded as a warning about the watched person.** `warningsShownFor` is
+claims about *her*; lost access lives in `accessLostSince`. Mixing them makes the watcher's list row
+report a missed check-in that nothing supports — the same false claim, arriving by a different
+surface.
 
 The warning alarm **keeps firing daily through an away period** rather than being cancelled, so
 each fire re-verifies against Firestore and an away cancelled remotely is picked up even if every

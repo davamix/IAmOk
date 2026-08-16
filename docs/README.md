@@ -8,7 +8,7 @@ non-goals in [HANDOVER.md](HANDOVER.md), which the whole design is built on top 
 
 | | |
 |---|---|
-| Current phase | **Phase 1 — Domain layer · complete and reviewed.** Next: Phase 2 — start from [phases/phase-2-brief.md](phases/phase-2-brief.md). |
+| Current phase | **Phase 2 — Watched side · code complete and reviewed; awaiting the device pass.** See [phases/phase-2-summary.md](phases/phase-2-summary.md) — the on-hardware exit criteria are **not yet met**, because the POCO F3 was not connected. |
 | Phase history | [phases/](phases/) — one summary per completed phase |
 | Firebase project | `i-am-ok-c74ca` · Firestore `europe-west1` · Native mode · all permanent |
 | Repo | https://github.com/davamix/IAmOk (public) |

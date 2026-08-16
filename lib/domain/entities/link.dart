@@ -17,12 +17,18 @@ enum LinkStatus { accepted, revoked }
 /// offline. [watchedTimezone] in particular is what makes ADR-0002 work: the
 /// alarm isolate computes `D` from this string and the current instant, with no
 /// plugin access at all.
+///
+/// [watcherName] is the mirror of [watchedName], denormalised for the identical
+/// reason in the identical direction — see its own doc comment. §7 originally
+/// carried only the watched half, because until the Phase 1 gate no surface on
+/// the watched side ever named anybody.
 class Link {
   Link({
     required this.watchedUid,
     required this.watcherUid,
     required this.status,
     required this.watchedName,
+    required this.watcherName,
     required this.watchedTimezone,
     required this.activeFrom,
     required this.createdAt,
@@ -47,6 +53,25 @@ class Link {
 
   /// Denormalised display name of the watched person.
   final String watchedName;
+
+  /// Denormalised display name of the **watcher**.
+  ///
+  /// The exact mirror of [watchedName], required by the Phase 1 gate's decision
+  /// that *the Tap screen names who will be notified*. Without it that screen
+  /// cannot be built at all: §8 grants `users/{uid}` read **to self only**, so
+  /// the watched person's device has no path from a `watcherUid` to a name, and
+  /// the link was the only document it may read that could have carried one.
+  /// §7's own rationale for denormalising `watchedName` — "the watcher never
+  /// needs to read `users/{watchedUid}`" — applies unchanged in this direction;
+  /// only the surface that needed it is new.
+  ///
+  /// Like [watchedName] this is a **display label and not an identity**. It is
+  /// written by `redeemInvite` from the redeemer's Google profile and can be
+  /// changed by that user afterwards, exactly as ADR-0003 records for
+  /// `setByName`. Nothing decides anything from it; it is rendered, and that is
+  /// all. Do not add a rules check comparing it to `displayName` — ADR-0003
+  /// explains why that costs a read and proves nothing.
+  final String watcherName;
 
   /// Denormalised IANA zone of the watched person, e.g. `Europe/Madrid`.
   final String watchedTimezone;
@@ -97,6 +122,7 @@ class Link {
   Link copyWith({
     LinkStatus? status,
     String? watchedName,
+    String? watcherName,
     String? watchedTimezone,
     DayKey? activeFrom,
     LocalTimeOfDay? warningLocalTime,
@@ -107,6 +133,7 @@ class Link {
         watcherUid: watcherUid,
         status: status ?? this.status,
         watchedName: watchedName ?? this.watchedName,
+        watcherName: watcherName ?? this.watcherName,
         watchedTimezone: watchedTimezone ?? this.watchedTimezone,
         activeFrom: activeFrom ?? this.activeFrom,
         warningLocalTime: warningLocalTime ?? this.warningLocalTime,
@@ -121,6 +148,7 @@ class Link {
       other.watcherUid == watcherUid &&
       other.status == status &&
       other.watchedName == watchedName &&
+      other.watcherName == watcherName &&
       other.watchedTimezone == watchedTimezone &&
       other.activeFrom == activeFrom &&
       other.warningLocalTime == warningLocalTime &&
@@ -133,6 +161,7 @@ class Link {
         watcherUid,
         status,
         watchedName,
+        watcherName,
         watchedTimezone,
         activeFrom,
         warningLocalTime,

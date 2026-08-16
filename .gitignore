@@ -44,6 +44,12 @@ app.*.map.json
 /android/app/profile
 /android/app/release
 
+# Gradle writes reports here even though android/build.gradle.kts redirects the
+# main build directory to /build. Appeared in Phase 2, the first phase to run a
+# real Android build.
+/android/build/
+/android/.gradle/
+
 # Widget Preview related
 .widget_preview/
 

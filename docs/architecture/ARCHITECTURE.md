@@ -1,7 +1,8 @@
 # I Am Ok — Architecture
 
-**Date:** 2026-08-15 · **Status:** Design. **Phase 1 built §5's Domain layer**; everything below
-that line is still design. · **Supersedes:** the *Architecture decisions* and *Open questions*
+**Date:** 2026-08-15 · **Status:** Design. **Phase 1 built §5's Domain layer and Phase 2 the four
+layers above it for the watched side**; the watcher side, Firebase, pairing and away mode are still
+design. · **Supersedes:** the *Architecture decisions* and *Open questions*
 sections of [HANDOVER.md](../HANDOVER.md).
 
 The scope boundary in HANDOVER.md ("Explicit non-goals") still holds and is **not** re-opened
@@ -135,6 +136,8 @@ Consequences that shape the design:
 ├─ Platform edge ─────────────────────────────────────────────┤
 │  AlarmScheduler  NotificationService  FcmService             │
 │  PermissionService  Clock  ClockService  ConnectivityService │
+├─ Copy — a leaf, reached by Presentation AND Platform ───────┤
+│  NotificationCopy   TapCopy                                  │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -142,6 +145,15 @@ Consequences that shape the design:
 exist, should we warn, is this day inside an away period, is this a correction — lives in
 **Domain** as a pure function over explicit inputs. No `DateTime.now()`, no plugin calls, no
 I/O. The layers above only supply inputs and execute the result.
+
+**Copy is a leaf, not a layer.** Every approved user-visible string lives in `lib/copy/`, which
+depends on the domain (for the enums it switches on) and on nothing else. Both Presentation and the
+Platform edge reach it — a notification's words are written by the same rules as a screen's, and the
+two must not be able to drift apart — and neither has to depend on the other to get them. That is
+also what makes the set reviewable: `uiux-reviewer` checks one directory against
+[ui-ux/screens.md](../ui-ux/screens.md). A user-visible literal inline in a widget is a review
+failure, including a screen-reader label, which is as user-visible as a headline and is the only
+thing some readers get.
 
 ---
 
@@ -207,6 +219,7 @@ links/{watchedUid}_{watcherUid}               deterministic id ⇒ pairing is na
   watcherUid         string
   status             "accepted" | "revoked"
   watchedName        string      denormalized  → watcher never needs to read users/{watchedUid}
+  watcherName        string      denormalized  → watched person never needs to read users/{watcherUid}
   watchedTimezone    string      denormalized  → watcher computes the same day boundary
   activeFrom         string      YYYY-MM-DD    → never warn about days before the link existed
   warningLocalTime   string      "10:00"       → watcher-local, per link
@@ -229,6 +242,19 @@ duplicate push. No dedupe logic anywhere.
 
 **Denormalizing `watchedName` and `watchedTimezone` onto the link** means a watcher never reads
 another user's document. Security rules stay tight and the watcher can render fully offline.
+
+**`watcherName` is the same trick in the other direction, and was added in Phase 2**
+([ADR-0005](decisions/0005-the-tap-screen-names-who-is-told.md)). The Phase 1 gate decided the Tap
+screen names *who will be notified when she taps*, and that screen cannot be built without it: §8 grants `users/{uid}` read **to self only**, so the watched person's device has
+no path from a `watcherUid` to a name, and the link is the only document it may read that could
+carry one. Adding a field was the alternative to weakening §8's read rule, which would have let
+every watched person read the profile of everyone watching them.
+
+Like `watchedName` — and like `setByName` in [ADR-0003](decisions/0003-away-attribution.md) — this
+is a **display label and not an identity**. It is written by `redeemInvite` from the redeemer's
+Google profile and the user can rename themselves afterwards. Nothing decides anything from it. Do
+not add a rules check comparing it to `displayName`; ADR-0003 records why that costs a read and
+proves nothing.
 
 **Away lives under the watched user, not on links.** Away is global by definition — there are
 no taps at all — so a per-link copy would be a fan-out write that can partially fail and leave
@@ -298,7 +324,7 @@ Three required, one optional. All in `europe-west1`.
 |---|---|---|
 | `onCheckInCreated` | `checkins/{uid}/days/{date}` created | Read accepted links where `watchedUid == uid` → collect watcher tokens → send **data-only, high-priority** FCM `{watchedUid, date, deviceTappedAt, tz, watchedName}` → delete tokens that return `UNREGISTERED` |
 | `onAwayChanged` | `users/{uid}/shared/away` written or deleted | Fan out a data-only nudge to **every party** — all watchers *and* the watched device, since either may have made the change. Each device reconciles and renders its own notification. |
-| `redeemInvite` | Callable | Validate code + expiry + not-consumed → create `links/{watched}_{watcher}` with `activeFrom = today in watched tz` → mark invite consumed. Atomic in a transaction. |
+| `redeemInvite` | Callable | Validate code + expiry + not-consumed → create `links/{watched}_{watcher}` with `activeFrom = today in watched tz`, `watchedName`/`watchedTimezone` **and `watcherName`** denormalized (§7) → mark invite consumed. Atomic in a transaction. |
 | `revokeLink` | Callable *(optional)* | Could be a client write under rules; a Function gives an audit point. Decide at implementation. |
 
 Redemption **must** be a Function: the client cannot enforce single-use or expiry, and cannot
@@ -374,6 +400,27 @@ away period with what Firestore returned — *including overwriting it with noth
    check-in received from Mum yesterday — your phone has been offline since HH:MM."* if the server
    could not be reached. Different message, different meaning.
 8. Record `warningsShownFor[D] = the outcome shown` — **except step 5**, whose outcome is not a claim about the watched person and is recorded as `accessLostSince` + `accessLostCause` instead. Putting it in `warningsShownFor` would make the watcher list report a missed check-in nothing supports ([ADR-0004](decisions/0004-refused-is-not-unreachable.md)).
+
+> **Record what was *delivered*, not what was decided.** Added at the Phase 1 gate and implemented
+> in Phase 2. `reconcile()` is told the delivery capability as an explicit value — `available`,
+> `redundant`, or `unavailable` — exactly as `now` and `away` already are, so the domain stays pure.
+>
+> | State | Post? | Consume? | When |
+> |---|---|---|---|
+> | `available` | yes | yes | normal |
+> | `redundant` | no | **yes** | the reader is looking at the screen that already shows this |
+> | `unavailable` | no | **no** | `POST_NOTIFICATIONS` revoked — nothing was delivered, so nothing is owed off |
+>
+> Without it the alarm isolate marks every reminder consumed whether or not anything appeared. The
+> daily warning self-heals from that, because a new day `D` gets a fresh attempt; **the access-lost
+> cadence does not.** Days 0, 1, 3, 7 and 14 are each consumed in silence, and if permissions return
+> on day 20 the next reminder is day 21 — a cadence built to survive a *sleeping* device failing on
+> a *muted* one, which §13 rates High precisely because it happens to watchers who never open the
+> app. It applies to **both** channels, `warningsShownFor` and `accessLostNotifiedOn`.
+>
+> `accessLostSince` and `accessLostCause` are **not** gated by it: they record a fact about the
+> *read*, not about what a human saw, and a phone with notifications revoked is exactly the phone
+> whose health panel must still be able to explain itself when it is finally opened.
 
 Steps 5, 6 and 7 matter for the same reason. Silence would be a silent failure; a flat "she didn't
 check in" would be a claim the device cannot support; and "your phone has been offline" is a claim
@@ -670,9 +717,17 @@ that. It is the trigger condition for un-deferring the scheduled Function in §9
 | Logic-bearing alarms | `android_alarm_manager_plus` |
 | Time | `timezone`, `flutter_timezone` |
 | Cross-isolate local store | `sqflite` |
-| Permissions | `permission_handler` |
+| Permissions | `permission_handler` — **deferred to Phase 7**, see below |
 | Connectivity | `connectivity_plus` |
 | State | `flutter_riverpod` |
+
+`permission_handler` is **not** in the Phase 2 build. `permission_handler_android` 14.0.0 does not
+compile below API 37 (it references `Manifest.permission.ACCESS_LOCAL_NETWORK` and
+`Build.VERSION_CODES.CINNAMON_BUN`), and three of the four §13 permission items are answered natively
+by `flutter_local_notifications` — the notification one *better*, because asking the notification
+manager "will this appear" also catches a switched-off channel, which no runtime-permission API does.
+The only item it uniquely answers is the battery-optimisation exemption, which is a health-panel row,
+so it returns in Phase 7 against whatever version compiles then. Recorded in `PermissionService`.
 
 Deep links for invites: **Android App Links**, not Firebase Dynamic Links — that service shut
 down in August 2025. `assetlinks.json` can be hosted on GitHub Pages under the domain the

@@ -9,6 +9,7 @@ void main() {
         watcherUid: 'ana',
         status: LinkStatus.accepted,
         watchedName: watchedUid,
+        watcherName: 'Ana',
         watchedTimezone: zone,
         activeFrom: day(from ?? '2026-07-01'),
         createdAt: at(utc, 2026, 7, 1),
@@ -24,6 +25,7 @@ void main() {
     FirestoreRead? read,
     DateTime? when,
     Set<ScheduledWarning> currentlyScheduled = const {},
+    NotificationDelivery delivery = NotificationDelivery.available,
   }) =>
       WatcherReconciler.reconcile(
         now: when ?? now,
@@ -32,6 +34,7 @@ void main() {
         cache: cache,
         read: read ?? const FirestoreRead.succeeded(),
         currentlyScheduled: currentlyScheduled,
+        delivery: delivery,
       );
 
   group('reconcile first, then decide — ADR-0001 decision 1', () {
@@ -269,6 +272,7 @@ void main() {
             cache: const WatcherCache.empty(),
             read: const FirestoreRead.succeeded(),
             currentlyScheduled: const {},
+            delivery: NotificationDelivery.available,
           ).decision.day,
         );
       }
@@ -328,6 +332,7 @@ void main() {
         cache: const WatcherCache.empty(),
         read: const FirestoreRead.succeeded(),
         currentlyScheduled: const {},
+        delivery: NotificationDelivery.available,
       );
       for (final warning in result.desiredWarnings) {
         expect(DayKey.fromInstant(warning.at, madrid), warning.day);
@@ -903,6 +908,7 @@ void main() {
         cache: const WatcherCache.empty(),
         read: const FirestoreRead.succeeded(),
         currentlyScheduled: const {},
+        delivery: NotificationDelivery.available,
       );
       expect(result.desiredWarnings, hasLength(7));
       expect(result.desiredWarnings.every((w) => w.at.hour == 10), isTrue);

@@ -12,6 +12,7 @@ void main() {
     Set<DayKey> checkedInDays = const {},
     Set<ScheduledReminder> currentlyScheduled = const {},
     DateTime? at,
+    List<Link> links = const [],
   }) =>
       WatchedReconciler.reconcile(
         now: at ?? now,
@@ -19,6 +20,7 @@ void main() {
         away: away,
         checkedInDays: checkedInDays,
         currentlyScheduled: currentlyScheduled,
+        links: links,
       );
 
   Set<DayKey> daysIn(Set<ScheduledReminder> reminders) =>
@@ -211,6 +213,7 @@ void main() {
       away: null,
       checkedInDays: const {},
       currentlyScheduled: const {},
+      links: const [],
     );
     expect(daysIn(result.desired), contains(day('2026-10-26')),
         reason: 'the window really does cross the transition');
@@ -233,6 +236,7 @@ void main() {
       away: null,
       checkedInDays: const {},
       currentlyScheduled: const {},
+      links: const [],
     );
     final movedToNewYork = WatchedReconciler.reconcile(
       now: now,
@@ -240,6 +244,7 @@ void main() {
       away: null,
       checkedInDays: const {},
       currentlyScheduled: inMadrid.desired,
+      links: const [],
     );
 
     expect(movedToNewYork.isNoOp, isFalse);
@@ -262,6 +267,7 @@ void main() {
       away: null,
       checkedInDays: const {},
       currentlyScheduled: const {},
+      links: const [],
     );
     expect(daysIn(result.desired).reduce((a, b) => a < b ? a : b),
         day('2026-08-18'));

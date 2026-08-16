@@ -1,122 +1,90 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-void main() {
-  runApp(const MyApp());
+import 'application/providers.dart';
+import 'data/local_store.dart';
+import 'domain/domain.dart';
+import 'platform/alarm_scheduler.dart';
+import 'platform/clock.dart';
+import 'platform/clock_service.dart';
+import 'platform/notification_service.dart';
+import 'platform/permission_service.dart';
+import 'presentation/tap_screen.dart';
+
+/// The **UI isolate's** entry point.
+///
+/// Two of the three isolates that run this app never come through here (§4).
+/// The alarm and FCM entry points bootstrap themselves from `LocalStore` and
+/// share no memory with anything built below — which is why every decision this
+/// app makes lives in the domain layer, where it behaves identically in all
+/// three.
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  // Parsed from a compiled-in blob, not read from disk, so this is cheap and
+  // needs no plugin. The domain layer initialises it lazily too, because the
+  // alarm isolate never runs app startup (see TimeZones).
+  TimeZones.ensureInitialized();
+
+  final store = await LocalStore.open();
+  final notifications = await NotificationService.initialize();
+  final permissions = PermissionService(notifications);
+
+  // The debug harness's forced date, if one is set. Read from disk rather than
+  // held in memory so every isolate agrees about what day it is.
+  //
+  // Gated on kDebugMode so the claim "zero in every release build" is enforced
+  // by the code rather than resting on the fact that the only WRITER is
+  // compiled out. Anything that could put a row under `debug_clock_offset_ms`
+  // — a restore, a rooted device — would otherwise shift the app's entire
+  // notion of now: the day boundary, every reminder instant, and from Phase 3
+  // the watcher's warning decision.
+  final clock = SystemClock(
+    offset: kDebugMode ? await store.clockOffset() : Duration.zero,
+  );
+
+  final services = AppServices(
+    store: store,
+    clock: clock,
+    notifications: notifications,
+    alarms: NotificationAlarmScheduler(notifications),
+    permissions: permissions,
+    clockService: const ClockService(),
+    // Phase 2 has no backend and no sign-in. Phase 4 replaces this with the
+    // Firebase uid, which survives reinstall and phone replacement so links
+    // never break (§1).
+    selfUid: 'local-watched-user',
+  );
+
+  runApp(
+    ProviderScope(
+      overrides: [appServicesProvider.overrideWithValue(services)],
+      child: const IAmOkApp(),
+    ),
+  );
 }
 
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
-
-  // This widget is the root of your application.
-  @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Flutter Demo',
-      theme: ThemeData(
-        // This is the theme of your application.
-        //
-        // TRY THIS: Try running your application with "flutter run". You'll see
-        // the application has a purple toolbar. Then, without quitting the app,
-        // try changing the seedColor in the colorScheme below to Colors.green
-        // and then invoke "hot reload" (save your changes or press the "hot
-        // reload" button in a Flutter-supported IDE, or press "r" if you used
-        // the command line to start the app).
-        //
-        // Notice that the counter didn't reset back to zero; the application
-        // state is not lost during the reload. To reset the state, use hot
-        // restart instead.
-        //
-        // This works for code too, not just values: Most code changes can be
-        // tested with just a hot reload.
-        colorScheme: .fromSeed(seedColor: Colors.deepPurple),
-      ),
-      home: const MyHomePage(title: 'Flutter Demo Home Page'),
-    );
-  }
-}
-
-class MyHomePage extends StatefulWidget {
-  const MyHomePage({super.key, required this.title});
-
-  // This widget is the home page of your application. It is stateful, meaning
-  // that it has a State object (defined below) that contains fields that affect
-  // how it looks.
-
-  // This class is the configuration for the state. It holds the values (in this
-  // case the title) provided by the parent (in this case the App widget) and
-  // used by the build method of the State. Fields in a Widget subclass are
-  // always marked "final".
-
-  final String title;
+class IAmOkApp extends StatelessWidget {
+  const IAmOkApp({super.key});
 
   @override
-  State<MyHomePage> createState() => _MyHomePageState();
-}
-
-class _MyHomePageState extends State<MyHomePage> {
-  int _counter = 0;
-
-  void _incrementCounter() {
-    setState(() {
-      // This call to setState tells the Flutter framework that something has
-      // changed in this State, which causes it to rerun the build method below
-      // so that the display can reflect the updated values. If we changed
-      // _counter without calling setState(), then the build method would not be
-      // called again, and so nothing would appear to happen.
-      _counter++;
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    // This method is rerun every time setState is called, for instance as done
-    // by the _incrementCounter method above.
-    //
-    // The Flutter framework has been optimized to make rerunning build methods
-    // fast, so that you can just rebuild anything that needs updating rather
-    // than having to individually change instances of widgets.
-    return Scaffold(
-      appBar: AppBar(
-        // TRY THIS: Try changing the color here to a specific color (to
-        // Colors.amber, perhaps?) and trigger a hot reload to see the AppBar
-        // change color while the other colors stay the same.
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        // Here we take the value from the MyHomePage object that was created by
-        // the App.build method, and use it to set our appbar title.
-        title: Text(widget.title),
-      ),
-      body: Center(
-        // Center is a layout widget. It takes a single child and positions it
-        // in the middle of the parent.
-        child: Column(
-          // Column is also a layout widget. It takes a list of children and
-          // arranges them vertically. By default, it sizes itself to fit its
-          // children horizontally, and tries to be as tall as its parent.
-          //
-          // Column has various properties to control how it sizes itself and
-          // how it positions its children. Here we use mainAxisAlignment to
-          // center the children vertically; the main axis here is the vertical
-          // axis because Columns are vertical (the cross axis would be
-          // horizontal).
-          //
-          // TRY THIS: Invoke "debug painting" (choose the "Toggle Debug Paint"
-          // action in the IDE, or press "p" in the console), to see the
-          // wireframe for each widget.
-          mainAxisAlignment: .center,
-          children: [
-            const Text('You have pushed the button this many times:'),
-            Text(
-              '$_counter',
-              style: Theme.of(context).textTheme.headlineMedium,
-            ),
-          ],
+  Widget build(BuildContext context) => MaterialApp(
+        title: 'I Am Ok',
+        debugShowCheckedModeBanner: false,
+        theme: ThemeData(
+          colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF00658F)),
+          useMaterial3: true,
         ),
-      ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _incrementCounter,
-        tooltip: 'Increment',
-        child: const Icon(Icons.add),
-      ),
-    );
-  }
+        darkTheme: ThemeData(
+          colorScheme: ColorScheme.fromSeed(
+            seedColor: const Color(0xFF00658F),
+            brightness: Brightness.dark,
+          ),
+          useMaterial3: true,
+        ),
+        // PLAN.md routes on the two onboarding selections in Phase 5. Until
+        // then the watched side is the whole app, which is what Phase 2 is for.
+        home: const TapScreen(),
+      );
 }

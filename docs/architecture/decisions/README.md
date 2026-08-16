@@ -10,6 +10,7 @@
 | [0002](0002-clock-split.md) | Split the clock, and cache the device timezone on disk | Accepted | ARCHITECTURE.md §4, §5, §6, §11 |
 | [0003](0003-away-attribution.md) | Enforce away attribution; stop treating the name as authenticated | Accepted | ARCHITECTURE.md §8, §17 |
 | [0004](0004-refused-is-not-unreachable.md) | "Reached and refused" is not "could not reach" | Accepted | ARCHITECTURE.md §10, §13, §17 |
+| [0005](0005-the-tap-screen-names-who-is-told.md) | The Tap screen names who will be notified, and says nothing else | Accepted | ARCHITECTURE.md §7 · `ui-ux/screens.md` |
 
 ## What belongs here
 

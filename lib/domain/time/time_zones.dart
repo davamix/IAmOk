@@ -58,6 +58,21 @@ abstract final class TimeZones {
     }
   }
 
+  /// [location], returning null instead of throwing.
+  ///
+  /// The same shape, and the same reason, as `Link.tryWatchedZone` and
+  /// `AwayPeriod.tryCreate`: a zone name read back off disk — written by an
+  /// older build, or a device alias newer than the pinned tzdata — must be able
+  /// to surface as a handled condition rather than as an exception thrown
+  /// inside an alarm isolate with seconds to live.
+  static tz.Location? tryLocation(String ianaName) {
+    try {
+      return location(ianaName);
+    } on UnknownTimeZone {
+      return null;
+    }
+  }
+
   /// UTC, available without initialisation.
   ///
   /// Present for tests and for the degenerate case. Real days are computed in

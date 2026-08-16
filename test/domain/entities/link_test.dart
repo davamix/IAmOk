@@ -13,6 +13,7 @@ void main() {
         watcherUid: 'ana',
         status: status,
         watchedName: 'Mum',
+        watcherName: 'Ana',
         watchedTimezone: zone,
         activeFrom: day('2026-07-01'),
         createdAt: at(utc, 2026, 7, 1),

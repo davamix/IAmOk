@@ -6,6 +6,7 @@ import '../policy/warning_policy.dart';
 import '../time/day_key.dart';
 import '../time/local_time_of_day.dart';
 import 'firestore_read.dart';
+import 'notification_delivery.dart';
 import 'watcher_cache.dart';
 
 /// One warning alarm that should exist.
@@ -262,6 +263,15 @@ abstract final class WatcherReconciler {
   /// create-only one — the shape [WatchedReconcileResult] warns about, reached
   /// by whoever reads the shortest signature. Pass an empty set deliberately if
   /// the alarms have genuinely not been enumerated.
+  ///
+  /// [delivery] is **required for the same reason**, and it is the one input
+  /// here that is not about the watched person at all: it says whether a
+  /// notification decided now would actually reach anyone. A default of
+  /// [NotificationDelivery.available] would restore precisely the assumption
+  /// that made the access-lost cadence burn itself out on a phone with
+  /// `POST_NOTIFICATIONS` revoked — see [NotificationDelivery]. The platform
+  /// edge supplies it: `PermissionService` for the revoked case, app lifecycle
+  /// for the foreground case.
   static WatcherReconcileResult reconcile({
     required DateTime now,
     required Link link,
@@ -269,6 +279,7 @@ abstract final class WatcherReconciler {
     required WatcherCache cache,
     required FirestoreRead read,
     required Set<ScheduledWarning> currentlyScheduled,
+    required NotificationDelivery delivery,
     int staleAwayAfterDays = WarningPolicy.defaultStaleAwayAfterDays,
   }) {
     final watchedZone = link.watchedZone;
@@ -329,6 +340,21 @@ abstract final class WatcherReconciler {
     final hadStandingAccessNotice = cache.accessLostNotifiedOn != null;
     var cancelAccessLostNotice = false;
 
+    // Both channels below compute what is OWED, then split it in two:
+    //
+    //   shouldNotify — post it, only if the platform can actually post.
+    //   seen         — record it as standing, unless nothing was delivered.
+    //
+    // They differ on exactly one state. `redundant` is not posted but IS
+    // recorded, because the watcher is looking at the screen that already shows
+    // it. `unavailable` is neither, because nothing reached anyone and a
+    // reminder nobody received is still owed. Recording on "we decided to
+    // speak" rather than "it was delivered" is the defect this closes; see
+    // [NotificationDelivery].
+    //
+    // **Both channels, deliberately.** Fixing one and leaving the other is the
+    // exact mistake ADR-0004's clamp made, and it cost two review rounds.
+
     if (!link.isAccepted) {
       // Revocation: the standing warnings are not wrong, they are simply no
       // longer this watcher's business. Withdraw rather than correct — a
@@ -346,7 +372,8 @@ abstract final class WatcherReconciler {
       final cause = read.cause;
       final since = next.accessLostSince;
       final notifiedOn = next.accessLostNotifiedOn;
-      final owed = decision.outcome == WarningOutcome.warnAccessLost;
+      final outcomeIsAccessLost =
+          decision.outcome == WarningOutcome.warnAccessLost;
 
       // Dedupe within the day: reconcile() runs on app open, FCM, alarm and
       // boot, so a day-granular cadence would otherwise fire several times.
@@ -355,15 +382,16 @@ abstract final class WatcherReconciler {
       // notification a day rather than one per reconcile.
       final alreadyToday = notifiedOn == decision.day;
 
-      if (!owed || alreadyToday) {
-        shouldNotify = false;
+      final bool owed;
+      if (!outcomeIsAccessLost || alreadyToday) {
+        owed = false;
       } else if (since == null || next.accessLostCause != cause) {
         // The transition, or a change of remediation: "sign in again" and
         // "update the app" are different instructions, so the standing
         // notification is the wrong one the moment the cause moves.
-        shouldNotify = true;
+        owed = true;
       } else {
-        shouldNotify = isAccessLostReminderDue(
+        owed = isAccessLostReminderDue(
           daysSinceLost: decision.day.differenceInDays(since),
           daysSinceLastNotified: notifiedOn == null
               ? decision.day.differenceInDays(since)
@@ -371,17 +399,35 @@ abstract final class WatcherReconciler {
         );
       }
 
+      shouldNotify = owed && delivery.postsNotification;
+
+      // Ungated, and deliberately so: this records a fact about the READ — the
+      // backend refused us, on this day, for this reason — not a fact about
+      // what any human saw. §13's health item and the cadence anchor both key
+      // on it, and a phone with notifications revoked is precisely the phone
+      // whose panel must still be able to explain itself when it is next
+      // opened. Only the *notified-on* stamp below is a record of delivery.
       next = next.withAccessLostOn(decision.day, cause);
-      if (shouldNotify) {
+
+      // The cadence's memory. Advancing this on `unavailable` is the failure
+      // [NotificationDelivery] exists to prevent: days 0, 1, 3, 7 and 14 would
+      // each be consumed in silence, and access returning on day 20 would owe
+      // nothing until day 21.
+      if (owed && delivery.consumesReminder) {
         next = next.withAccessLostNotifiedOn(decision.day);
       }
     } else {
       final standing = next.warningsShownFor[decision.day];
-      shouldNotify = decision.isWarning &&
+      final owed = decision.isWarning &&
           (standing == null || _supersedes(decision.outcome, standing));
+
+      shouldNotify = owed && delivery.postsNotification;
+
       // Only record what is actually on screen. When the new message does not
-      // supersede, the old one is still the one showing.
-      if (shouldNotify) {
+      // supersede, the old one is still the one showing — and when nothing
+      // could be posted at all, nothing is standing, so the next reconcile of
+      // the same day must find the warning still owed rather than served.
+      if (owed && delivery.consumesReminder) {
         next = next.withWarningShownFor(decision.day, decision.outcome);
       }
       if (read is ReadSucceeded) {

@@ -10,6 +10,13 @@ android {
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
+        // Required by `flutter_local_notifications`, which uses `java.time` to
+        // schedule zoned instants. minSdk is 24 here — deliberately low,
+        // because docs/testing/device-matrix.md notes the watched person's
+        // phone is likely to be old — and `java.time` only arrives natively at
+        // API 26, so those two devices need the desugared library to schedule
+        // a reminder at all.
+        isCoreLibraryDesugaringEnabled = true
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
@@ -46,4 +53,8 @@ kotlin {
 
 flutter {
     source = "../.."
+}
+
+dependencies {
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
 }

@@ -9,6 +9,7 @@ void main() {
     watcherUid: 'ana',
     status: LinkStatus.accepted,
     watchedName: 'Mum',
+    watcherName: 'Ana',
     watchedTimezone: 'Europe/Madrid',
     activeFrom: day('2026-07-01'),
     createdAt: at(utc, 2026, 7, 1),

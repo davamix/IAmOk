@@ -1,9 +1,10 @@
 # I Am Ok — Implementation Plan
 
-**Date:** 2026-08-15 · **Status:** Approved and in progress. **Phases 0 and 1 complete** — see
-[phases/phase-0-summary.md](phases/phase-0-summary.md) and
-[phases/phase-1-summary.md](phases/phase-1-summary.md). The domain layer exists and is the only app
-code so far.
+**Date:** 2026-08-15 · **Status:** Approved and in progress. **Phases 0 and 1 complete**; **Phase 2
+is code complete and reviewed, with its device exit criteria still outstanding** — see
+[phases/phase-0-summary.md](phases/phase-0-summary.md),
+[phases/phase-1-summary.md](phases/phase-1-summary.md) and
+[phases/phase-2-summary.md](phases/phase-2-summary.md).
 
 Nine phases. Each ends with a summary document in `docs/phases/`, and a review gate before the
 next begins. Phases 1–3 need no backend at all.
@@ -139,6 +140,11 @@ memory-safety idea, worth having even though the write is idempotent. Re-enables
 
 **Exit criteria** — on a **real phone**: 12:00/18:00/21:00 fire; a tap cancels the rest of the day;
 alarms survive a reboot; the window re-arms without opening the app.
+
+> **Status: not yet met.** The code, the tests and the debug harness are done and the debug APK
+> builds, but no handset was attached when the phase was implemented, so none of the four criteria
+> above has been observed on hardware. They are the outstanding work; see
+> [phases/phase-2-summary.md](phases/phase-2-summary.md).
 
 **Risk** — this is where OEM battery management either works or doesn't. It is the reason this phase
 is second rather than fifth.

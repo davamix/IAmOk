@@ -1,6 +1,8 @@
 import 'package:timezone/timezone.dart' as tz;
 
 import '../away/away_period.dart';
+import '../entities/link.dart';
+import '../entities/watched_audience.dart';
 import '../policy/reminder_policy.dart';
 import '../time/day_key.dart';
 
@@ -11,6 +13,7 @@ class WatchedReconcileResult {
     required this.desired,
     required this.toSchedule,
     required this.toCancel,
+    required this.audience,
   });
 
   /// Every reminder that should exist across the window.
@@ -23,8 +26,22 @@ class WatchedReconcileResult {
   /// leaves reminders armed through a holiday.
   final Set<ScheduledReminder> toCancel;
 
+  /// Who will be notified when she taps — the one thing the Tap screen says
+  /// about watchers. See [WatchedAudience] for what is deliberately absent.
+  ///
+  /// It comes out of `reconcile()` rather than off a separate query on purpose:
+  /// "reconcile, don't mutate" (§3) means one function reads current state and
+  /// computes everything that should be true of it, and a second path to the
+  /// same links is a second source of truth about who is watching.
+  final WatchedAudience audience;
+
   /// Reality already matches. The second of two consecutive reconciles must
   /// report this, or boot recovery is a duplicate-notification bug.
+  ///
+  /// Deliberately **not** widened to cover [audience]: this asks whether any
+  /// alarm work is owed, and the audience is state to render rather than an
+  /// action to take. A caller doing `if (isNoOp) return;` skips scheduling, not
+  /// drawing.
   bool get isNoOp => toSchedule.isEmpty && toCancel.isEmpty;
 
   @override
@@ -55,12 +72,22 @@ abstract final class WatchedReconciler {
   ///
   /// [away] is a parameter from the first line even though away mode is not
   /// built until Phase 6 (PLAN.md, Phase 1, non-negotiable).
+  ///
+  /// [links] is the watched person's **own** links — the ones where they are
+  /// the watched party, which §8 already lets them read. It is required rather
+  /// than optional on the same reasoning PLAN.md gives for [away]: retrofitting
+  /// a parameter later means touching every call site and every test written in
+  /// between. It feeds [WatchedReconcileResult.audience] and nothing else — no
+  /// alarm decision on this side depends on who is watching, and none should,
+  /// because reminders exist for the person's own routine rather than for an
+  /// audience.
   static WatchedReconcileResult reconcile({
     required DateTime now,
     required tz.Location watchedZone,
     required AwayPeriod? away,
     required Set<DayKey> checkedInDays,
     required Set<ScheduledReminder> currentlyScheduled,
+    required List<Link> links,
   }) {
     final today = DayKey.fromInstant(now, watchedZone);
 
@@ -95,6 +122,7 @@ abstract final class WatchedReconciler {
       desired: desired,
       toSchedule: desired.difference(currentlyScheduled),
       toCancel: currentlyScheduled.difference(desired),
+      audience: WatchedAudience.from(links),
     );
   }
 }

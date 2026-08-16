@@ -1,8 +1,65 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- ARCHITECTURE.md §13. Every permission here is a health-panel row, and
+         every one of them can be taken away again after it is granted — which
+         is why §13 models permissions as continuously observed state rather
+         than as an onboarding gate. -->
+
+    <!-- API 33+. Without it the app is INERT: the alarms still fire and
+         nothing is ever shown. That is the state NotificationDelivery.
+         unavailable exists to tell the domain about, so a muted phone stops
+         silently consuming reminders it never delivered. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+
+    <!-- Re-arm the display-only reminders after a reboot. Handled for us by
+         flutter_local_notifications' ScheduledNotificationBootReceiver, which
+         is why §10's asymmetry table calls boot recovery "free" on this side. -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
+
+    <!-- A midday nudge deferred by Doze into the middle of the night is worse
+         than useless, so the reminders are exact.
+
+         USE_EXACT_ALARM is available to apps whose core purpose is alarms and
+         reminders. This one plausibly qualifies, but §13 is explicit: EXPECT TO
+         JUSTIFY IT IN PLAY REVIEW, and write the justification before
+         submitting rather than after rejection (Phase 8).
+
+         SCHEDULE_EXACT_ALARM is the revocable sibling, declared for API 31–32
+         where USE_EXACT_ALARM does not exist. -->
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM"/>
+    <uses-permission
+        android:name="android.permission.SCHEDULE_EXACT_ALARM"
+        android:maxSdkVersion="32"/>
+
+    <!-- REQUEST_IGNORE_BATTERY_OPTIMIZATIONS is deliberately ABSENT until
+         Phase 7. It is the one §13 item Phase 2 does not measure, nothing in
+         lib/ calls it, and a permission with no code behind it cannot be
+         justified in Play review while still appearing in the store listing.
+         It comes back with the health panel that uses it. -->
+
     <application
         android:label="I Am Ok"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher">
+        android:icon="@mipmap/ic_launcher"
+        android:allowBackup="false"
+        android:fullBackupContent="false">
+        <!-- allowBackup=false, and the reason is INTEGRITY rather than privacy.
+             Android's default is true, so without this the whole LocalStore is
+             copied to Drive and restored onto a new device — including
+             `pending_alarms`. Scheduled notifications do NOT survive a restore,
+             so the restored store insists a full 7-day window is armed while
+             nothing is: `desired.difference(currentlyScheduled)` is then empty,
+             every reminder is skipped, and she is never nudged. LocalStore's own
+             comment names that as the one direction that must never occur —
+             "believing more is armed than really is would leave a reminder that
+             never fires and nothing to notice it" — and Auto Backup manufactures
+             it for free. In Phase 3 the same restore would suppress a warning
+             that was never shown on this device.
+
+             Nothing here is user-authored and from Phase 4 the durable truth is
+             Firestore, so there is nothing worth preserving. It also keeps the
+             check-in history and link graph off Drive, which has no relationship
+             to the europe-west1 residency the threat model relies on. -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -25,6 +82,27 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+        <!-- Re-arms the scheduled reminders after a reboot, with no code of
+             ours running. This is what makes "alarms survive a reboot" a
+             property of the platform on the watched side rather than something
+             this app has to get right. The watcher side's logic-bearing alarm
+             is different and is Phase 3's problem. -->
+        <receiver
+            android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationBootReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED"/>
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED"/>
+                <action android:name="android.intent.action.QUICKBOOT_POWERON"/>
+                <action android:name="com.htc.intent.action.QUICKBOOT_POWERON"/>
+            </intent-filter>
+        </receiver>
+
+        <!-- Delivers a scheduled notification when its instant arrives. -->
+        <receiver
+            android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationReceiver"
+            android:exported="false"/>
+
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data

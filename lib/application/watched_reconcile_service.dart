@@ -131,11 +131,16 @@ class WatchedReconcileService {
       links: links,
     );
 
-    // **toCancel before toSchedule**, and the ordering is enforced inside
+    // **toCancel before the desired set**, and the ordering is enforced inside
     // `AlarmScheduler.apply` rather than here, so no caller can get it wrong.
+    //
+    // The whole `desired` set is handed over rather than `toSchedule`: a
+    // force-stop clears every platform alarm without touching this store, so a
+    // diff computed against the store would re-arm nothing and leave the app
+    // permanently inert. Measured on hardware — see `AlarmScheduler.apply`.
     await alarms.apply(
       toCancel: result.toCancel,
-      toSchedule: result.toSchedule,
+      desired: result.desired,
     );
 
     // Recorded only after the platform calls returned. A crash in between

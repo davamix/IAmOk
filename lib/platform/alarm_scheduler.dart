@@ -19,12 +19,13 @@ import 'notification_service.dart';
 abstract interface class AlarmScheduler {
   /// Makes the platform match a reconcile result.
   ///
-  /// **[toCancel] is applied before [toSchedule].** See
-  /// [NotificationAlarmScheduler.apply] for why the order is load-bearing;
-  /// every implementation owes that guarantee.
+  /// **[toCancel] is applied before [desired].** See
+  /// [NotificationAlarmScheduler.apply] for why the order is load-bearing, and
+  /// for why the second argument is the whole desired set rather than the
+  /// diff; every implementation owes both guarantees.
   Future<void> apply({
     required Set<ScheduledReminder> toCancel,
-    required Set<ScheduledReminder> toSchedule,
+    required Set<ScheduledReminder> desired,
   });
 
   /// Tears down every reminder.
@@ -52,15 +53,41 @@ class NotificationAlarmScheduler implements AlarmScheduler {
   /// `WatchedReconcileResult` does not expose a combined "reschedule" set the
   /// way the watcher side does; `desired.intersection` of the two sets by day is
   /// what that would be, and the ordering below is what makes it unnecessary.
+  ///
+  /// ## Why it schedules the WHOLE desired set, not the difference
+  ///
+  /// **Measured on the POCO F3, Phase 2 device pass.** Android cancels every one
+  /// of an app's `AlarmManager` alarms when the app is force-stopped — which on
+  /// HyperOS is an ordinary user action: swiping from recents, "clear all", or
+  /// any task killer. The device matrix says so in terms ("Lock in recents |
+  /// Off | Swiping the app from recents kills it and its alarms").
+  ///
+  /// Nothing tells the app. `LocalStore` still holds all 21 as pending, so a
+  /// diff-based schedule computes `desired.difference(currentlyScheduled)` = ∅
+  /// and re-arms **nothing**. Observed directly: 21 armed → force-stop → 0
+  /// armed → reopen and reconcile → **still 0**. The app is silently and
+  /// permanently inert, which is the one failure mode this project cannot
+  /// detect in itself, and `LocalStore.replacePendingReminders` names this exact
+  /// direction as the one that must never occur.
+  ///
+  /// Scheduling is **idempotent by id** — `zonedSchedule` on an existing id
+  /// replaces it — so asserting the whole set costs a handful of local binder
+  /// calls per reconcile and makes the operation self-healing whatever the
+  /// platform's true state. That is what "reconcile, don't mutate" actually
+  /// requires: the store is a record of what we *asked for*, never evidence of
+  /// what the platform *holds*, and only one of those may be trusted.
+  ///
+  /// The diff is still needed for [toCancel], because a reminder that should no
+  /// longer exist cannot be removed by re-asserting the ones that should.
   @override
   Future<void> apply({
     required Set<ScheduledReminder> toCancel,
-    required Set<ScheduledReminder> toSchedule,
+    required Set<ScheduledReminder> desired,
   }) async {
     for (final reminder in toCancel) {
       await _notifications.cancelReminder(reminder.day, reminder.slot);
     }
-    for (final reminder in toSchedule) {
+    for (final reminder in desired) {
       await _notifications.scheduleReminder(reminder);
     }
   }

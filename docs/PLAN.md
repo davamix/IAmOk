@@ -1,7 +1,7 @@
 # I Am Ok — Implementation Plan
 
-**Date:** 2026-08-15 · **Status:** Approved and in progress. **Phases 0 and 1 complete**; **Phase 2
-is code complete and reviewed, with its device exit criteria still outstanding** — see
+**Date:** 2026-08-15 · **Status:** Approved and in progress. **Phases 0, 1 and 2 complete** — Phase 2
+reviewed and verified on real hardware — see
 [phases/phase-0-summary.md](phases/phase-0-summary.md),
 [phases/phase-1-summary.md](phases/phase-1-summary.md) and
 [phases/phase-2-summary.md](phases/phase-2-summary.md).
@@ -141,9 +141,10 @@ memory-safety idea, worth having even though the write is idempotent. Re-enables
 **Exit criteria** — on a **real phone**: 12:00/18:00/21:00 fire; a tap cancels the rest of the day;
 alarms survive a reboot; the window re-arms without opening the app.
 
-> **Status: not yet met.** The code, the tests and the debug harness are done and the debug APK
-> builds, but no handset was attached when the phase was implemented, so none of the four criteria
-> above has been observed on hardware. They are the outstanding work; see
+> **Status: MET, on stock power settings.** Verified 2026-08-17 on the POCO F3 (Android 13,
+> HyperOS `OS1.0`), reading `AlarmManager` rather than the app's own belief. The pass also found the
+> phase's most serious defect — a force-stop cancels every alarm and `reconcile()` did not repair it,
+> leaving the app permanently inert — now fixed and re-verified on the same device. Evidence in
 > [phases/phase-2-summary.md](phases/phase-2-summary.md).
 
 **Risk** — this is where OEM battery management either works or doesn't. It is the reason this phase

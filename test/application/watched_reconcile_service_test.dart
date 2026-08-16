@@ -24,17 +24,21 @@ class _RecordingScheduler implements AlarmScheduler {
   @override
   Future<void> apply({
     required Set<ScheduledReminder> toCancel,
-    required Set<ScheduledReminder> toSchedule,
+    required Set<ScheduledReminder> desired,
   }) async {
     for (final reminder in toCancel) {
       calls.add('cancel ${reminder.day} ${reminder.slot.name}');
       armed.remove(reminder);
     }
-    for (final reminder in toSchedule) {
+    for (final reminder in desired) {
       calls.add('schedule ${reminder.day} ${reminder.slot.name}');
       armed.add(reminder);
     }
   }
+
+  /// What a force-stop does: every platform alarm is cancelled, and nothing
+  /// tells the app. The store is untouched.
+  void platformWipedByForceStop() => armed.clear();
 
   @override
   Future<void> cancelAll() async {
@@ -115,22 +119,33 @@ void main() {
   });
 
   group('idempotence — every entry point calls the same function', () {
-    test('a second reconcile schedules nothing new', () async {
+    // Idempotence is asserted on **what ends up armed** and on the absence of
+    // CANCEL churn — not on the raw call log. Since the repair fix, every
+    // reconcile re-asserts the whole desired set, so the log grows by design;
+    // what must never change is the resulting state, or boot recovery becomes a
+    // duplicate-notification bug.
+    test('a second reconcile changes nothing that is armed', () async {
       await service().reconcile(selfUid: selfUid);
-      final afterFirst = List<String>.from(scheduler.calls);
+      final afterFirst = Set<ScheduledReminder>.from(scheduler.armed);
 
+      scheduler.calls.clear();
       await service().reconcile(selfUid: selfUid);
-      expect(scheduler.calls, afterFirst,
+
+      expect(scheduler.armed, afterFirst,
           reason: 'boot recovery is the same function, not a special case');
-      expect(scheduler.armed, hasLength(21));
+      expect(scheduler.calls.where((c) => c.startsWith('cancel')), isEmpty,
+          reason: 'nothing moved, so nothing may be torn down');
     });
 
     test('a third run changes nothing either', () async {
       await service().reconcile(selfUid: selfUid);
       await service().reconcile(selfUid: selfUid);
-      final calls = scheduler.calls.length;
+      final armed = Set<ScheduledReminder>.from(scheduler.armed);
+      scheduler.calls.clear();
+
       await service().reconcile(selfUid: selfUid);
-      expect(scheduler.calls, hasLength(calls));
+      expect(scheduler.armed, armed);
+      expect(scheduler.calls.where((c) => c.startsWith('cancel')), isEmpty);
     });
   });
 
@@ -178,6 +193,75 @@ void main() {
       expect(tomorrow.hasTappedToday, isFalse);
       expect(scheduler.armed.where((r) => r.day == day('2026-08-18')),
           hasLength(3));
+    });
+  });
+
+  group('reconcile repairs a platform wiped behind its back', () {
+    // MEASURED ON THE POCO F3, Phase 2 device pass, stock power settings:
+    //
+    //   fresh launch + reconcile  → 21 alarms armed
+    //   force-stop                → 0 armed   (Android cancels them all)
+    //   reopen + reconcile        → STILL 0
+    //
+    // Nothing tells the app. `LocalStore` still held all 21 as pending, so the
+    // old `desired.difference(currentlyScheduled)` was empty and re-armed
+    // nothing. The app was silently and permanently inert — the one failure
+    // this project cannot detect in itself — and on HyperOS a force-stop is an
+    // ordinary user action: swiping from recents, "clear all", any task killer.
+    //
+    // The store records what we ASKED for. It is never evidence of what the
+    // platform HOLDS, and only one of those may be trusted.
+
+    test('re-arms everything after a force-stop clears the platform', () async {
+      await service().reconcile(selfUid: selfUid);
+      expect(scheduler.armed, hasLength(21));
+      expect(await store.pendingReminders(), hasLength(21),
+          reason: 'the store believes all 21 are armed');
+
+      scheduler.platformWipedByForceStop();
+      expect(scheduler.armed, isEmpty);
+
+      await service().reconcile(selfUid: selfUid);
+      expect(scheduler.armed, hasLength(21),
+          reason: 'reconcile must MAKE REALITY MATCH, not trust its own record '
+              'of what it once asked for');
+    });
+
+    test('and it repairs a PARTIAL loss too', () async {
+      // An OEM cleaner that drops some rather than all. Same principle, and the
+      // count-based check a diff would do cannot see it either.
+      await service().reconcile(selfUid: selfUid);
+      final survivors = scheduler.armed.take(5).toSet();
+      scheduler.armed
+        ..clear()
+        ..addAll(survivors);
+
+      await service().reconcile(selfUid: selfUid);
+      expect(scheduler.armed, hasLength(21));
+    });
+
+    test('repairing is still idempotent in EFFECT', () async {
+      // Asserting the whole desired set means the call log grows every
+      // reconcile — that is the cost, and it is cheap. What must not change is
+      // what ends up armed, or boot recovery becomes a duplicate bug.
+      await service().reconcile(selfUid: selfUid);
+      final armed = Set<ScheduledReminder>.from(scheduler.armed);
+      await service().reconcile(selfUid: selfUid);
+      await service().reconcile(selfUid: selfUid);
+      expect(scheduler.armed, armed);
+      expect(await store.pendingReminders(), armed);
+      expect(armed, hasLength(21));
+    });
+
+    test('a tap still cancels the rest of the day after a wipe', () async {
+      // The repair must not resurrect reminders the day no longer wants.
+      await service().tap(selfUid: selfUid);
+      scheduler.platformWipedByForceStop();
+
+      await service().reconcile(selfUid: selfUid);
+      expect(scheduler.armed.where((r) => r.day == day('2026-08-17')), isEmpty,
+          reason: 'today is tapped, so it must stay cancelled through a repair');
+      expect(scheduler.armed, hasLength(18));
     });
   });
 
@@ -343,14 +427,16 @@ void main() {
       clock = FixedClock(at(madrid, 2026, 10, 22, 6));
 
       await service().reconcile(selfUid: selfUid);
-      final afterFirst = List<String>.from(scheduler.calls);
+      final afterFirst = Set<ScheduledReminder>.from(scheduler.armed);
       expect(daysCovered(scheduler.armed), contains(day('2026-10-26')),
           reason: 'the premise: the window really does cross the transition');
 
+      scheduler.calls.clear();
       await service().reconcile(selfUid: selfUid);
-      expect(scheduler.calls, afterFirst,
+      expect(scheduler.armed, afterFirst);
+      expect(scheduler.calls.where((c) => c.startsWith('cancel')), isEmpty,
           reason: 'the stored instants must round-trip exactly, or every '
-              'reconcile churns all 21 alarms');
+              'reconcile tears down and rebuilds all 21 alarms');
     });
 
     test('every alarm keeps its named wall-clock time across the change',
@@ -367,9 +453,11 @@ void main() {
     test('the spring change round-trips too', () async {
       clock = FixedClock(at(madrid, 2027, 3, 26, 6));
       await service().reconcile(selfUid: selfUid);
-      final afterFirst = List<String>.from(scheduler.calls);
+      final afterFirst = Set<ScheduledReminder>.from(scheduler.armed);
+      scheduler.calls.clear();
       await service().reconcile(selfUid: selfUid);
-      expect(scheduler.calls, afterFirst);
+      expect(scheduler.armed, afterFirst);
+      expect(scheduler.calls.where((c) => c.startsWith('cancel')), isEmpty);
     });
   });
 

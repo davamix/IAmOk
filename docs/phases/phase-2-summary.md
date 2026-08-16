@@ -1,14 +1,14 @@
 # Phase 2 — Watched side · summary
 
-**Date:** 2026-08-16 · **Status:** Code complete and reviewed. **The device exit criteria are NOT
-met** — no handset was attached. · **Next:** the device pass, then Phase 3
+**Date:** 2026-08-17 · **Status:** Complete. Reviewed, and **verified on real hardware with stock
+power settings — every exit criterion passes.** · **Next:** the owner's review, then Phase 3
 
 Phase 1 was a domain layer and a stock Flutter counter scaffold. Phase 2 built the four layers above
 it and made the app real: `LocalStore`, `AlarmScheduler`, `NotificationService` and its channels, the
 `Clock`, the Tap screen, and the debug harness. It also landed the **two decisions carried in from
 the Phase 1 gate**, which are the parts most worth reading.
 
-**517 tests**, up from 328. `flutter analyze` clean. `flutter build apk --debug` succeeds.
+**521 tests**, up from 328. `flutter analyze` clean. `flutter build apk --debug` succeeds.
 
 ---
 
@@ -359,48 +359,110 @@ That is ADR-0002's claim tested against the case that could have falsified it.
 
 ---
 
-## Device testing — NOT DONE
+## Device testing — DONE, on stock power settings
 
-**No handset was attached during this phase.** `flutter devices` and `adb devices -l` both reported
-nothing but the Windows and Edge targets, so none of PLAN.md's four exit criteria has been observed
-on hardware.
+**POCO F3 · `M2012K11AG` · Android 13 (API 33) · Xiaomi HyperOS `OS1.0` (MIUI `V816.0.6.0.TKHEUXM`,
+security patch 2024-03-01) · Europe/Madrid · 2026-08-17.**
 
-| Device | Android | Skin | Power settings | Result |
-|---|---|---|---|---|
-| POCO F3 (`M2012K11AG`) | 13 / API 33 | HyperOS 1.0 | — | **NOT RUN — device not connected** |
+**Power settings were stock, and that is evidence rather than an assumption.** Captured before the
+app was launched for the first time: not on the battery-optimisation whitelist, standby bucket 50,
+`POST_NOTIFICATIONS` `granted=false` (the API 33 default), fresh install with no prior data.
 
-`docs/testing/device-matrix.md` says a checklist that only records passes is not evidence. A
-checklist that records nothing is less than that, so this is stated as the outstanding work rather
-than softened.
+| # | Criterion | Result |
+|---|---|---|
+| 1 | Reminders exist at 12:00 / 18:00 / 21:00 local | **PASS** — 21 alarms registered with `AlarmManager` as `RTC_WAKEUP`, at exactly 12:00/18:00/21:00 Europe/Madrid across 7 consecutive days. Read from `dumpsys alarm`, not from the app's own belief. |
+| 2 | A tap cancels the rest of the day | **PASS** — 21 → 18, that day's three gone, the following six untouched. |
+| 3 | Alarms survive a reboot | **PASS, with a caveat** — restored without the app being opened, but **~76 s after `sys.boot_completed`**. See below. |
+| 4 | The window re-arms without opening the app | **PASS** — the boot receiver restored the full set with the app never launched, and correctly kept that day's already-tapped reminders cancelled. |
+| 5 | Target disabled for the rest of the day, re-enables at local midnight | **PASS** — disabled immediately after the tap; enabled again after rolling the date forward with the harness. |
+| 6 | Notification permission denial is detected and explained | **PASS** — with the permission denied and user-fixed, the banner appears with a working *"Turn reminders on"* action, in the reserved band, and the target does not move. |
+| 7 | The debug harness works on-device | **PASS** — force date, show clock, run reconcile, fire each reminder, compare store against platform, seed/revoke watchers, dump store. |
 
-**Outstanding, and the whole point of the phase:**
+Two things verified that are not on the checklist but are worth recording. **First run requests
+`POST_NOTIFICATIONS`** — confirmed denied by default on this device, so without the request the app
+would have been permanently inert and the banner would have blamed the user for a permission never
+asked for. And the **notification copy is verbatim**: `channel=reminders`, importance 4,
+`android.title="I Am Ok"`, `android.text="Remember to tap I'm OK today."`
 
-- [ ] Reminders fire at 12:00, 18:00, 21:00 local
-- [ ] A tap cancels the remaining reminders for that day
-- [ ] Alarms survive a reboot
-- [ ] The window re-arms for following days **without the app being opened**
-- [ ] The tap target is disabled for the rest of the day and re-enables at local midnight
-- [ ] Notification permission denial is detected and explained
-- [ ] The debug harness works on-device
+### The defect the device pass found, which no test could
 
-**Stock power settings first**, then repeat with Autostart and battery optimisation relaxed. The
-difference between the two passes is the finding: it decides whether onboarding must walk a family
-through Autostart, or whether §9's scheduled-function escape hatch has to be un-deferred.
+**A force-stop cancels every alarm, and `reconcile()` did not repair it.**
 
-Setup reminder: File transfer (MTP) mode, USB debugging, and Xiaomi additionally needs
-"Install via USB".
+```
+fresh launch + reconcile  →  21 armed
+force-stop                →   0 armed
+reopen + reconcile        →   0 armed        ← permanently inert
+```
 
-### One exit criterion deserves a note before it is tested
+Android cancels all of an app's `AlarmManager` alarms when it is force-stopped, and nothing tells
+the app. `LocalStore` still held all 21 as pending, so `desired.difference(currentlyScheduled)` was
+**empty** and re-armed nothing. The app went silently and permanently inert — the one failure mode
+this project cannot detect in itself, and precisely the direction
+`LocalStore.replacePendingReminders` names as the one that must never occur.
 
-*"The window re-arms without opening the app"* has no logic-bearing alarm behind it on this side, by
-design. The mechanism is the **7-day rolling window**: reconcile arms seven days ahead, so reminders
-keep firing for a week without the app running, and the watched person opens the app daily to tap,
-which re-arms it. §10's claim that the watched side can stay display-only rests on that, and the
-extension to `through + 7` during away is what covers the one case where she genuinely does not open
-it for a week.
+**This is not an exotic state on this handset.** The device matrix already says *"Lock in recents |
+Off | Swiping the app from recents kills it and its alarms."* Swiping from recents, "clear all", any
+task killer, or Settings → Force stop all reach it, and an elderly user tidying her phone does
+exactly that.
 
-So the device check is *do days 2–7 fire with the app never opened*, not *does something re-arm at
-midnight*. Nothing runs at midnight, deliberately.
+The fix is one line of intent: **`reconcile()` now asserts the whole desired set rather than the
+difference.** Scheduling is idempotent by id — `zonedSchedule` on an existing id replaces it — so
+re-asserting 21 alarms costs a handful of local binder calls and makes the operation self-healing
+whatever the platform's true state. Cancellation still uses the diff, because a reminder that should
+no longer exist cannot be removed by re-asserting the ones that should.
+
+The underlying rule, now written into `AlarmScheduler`: **the store records what we asked for. It is
+never evidence of what the platform holds, and only one of those may be trusted.**
+
+Re-verified on the same device after the fix:
+
+```
+fresh launch + reconcile  →  21 armed
+force-stop                →   0 armed
+reopen + reconcile        →  21 armed        ← repaired
+```
+
+It is also the answer to the security review's `allowBackup` finding, which is the same shape
+arriving by restore rather than by force-stop, and it is what the harness's *"Compare store against
+platform"* control exists to surface — it reported `store says 21 / platform has 24 / DIVERGED`
+during the session, which is what prompted the investigation.
+
+### Boot recovery is delayed, not free
+
+`ScheduledNotificationBootReceiver` restored the alarms with the app never opened — but **76 seconds
+after `sys.boot_completed`**, not immediately. A first measurement at 60 s read zero and looked like
+a hard failure. It was not.
+
+Nothing in this design depends on sub-minute boot recovery — the earliest reminder is at 12:00 — so
+this costs nothing today. It is recorded because it is the kind of number that quietly becomes
+load-bearing later, and because **a check made too early reads as a failure**. Anyone re-running
+this should poll for several minutes before concluding anything.
+
+### Found and not fixed
+
+**The harness's date picker opens on the UTC day, not the local day.** At 00:17 CEST it offered
+16 August while the device said the 17th, because `initialDate` is built from `clock.now()`, which
+is UTC by design. Debug-only and cosmetic, but it is the same "two zones on one screen" mistake the
+UI review found in the tap-time rendering, so it is named rather than quietly left.
+
+### Not observed
+
+- **A reminder firing at its natural 12:00 / 18:00 / 21:00.** The session ran from 00:06 to 00:30
+  local. What is verified is that the alarms are registered with the OS at exactly those instants,
+  and that firing one through the harness posts the approved copy on the right channel. Watching one
+  arrive unattended is a day's wait and is the obvious next check.
+- **The window draining past day 7 with the app never opened.** By design it would: the depth is
+  seven days and the watched person opens the app daily to tap. §10's away extension to `through + 7`
+  is what covers the one case where she genuinely does not.
+- **The relaxed-settings pass.** `docs/testing/device-matrix.md` asks for stock first, then a repeat
+  with Autostart and battery optimisation relaxed, with the *difference* being the finding. Stock
+  passed every criterion, so there is nothing yet for a second pass to explain — it becomes
+  worthwhile if Phase 3's logic-bearing alarm behaves differently.
+
+**The headline result: with stock HyperOS power settings, on the handset the device matrix calls the
+harshest mainstream case, every Phase 2 exit criterion passes.** That is the OEM risk this phase was
+scheduled second to retire, and it is substantially retired for display-only alarms. Phase 3's
+`android_alarm_manager_plus` isolate is a different mechanism and does not inherit this result.
 
 ---
 
@@ -408,7 +470,7 @@ midnight*. Nothing runs at midnight, deliberately.
 
 ```
 flutter analyze                                   No issues found!
-flutter test                                      All tests passed!  (517 tests)
+flutter test                                      All tests passed!  (521 tests)
 dart run tools/models/away_warning_model.dart     superseded: 4 failure(s)   decided: 0 failure(s)
 flutter build apk --debug                         Built app-debug.apk
   └─ GeneratedPluginRegistrant.java               3 registrations, timezone absent (ADR-0002 holds)

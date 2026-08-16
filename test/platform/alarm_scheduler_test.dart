@@ -74,7 +74,7 @@ void main() {
     };
 
     return scheduler
-        .apply(toCancel: inMadrid, toSchedule: inNewYork)
+        .apply(toCancel: inMadrid, desired: inNewYork)
         .then((_) {
       final firstSchedule =
           notifications.calls.indexWhere((c) => c.startsWith('schedule'));
@@ -92,7 +92,7 @@ void main() {
   test('a cancel-only diff issues no schedules', () async {
     await scheduler.apply(
       toCancel: {reminderOn('2026-08-17', ReminderSlot.midday)},
-      toSchedule: const {},
+      desired: const {},
     );
     expect(notifications.calls, ['cancel 2026-08-17 midday']);
   });
@@ -100,13 +100,13 @@ void main() {
   test('a schedule-only diff issues no cancels', () async {
     await scheduler.apply(
       toCancel: const {},
-      toSchedule: {reminderOn('2026-08-17', ReminderSlot.night)},
+      desired: {reminderOn('2026-08-17', ReminderSlot.night)},
     );
     expect(notifications.calls, ['schedule 2026-08-17 night']);
   });
 
   test('an empty diff touches the platform not at all', () async {
-    await scheduler.apply(toCancel: const {}, toSchedule: const {});
+    await scheduler.apply(toCancel: const {}, desired: const {});
     expect(notifications.calls, isEmpty,
         reason: 'a no-op reconcile must be a no-op at the platform too');
   });

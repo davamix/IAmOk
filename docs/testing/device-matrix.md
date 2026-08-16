@@ -1,7 +1,8 @@
 # Device matrix
 
-**Date:** 2026-08-15 · **Status:** Primary physical device confirmed. Sufficient for Phases 2–3;
-**Phase 4 needs a second handset** and two coverage gaps are named below.
+**Date:** 2026-08-17 · **Status:** Primary physical device confirmed **and exercised — Phase 2
+passed every criterion here on stock power settings.** Sufficient for Phases 2–3; **Phase 4 needs a
+second handset** and two coverage gaps are named below.
 
 ## Build targets
 
@@ -18,7 +19,7 @@ minSdk 24 matters here more than usual: the watched user's phone is likely to be
 
 | Device | Kind | Android | Notes |
 |---|---|---|---|
-| **POCO F3** — `M2012K11AG`, codename `alioth`, arm64 | **Physical** — the owner's own phone | **13 (API 33)** | Xiaomi **HyperOS 1.0**, MIUI build `V816.0.6.0.TKHEUXM`, security patch 2024-03-01. Confirmed over adb 2026-08-15. |
+| **POCO F3** — `M2012K11AG`, codename `alioth`, arm64 | **Physical** — the owner's own phone | **13 (API 33)** | Xiaomi **HyperOS `OS1.0`**, MIUI build `V816.0.6.0.TKHEUXM`, security patch 2024-03-01. Confirmed over adb 2026-08-15; **Phase 2 run 2026-08-17, all criteria pass on stock settings.** |
 | `Medium_Phone_API_36.0` | Emulator AVD | 36 | Verified present. Useless for the questions that matter — see below. |
 
 **This is the best possible primary device for this project, and that is not a compliment to the
@@ -116,16 +117,30 @@ Run against **stock power settings first** — the default state is the one real
 if something fails, repeat with battery optimisation disabled to establish whether the failure is
 fixable by onboarding guidance or not at all.
 
-**Phase 2 — watched side**
+**Phase 2 — watched side** · **run 2026-08-17 on the POCO F3, stock power settings — all pass.**
+Full evidence in [phase-2-summary.md](../phases/phase-2-summary.md).
 
-- [ ] Reminders fire at 12:00, 18:00, 21:00 local
-- [ ] A tap cancels the remaining reminders for that day
-- [ ] Alarms survive a reboot
-- [ ] The window re-arms for following days **without the app being opened**
-- [ ] The tap target is disabled for the rest of the day and re-enables at local midnight
-- [ ] Notification permission denial is detected and explained
-- [ ] The debug harness works on-device: force date, fire alarm now, dump `LocalStore`, run
+- [x] Reminders fire at 12:00, 18:00, 21:00 local — *registered with `AlarmManager` at exactly those
+      instants across 7 days; a reminder arriving unattended at 12:00 is still unobserved*
+- [x] A tap cancels the remaining reminders for that day
+- [x] Alarms survive a reboot — **~76 s after `sys.boot_completed`, not immediately**
+- [x] The window re-arms for following days **without the app being opened**
+- [x] The tap target is disabled for the rest of the day and re-enables at local midnight
+- [x] Notification permission denial is detected and explained
+- [x] The debug harness works on-device: force date, fire alarm now, dump `LocalStore`, run
       `reconcile()`. Without it every later item on this page costs a day to verify.
+
+> **Two things this run established that anyone repeating it needs.**
+>
+> **A force-stop cancels every alarm the app has registered**, and nothing tells the app. Before the
+> fix, reopening and reconciling re-armed *nothing*, because the diff was computed against the app's
+> own store rather than against the platform — 21 armed → force-stop → 0 → reopen → still 0. On this
+> handset that is an everyday action, not an exotic one. `reconcile()` now asserts the whole desired
+> set, and the repair is verified on-device. **Any alarm test must therefore treat "was the app
+> force-stopped" as a variable**, including a swipe from recents.
+>
+> **Boot recovery is delayed.** Checking at 60 s reads zero and looks like a hard failure; the alarms
+> arrive at ~76 s. Poll for several minutes before concluding anything.
 
 **Phase 3 — watcher side**
 

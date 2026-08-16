@@ -56,6 +56,20 @@ The only screen the watched person needs.
 The Away control is present but visibly secondary, and not adjacent to the tap target. While an
 away period is active it reads *"I'm not away"*.
 
+**The screen names who will be notified when she taps.** Decided at the Phase 1 gate; copy and the
+empty-list case are owed in Phase 2, see [phase-2-brief.md](../phases/phase-2-brief.md).
+
+> **Nothing else about watchers is ever shown on this screen — no "X started watching you", no
+> "Y stopped watching you", no "nobody is watching you".** Owner's decision, recorded so it is not
+> re-proposed. If everyone stops watching, that is a family problem or a lack of communication, not
+> the app's responsibility. And a watched person overwhelmed by several similar-sounding status
+> messages is worse off than one reading a single unchanging line — elderly users are not ready to
+> read a lot, and may not distinguish what the different messages mean.
+>
+> This knowingly accepts the exposure the Phase 1 security review raised: if the last watcher
+> revokes, she goes on tapping and no surface says otherwise. That is the trade, made deliberately
+> in favour of a screen she can read at a glance.
+
 Reminders — display-only notifications at **12:00, 18:00, 21:00** watched-local — are cancelled by
 the tap and are absent entirely on away days.
 

@@ -126,6 +126,10 @@ always null. Retrofitting it later means touching every call site and every test
 
 Fake data, no backend. Proves the mechanism that everything else assumes works.
 
+**Start from [phases/phase-2-brief.md](phases/phase-2-brief.md)** — it carries two decisions taken
+at the Phase 1 gate that must land in this phase: the domain must be told whether a notification can
+actually be **delivered**, and the Tap screen names **who will be notified** and says nothing else.
+
 **Deliverables** — `LocalStore` (sqflite), `AlarmScheduler`, `NotificationService` + channels, the
 minimal Tap screen, and the debug harness (force date, fire alarm now, dump store, run reconcile).
 

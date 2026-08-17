@@ -644,11 +644,18 @@ force-stop fix does not repair it, because re-asserting the whole desired set ca
 that is no longer in the desired set. **Phase 3 puts a logic-bearing warning alarm through the same
 code path, and there §10 rates a false fire as costing "everything".**
 
-**Deliberately not fixed here.** Serialising `reconcile()` is a real decision rather than a patch:
-Phase 3 adds an alarm isolate and Phase 4 an FCM isolate, both calling the same entry point, so the
-question is cross-**isolate** exclusion and not merely an in-process mutex — and §4 is explicit that
-the three isolates share no memory. Settling that belongs with the Phase 3 alarm design. Recorded
-here so it is not rediscovered from the symptom.
+**Fixed at the start of Phase 3 as [ADR-0006](../architecture/decisions/0006-reconcile-is-serialised-on-disk.md)** —
+a lease in `LocalStore`, because §4's three isolates share no memory and the store is the only thing
+all of them can see. Reading state is never gated; only changing alarms is, which is what makes the
+same mechanism safe for the watcher's alarm isolate, where skipping the *decision* would be
+dangerous but skipping the *scheduling* is free.
+
+The fix had a second half that was not obvious and is worth carrying forward: **the lock alone made
+this worse.** It correctly refused the zone-corrected reconcile, so nothing repaired the wall times
+and a fresh install armed the whole window at 14:00 / 20:00 / 23:00 — a 23:00 nudge to someone who
+may be asleep, in place of one stray alarm at a correct time. Caching the device zone *before* the
+first reconcile removes the UTC pass instead of undoing it. Re-measured on a fresh install: 18 alarms
+at the right times, 18 matching store rows, nothing stranded.
 
 ### Not observed
 

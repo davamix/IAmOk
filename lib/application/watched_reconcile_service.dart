@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:timezone/timezone.dart' as tz;
 
 import '../data/local_store.dart';
@@ -106,24 +108,91 @@ class WatchedReconcileService {
     required this.clock,
     required this.alarms,
     required this.notificationsEnabled,
+    this.lockOwner = 'ui',
   });
 
   final LocalStore store;
   final Clock clock;
   final AlarmScheduler alarms;
 
+  /// Names the caller in the reconcile lease, so a held lock is legible in a
+  /// `dump()` instead of being an opaque token.
+  ///
+  /// Phase 3's alarm isolate passes `'alarm'` and Phase 4's FCM handler `'fcm'`.
+  /// Exclusion itself does not key on this — the owner string appends the
+  /// instant, so two runs from the same isolate are still distinct holders.
+  final String lockOwner;
+
   /// Asked afresh on every reconcile rather than cached. Android can revoke
   /// `POST_NOTIFICATIONS` at any moment, including while the app is open —
   /// §13's whole argument is that permissions are continuously observed state.
   final Future<bool> Function() notificationsEnabled;
 
+  /// How long a reconcile may hold the lock before anyone may take it.
+  ///
+  /// Long enough for the slowest legitimate run — Phase 4 adds a Firestore read
+  /// with its own timeout inside this window — and short enough that a bare
+  /// isolate killed mid-reconcile does not block the next one for a noticeable
+  /// time. It is a lease, so the only cost of overshooting is a reconcile that
+  /// declines to touch alarms once.
+  static const Duration lockLease = Duration(seconds: 30);
+
+  /// Distinguishes this isolate's runs from another isolate's.
+  ///
+  /// **Randomness is correct here and would be a defect one file over.**
+  /// `AlarmIds` must be a pure function of its inputs, because its output is
+  /// handed to the platform and has to still mean the same thing in the next
+  /// process — deriving it from a seeded hash is what stranded 54 alarms on the
+  /// POCO. This value is the opposite kind of thing: an **ephemeral identity**,
+  /// never persisted beyond a lease, never recomputed, and only ever compared
+  /// for equality against itself. Two isolates must disagree about it, which is
+  /// exactly what a random number guarantees and a derived one does not.
+  static final int _isolateSalt = Random().nextInt(0x7fffffff);
+
+  /// Distinguishes this isolate's runs from each other, since two can start
+  /// inside the same microsecond and a clock-derived token would collide.
+  static int _sequence = 0;
+
   /// Reconciles, and returns what the screen should show.
+  ///
+  /// ## Two halves, and only one of them takes the lock
+  ///
+  /// Reading state and returning it is **always** safe and always happens: the
+  /// screen must render whether or not another isolate is mid-reconcile, and a
+  /// caller that got no state would show the *"this phone could not get ready"*
+  /// error for a condition that is not an error.
+  ///
+  /// Changing the alarm set is the half that races, so it is the half that is
+  /// serialised. When the lock is already held, this returns the state it read
+  /// and touches no alarms — correct, because whoever holds the lock is
+  /// computing the same desired set from the same store and is about to assert
+  /// it. `reconcile()` is idempotent, so skipping a redundant run costs nothing;
+  /// running it concurrently strands an alarm that can never be cancelled.
+  ///
+  /// **This split is what makes the same lock safe on the watcher side**, where
+  /// skipping outright would be dangerous: the alarm isolate must always reach
+  /// its warn/don't-warn decision, because silence is the one failure this app
+  /// cannot detect in itself. It is the *scheduling* it may skip, never the
+  /// speaking.
   Future<WatchedState> reconcile({required String selfUid}) async {
     final now = clock.now();
     final zone = await _deviceZone();
 
     final links = await store.linksWatching(selfUid);
     final checkedIn = await store.checkedInDays();
+
+    final owner = '$lockOwner:$_isolateSalt:${_sequence++}';
+    final holdsLock = await store.acquireReconcileLock(
+      owner: owner,
+      now: now,
+      lease: lockLease,
+    );
+
+    // Read AFTER the lock is settled. Reading before it means diffing against a
+    // snapshot another isolate may already be replacing, which is the whole
+    // defect. When the lock was not taken the value is still read and still fed
+    // through the reconciler, because the result carries the audience the screen
+    // needs — it is simply not applied.
     final pending = await store.pendingReminders();
 
     final result = WatchedReconciler.reconcile(
@@ -139,23 +208,35 @@ class WatchedReconcileService {
       links: links,
     );
 
-    // **toCancel before the desired set**, and the ordering is enforced inside
-    // `AlarmScheduler.apply` rather than here, so no caller can get it wrong.
-    //
-    // The whole `desired` set is handed over rather than `toSchedule`: a
-    // force-stop clears every platform alarm without touching this store, so a
-    // diff computed against the store would re-arm nothing and leave the app
-    // permanently inert. Measured on hardware — see `AlarmScheduler.apply`.
-    final exact = await alarms.apply(
-      toCancel: result.toCancel,
-      desired: result.desired,
-    );
+    var exact = true;
+    if (holdsLock) {
+      try {
+        // **toCancel before the desired set**, and the ordering is enforced
+        // inside `AlarmScheduler.apply` rather than here, so no caller can get
+        // it wrong.
+        //
+        // The whole `desired` set is handed over rather than `toSchedule`: a
+        // force-stop clears every platform alarm without touching this store, so
+        // a diff computed against the store would re-arm nothing and leave the
+        // app permanently inert. Measured on hardware — see
+        // `AlarmScheduler.apply`.
+        exact = await alarms.apply(
+          toCancel: result.toCancel,
+          desired: result.desired,
+        );
 
-    // Recorded only after the platform calls returned. A crash in between
-    // leaves the store believing less is armed than really is, which the next
-    // reconcile repairs by scheduling over the same ids. The opposite order
-    // would leave a reminder that never fires and nothing to notice it.
-    await store.replacePendingReminders(result.desired);
+        // Recorded only after the platform calls returned. A crash in between
+        // leaves the store believing less is armed than really is, which the
+        // next reconcile repairs by scheduling over the same ids. The opposite
+        // order would leave a reminder that never fires and nothing to notice
+        // it.
+        await store.replacePendingReminders(result.desired);
+      } finally {
+        // Released even if the platform threw, so one failure does not lock the
+        // app out of its own alarms until the lease expires.
+        await store.releaseReconcileLock(owner);
+      }
+    }
 
     final today = DayKey.fromInstant(now, zone);
     return WatchedState(

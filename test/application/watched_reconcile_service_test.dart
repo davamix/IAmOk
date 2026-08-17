@@ -36,8 +36,22 @@ class _RecordingScheduler implements AlarmScheduler {
       calls.add('schedule ${reminder.day} ${reminder.slot.name}');
       armed.add(reminder);
     }
+    if (onApply != null) {
+      final reentrant = onApply!;
+      onApply = null; // Once, or it recurses forever.
+      await reentrant();
+    }
     return exact;
   }
+
+  /// Runs once, **during** the next [apply], then clears itself.
+  ///
+  /// This is how the concurrency defect is reproduced deterministically. The
+  /// real one was two isolates overlapping on a phone; here a second reconcile
+  /// begins while the first is inside the platform call, which is the same
+  /// interleaving and is the moment the first run has scheduled alarms but has
+  /// not yet written the store.
+  Future<void> Function()? onApply;
 
   /// What a force-stop does: every platform alarm is cancelled, and nothing
   /// tells the app. The store is untouched.
@@ -486,6 +500,125 @@ void main() {
       expect(days.reduce((a, b) => a > b ? a : b), day('2026-08-22'));
       expect(inMadrid, isNot(days),
           reason: 'the day set really moved, not just the instants');
+    });
+  });
+
+  /// **The concurrency defect, reproduced.**
+  ///
+  /// Measured on the POCO F3 on 2026-08-17 and reproduced across two fresh
+  /// installs: the store held 18 pending reminders while `dumpsys alarm` held
+  /// 19. The extra was armed at 21:00 UTC by a reconcile that ran before the
+  /// device zone was cached, and **nothing could ever cancel it** — `toCancel`
+  /// is `currentlyScheduled − desired`, and that day had left the window.
+  ///
+  /// The invariant every test here asserts is the one the device broke: **what
+  /// the platform holds and what the store believes must not diverge.**
+  group('two reconciles that overlap', () {
+    /// 21:55 Madrid is 19:55 UTC, and that gap is the whole scenario: under UTC
+    /// the 21:00 night slot is still an hour away and therefore desired, while
+    /// under Europe/Madrid it passed at 21:00 and is not. A run that arms it and
+    /// a run that does not want it are exactly what strands an alarm.
+    void atTheZoneGap() =>
+        clock = FixedClock(at(madrid, 2026, 8, 17, 21, 55));
+
+    test('strand no alarm the store does not know about', () async {
+      atTheZoneGap();
+      // A fresh install: the zone has not been cached yet, so the first
+      // reconcile takes the documented UTC fallback.
+      await store.setDeviceTimezone('UTC');
+
+      // The second run begins while the first is inside the platform call —
+      // after it armed the UTC set, before it wrote the store.
+      scheduler.onApply = () async {
+        await store.setDeviceTimezone('Europe/Madrid');
+        await service().reconcile(selfUid: selfUid);
+      };
+
+      await service().reconcile(selfUid: selfUid);
+
+      expect(scheduler.armed, await store.pendingReminders(),
+          reason: 'the platform and the store must agree. Without the lock the '
+              'inner run diffs against a snapshot the outer run is about to '
+              'replace, and the loser leaves an alarm armed with no store row '
+              'to ever cancel it.');
+    });
+
+    test('the inner run touches no alarms at all', () async {
+      atTheZoneGap();
+      await store.setDeviceTimezone('Europe/Madrid');
+      await service().reconcile(selfUid: selfUid);
+
+      final before = List<String>.from(scheduler.calls);
+      scheduler.onApply = () async => service().reconcile(selfUid: selfUid);
+      scheduler.calls.clear();
+
+      await service().reconcile(selfUid: selfUid);
+
+      final scheduledByInner = scheduler.calls.length - before.length;
+      expect(scheduledByInner, lessThanOrEqualTo(0),
+          reason: 'the inner run must add no platform calls of its own');
+    });
+
+    test('the inner run still returns state the screen can render', () async {
+      // The half that must never be skipped. A caller that got nothing would
+      // show "this phone could not get ready" for a condition that is not an
+      // error — the Phase 2 defect where a failure replaced the whole screen.
+      await seedWatchers(['Ana']);
+      await store.setDeviceTimezone('Europe/Madrid');
+
+      WatchedState? inner;
+      scheduler.onApply =
+          () async => inner = await service().reconcile(selfUid: selfUid);
+      await service().reconcile(selfUid: selfUid);
+
+      expect(inner, isNotNull);
+      expect(inner!.today, day('2026-08-17'));
+      expect(inner!.audience.names, ['Ana'],
+          reason: 'the screen still says who will be told');
+    });
+  });
+
+  group('the reconcile lock', () {
+    test('is released, so the next reconcile does its work', () async {
+      await service().reconcile(selfUid: selfUid);
+      expect(await store.reconcileLockHolder(), isNull,
+          reason: 'a lease left behind would block every later reconcile for '
+              'as long as it had to run, which reads exactly like the app '
+              'being broken');
+
+      scheduler.calls.clear();
+      await service().reconcile(selfUid: selfUid);
+      expect(scheduler.calls, isNotEmpty);
+    });
+
+    test('is released even when the platform throws', () async {
+      scheduler.onApply = () async => throw StateError('exact alarms refused');
+
+      await expectLater(
+        service().reconcile(selfUid: selfUid),
+        throwsA(isA<StateError>()),
+      );
+
+      expect(await store.reconcileLockHolder(), isNull,
+          reason: 'one platform failure must not lock the app out of its own '
+              'alarms until the lease expires');
+    });
+
+    test('names the isolate that holds it', () async {
+      // Only for legibility in a dump — but a lock whose holder is opaque is a
+      // lock nobody can debug from a device at 03:00.
+      scheduler.onApply = () async {
+        final holder = await store.reconcileLockHolder();
+        expect(holder!.owner, startsWith('alarm:'));
+      };
+
+      await WatchedReconcileService(
+        store: store,
+        clock: clock,
+        alarms: scheduler,
+        notificationsEnabled: () async => true,
+        lockOwner: 'alarm',
+      ).reconcile(selfUid: selfUid);
     });
   });
 

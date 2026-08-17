@@ -27,7 +27,9 @@ class LocalStore {
   /// The current schema version. Bump **and** add an `onUpgrade` branch — an
   /// installed app that loses its store loses its `warningsShownFor`, and the
   /// visible symptom is every standing warning firing again.
-  static const int schemaVersion = 1;
+  ///
+  /// **v2** adds `reconcile_lock`. See [acquireReconcileLock].
+  static const int schemaVersion = 2;
 
   static const String defaultDatabaseName = 'i_am_ok.db';
 
@@ -55,9 +57,11 @@ class LocalStore {
         }
       },
       onUpgrade: (db, from, to) async {
-        // Nothing to migrate yet. The branch exists so the next schema change
-        // is an edit rather than a decision.
-        throw StateError('no migration from v$from to v$to');
+        // Additive only, and deliberately not a drop-and-recreate: an installed
+        // app that loses this store loses `warningsShownFor`, and every standing
+        // warning fires again the next morning.
+        if (from < 2) await db.execute(_reconcileLockTable);
+        if (to > 2) throw StateError('no migration from v$from to v$to');
       },
     );
     return LocalStore._(db);
@@ -168,7 +172,21 @@ class LocalStore {
       set_by_name TEXT
     )
     ''',
+    _reconcileLockTable,
   ];
+
+  /// One row, or none. See [acquireReconcileLock] for why it exists.
+  ///
+  /// Deliberately carries **no** foreign key and nothing hangs off it, so the
+  /// `INSERT OR REPLACE` used to take the lock cannot cascade — the failure
+  /// `upsertLink` was fixed for.
+  static const String _reconcileLockTable = '''
+    CREATE TABLE reconcile_lock (
+      id         INTEGER PRIMARY KEY CHECK (id = 0),
+      owner      TEXT NOT NULL,
+      expires_at INTEGER NOT NULL
+    )
+    ''';
 
   // ---------------------------------------------------------------- settings
 
@@ -540,6 +558,117 @@ class LocalStore {
         }
       });
 
+  // ----------------------------------------------------------- reconcile lock
+
+  /// Tries to take the reconcile lock, returning whether it was taken.
+  ///
+  /// ## The failure this exists for
+  ///
+  /// `reconcile()` computes `toCancel` as `currentlyScheduled − desired`, where
+  /// `currentlyScheduled` is a **snapshot** of [pendingReminders]. Two runs that
+  /// overlap each diff against their own snapshot, and whichever writes second
+  /// replaces the row set without cancelling what it removed. The loser's alarms
+  /// stay registered with the platform carrying no store row — and are then
+  /// **unreachable forever**, because re-asserting the desired set cannot cancel
+  /// something that is no longer in it.
+  ///
+  /// Measured on the POCO F3 on 2026-08-17 and reproduced: a fresh install left
+  /// one reminder armed at 21:00 UTC that the store had no record of, because
+  /// the first reconcile ran before the device zone was cached and raced the
+  /// zone-corrected one behind it.
+  ///
+  /// ## Why it is a row and not a mutex
+  ///
+  /// §4: three isolates, sharing no memory. A Dart lock in the UI isolate is
+  /// invisible to the alarm isolate and to the FCM isolate, both of which call
+  /// the same `reconcile()`. The store is the only thing all three can see, so
+  /// the lock lives where the contract already is.
+  ///
+  /// ## Why it expires
+  ///
+  /// A bare isolate can be killed at any moment — that is its normal ending, not
+  /// an error — so a lock held until explicit release would eventually be held
+  /// forever by a process that no longer exists, and the app would go quietly
+  /// inert. That is the failure mode this project cannot detect in itself, so
+  /// the lock is a **lease**: [now] plus [lease], after which anyone may take it.
+  ///
+  /// [now] is a parameter rather than a clock read, like every other decision in
+  /// this codebase — the guard in `domain_purity_test.dart` covers this file.
+  ///
+  /// A [DatabaseException] — SQLite reporting the database busy under a
+  /// concurrent writer — is reported as **not acquired** rather than thrown. The
+  /// two are the same fact from the caller's side: somebody else is working, so
+  /// do not touch the alarm set. Failing closed is the safe direction, because a
+  /// skipped reconcile is repaired by the next one and a double reconcile is
+  /// what strands an alarm.
+  Future<bool> acquireReconcileLock({
+    required String owner,
+    required DateTime now,
+    required Duration lease,
+  }) async {
+    try {
+      return await _db.transaction(
+        (txn) async {
+          final rows = await txn.query('reconcile_lock', where: 'id = 0');
+          if (rows.isNotEmpty) {
+            final until = rows.first['expires_at'] as int;
+            // A live lease ALWAYS refuses, including to a caller presenting the
+            // same owner string. The first draft exempted the current holder so
+            // it could refresh rather than deadlock against itself, and a test
+            // caught what that actually buys: two runs whose owner tokens
+            // happen to match — same label, same instant — would each be handed
+            // the lock, and the exclusion would silently not exist. Nothing in
+            // this design acquires twice, so the exemption protected against
+            // nothing and disabled the mechanism under precisely the timing
+            // that makes it necessary.
+            if (until > now.millisecondsSinceEpoch) return false;
+          }
+          await txn.insert(
+            'reconcile_lock',
+            {
+              'id': 0,
+              'owner': owner,
+              'expires_at': now.add(lease).millisecondsSinceEpoch,
+            },
+            conflictAlgorithm: ConflictAlgorithm.replace,
+          );
+          return true;
+        },
+        // BEGIN EXCLUSIVE, so the write lock is taken before the read rather
+        // than upgraded after it. Two connections that both read first and then
+        // try to upgrade produce the classic deadlock, and the compare-and-set
+        // above would not be one.
+        exclusive: true,
+      );
+    } on DatabaseException {
+      return false;
+    }
+  }
+
+  /// Releases the lock, but **only if [owner] still holds it**.
+  ///
+  /// This is the only thing [owner] is for, and it is why callers must make it
+  /// **unique per acquisition** rather than merely descriptive. The case: a slow
+  /// run's lease expires, another isolate takes the lock, and then the slow run
+  /// finishes and releases. With a reused token it would free a lock that now
+  /// belongs to somebody else, and the exclusion would stop existing under
+  /// exactly the load that made it necessary.
+  Future<void> releaseReconcileLock(String owner) => _db.delete(
+        'reconcile_lock',
+        where: 'id = 0 AND owner = ?',
+        whereArgs: [owner],
+      );
+
+  /// Who holds the lock and until when, or null. For the debug harness.
+  Future<({String owner, DateTime expiresAt})?> reconcileLockHolder() async {
+    final rows = await _db.query('reconcile_lock', where: 'id = 0');
+    if (rows.isEmpty) return null;
+    return (
+      owner: rows.first['owner'] as String,
+      expiresAt: _instant(rows.first['expires_at'])!,
+    );
+  }
+
   // ------------------------------------------------------------- debug: dump
 
   /// Every table, as rows. The debug harness's *dump `LocalStore`*.
@@ -552,6 +681,7 @@ class LocalStore {
       'warnings_shown',
       'pending_alarms',
       'self_away',
+      'reconcile_lock',
     ];
     return {
       for (final table in tables) table: await _db.query(table),
@@ -568,6 +698,11 @@ class LocalStore {
           'links',
           'self_away',
           'settings',
+          // Cleared last and deliberately: a wipe is the harness resetting the
+          // world, and leaving a lease behind would block the next reconcile
+          // for as long as it had left to run, which reads exactly like the app
+          // being broken.
+          'reconcile_lock',
         ]) {
           await txn.delete(table);
         }

@@ -371,11 +371,24 @@ be absent or wrong — for two clauses that read correctly without it. Recorded 
 re-proposed; the cost of getting this wrong rises sharply after translation, which is why it was
 settled before Phase 3 wrote a single warning.
 
-**Still open — where the refused notification routes on tap.** It says *"Open the app to see what to
-do."* §13's health panel is Phase 7, so there is nothing yet for it to open. Proposed for Phase 3:
-it opens the watcher surface this phase builds, which carries the per-link access-lost state and its
-remediation from `LocalStore.accessLostCause`. That keeps the sentence honest — the app does show
-what to do — without pulling the panel forward. **Not yet approved.**
+**The refused notification opens the watcher surface Phase 3 builds**, which carries a per-link
+access-lost row rendering the remediation for the cause in `LocalStore.accessLostCause` — the three
+lines already approved in *Health panel* above. §13's full panel stays in Phase 7.
+
+That keeps *"Open the app to see what to do"* true. [ADR-0004](../architecture/decisions/0004-refused-is-not-unreachable.md)
+makes actionability the whole reason this fourth message exists rather than being folded into the
+offline one, so a tap that lands somewhere with no remediation would hollow it out — and a promise
+the device does not keep is the failure class this app is least able to afford.
+
+Rejected: opening the app with no routing (cheapest, and it makes the sentence false); pulling the
+health panel forward from Phase 7 (most faithful, and it is a screen nobody has designed); and
+cutting the sentence until Phase 7 (honest, but it removes the action and leaves a message the reader
+can do nothing about, which is precisely what ADR-0004 rejected).
+
+**Two consequences for the implementation.** The notification carries a payload identifying the link,
+and the tap must route on a **cold start** — `getNotificationAppLaunchDetails()`, not only the live
+callback. A watcher tapping this is by definition someone whose app has been closed, so the cold path
+is the normal one here rather than the edge case. It is on the Phase 3 device list.
 
 **Owed before Phase 6 ships the away picker:** `TapCopy.away` names nobody, while this file also
 says *"every surface that displays an away period names who set it"*. Those two contradict, and the

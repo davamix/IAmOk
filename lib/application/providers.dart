@@ -64,9 +64,48 @@ final watchedStateProvider =
 
 class WatchedStateNotifier extends AsyncNotifier<WatchedState> {
   @override
-  Future<WatchedState> build() {
+  Future<WatchedState> build() async {
     final services = ref.watch(appServicesProvider);
+    // BEFORE the first reconcile, and the order is load-bearing — see
+    // [_cacheDeviceZone].
+    await _cacheDeviceZone(services);
     return services.watchedReconcile.reconcile(selfUid: services.selfUid);
+  }
+
+  /// Caches the device's IANA zone, and is called **before the first
+  /// reconcile**.
+  ///
+  /// On a fresh install `LocalStore.deviceTimezone()` is null, so a reconcile
+  /// that runs first takes ADR-0002's documented UTC fallback and arms the whole
+  /// window at **UTC wall times** — 14:00 / 20:00 / 23:00 in Madrid rather than
+  /// 12:00 / 18:00 / 21:00. Measured on the POCO F3 on 2026-08-17: 19 alarms,
+  /// every one an hour or two late, with `device_timezone` already correctly
+  /// stored beside them.
+  ///
+  /// Before [ADR-0006][] a second reconcile ran behind the first and quietly
+  /// corrected the times — while stranding one alarm doing it, which is the
+  /// defect that produced the ADR. Now that run is correctly refused as
+  /// concurrent, so **nothing corrects them** until the next resume: a 23:00
+  /// nudge to someone who may well be asleep, for up to the depth of the window.
+  ///
+  /// Ordering the two removes the failure instead of repairing it, which is the
+  /// better fix in any case — the UTC pass never made sense, it was only ever
+  /// cheap to undo.
+  ///
+  /// **Never allowed to fail the load.** A zone lookup that throws leaves
+  /// whatever is already cached and lets `reconcile()` fall back as designed; an
+  /// exception escaping here would put the provider into `AsyncError` and show
+  /// *"this phone could not get ready"* for a plugin hiccup, on the screen whose
+  /// whole job is to be there every morning.
+  ///
+  /// [ADR-0006]: ../../docs/architecture/decisions/0006-reconcile-is-serialised-on-disk.md
+  Future<void> _cacheDeviceZone(AppServices services) async {
+    try {
+      final zone = await services.clockService.deviceTimezone();
+      if (zone != null) await services.store.setDeviceTimezone(zone);
+    } on Object {
+      // Swallowed deliberately; see above.
+    }
   }
 
   /// Re-reads everything. Called on resume, and after the debug harness changes
@@ -142,8 +181,7 @@ class WatchedStateNotifier extends AsyncNotifier<WatchedState> {
   /// lets a bare alarm isolate compute the day with no plugin access at all.
   Future<void> refreshDeviceZone() async {
     final services = ref.read(appServicesProvider);
-    final zone = await services.clockService.deviceTimezone();
-    if (zone != null) await services.store.setDeviceTimezone(zone);
+    await _cacheDeviceZone(services);
     await refresh();
   }
 }

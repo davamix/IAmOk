@@ -159,6 +159,13 @@ intent, which is a useful check and a different question. `dumpsys` is the only 
 
 To poll for boot recovery, loop the above every 15 s for several minutes.
 
+**Dismiss the harness's test notifications before reading the shade.** *"Fire ⟨slot⟩ reminder now"*
+posts under a sentinel epoch day so it cannot collide with a real armed reminder — which also means
+no reconcile ever cancels it, so it sits in the shade indefinitely looking exactly like a genuine
+reminder. Use the harness's *"Dismiss test notifications"* control, which cancels those three ids and
+leaves the armed window alone. On 2026-08-17 a leftover test notification was a live candidate
+explanation for duplicate reminders and cost real time to rule out.
+
 > **Two things this run established that anyone repeating it needs.**
 >
 > **A force-stop cancels every alarm the app has registered**, and nothing tells the app. Before the
@@ -202,6 +209,14 @@ To poll for boot recovery, loop the above every 15 s for several minutes.
 - [ ] Replaced by a correction when a late check-in arrives
 - [ ] A *different and honest* message when the device cannot reach the network
 - [ ] The alarm isolate survives the app being swiped away from recents
+- [ ] **Two isolates contend for the reconcile lease and only one changes the alarm set** —
+      [ADR-0006](../architecture/decisions/0006-reconcile-is-serialised-on-disk.md). Asserted in
+      `test/data/local_store_lock_test.dart` across two connections to one file, but that runs on
+      `sqflite_common_ffi`'s **desktop** SQLite; whether Android's honours `BEGIN EXCLUSIVE` the same
+      way between two isolates is the same API-level gap that hid the UPSERT defect. Fire the alarm
+      while the app is open in the foreground and confirm the store and `dumpsys` still agree.
+- [ ] Tapping the *lost access* notification opens the watcher surface **from a cold start** — the
+      normal case, since this notification is for a watcher whose app has been closed
 
 **Phase 4 — end to end.** PLAN.md's exit criterion is *"a tap on one physical phone quietly updates
 a second physical phone"*, and only one physical phone exists today. Either a second handset is

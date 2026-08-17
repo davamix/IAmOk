@@ -77,6 +77,16 @@ This collapses seven edge cases (reboot, late FCM, missed FCM, clock change, tim
 reinstall, away-mode transitions) into one code path that is unit-testable with no device and
 no network.
 
+**One at a time, and that is enforced rather than assumed**
+([ADR-0006](decisions/0006-reconcile-is-serialised-on-disk.md)). Idempotence makes running
+`reconcile()` twice *in sequence* free; it says nothing about running it twice *at once*. Two
+overlapping runs each diff their desired set against their own snapshot of what is armed, and the
+loser leaves an alarm on the platform with no store row — which no later reconcile can cancel, because
+re-asserting what should exist says nothing about what should not. Measured on hardware, on a fresh
+install, where the UTC-fallback run of §11 raced the zone-corrected one behind it. So a run takes a
+**lease in `LocalStore`** before it changes any alarm: the store is the only thing §4's three isolates
+can all see. Reading state is never gated — only changing alarms is.
+
 **No state is ever transmitted as a command.** Every push is a "something changed, reconcile
 now" nudge that carries no authority. Losing one costs latency, never correctness — which is
 what stops a lost "away finished" message from silencing a watcher permanently (§12).
@@ -167,7 +177,7 @@ thing some readers get.
 | `CheckInRepository` | Data | Write today's check-in; read a watched person's days | UI, Alarm |
 | `AwayRepository` | Data | Read / set / cancel the away period for a watched user | UI, FCM, Alarm |
 | `InviteService` | Data | Create invite; call `redeemInvite` | UI |
-| `LocalStore` | Data | SQLite. Per-link `lastConfirmedDate`, `warningsShownFor` (day → **which** warning is standing, [ADR-0004](decisions/0004-refused-is-not-unreachable.md)), `activeFrom`, `watchedTimezone`, cached `awayPeriod`, `accessLostSince` + `accessLostCause` + `accessLostNotifiedOn`; plus `deviceTimezone`, `pendingAlarms`, `lastReconcileAt` (a **timestamp** — §10 renders "offline since 10:14") | **All three** |
+| `LocalStore` | Data | SQLite. Per-link `lastConfirmedDate`, `warningsShownFor` (day → **which** warning is standing, [ADR-0004](decisions/0004-refused-is-not-unreachable.md)), `activeFrom`, `watchedTimezone`, cached `awayPeriod`, `accessLostSince` + `accessLostCause` + `accessLostNotifiedOn`; plus `deviceTimezone`, `pendingAlarms`, `lastReconcileAt` (a **timestamp** — §10 renders "offline since 10:14"), and the `reconcileLock` lease ([ADR-0006](decisions/0006-reconcile-is-serialised-on-disk.md)) | **All three** |
 | `AlarmScheduler` | Platform | Schedule / cancel / enumerate alarms; `rescheduleOnReboot` | UI, Alarm |
 | `NotificationService` | Platform | Channels, display, cancel, replace-by-id, tap routing | All three |
 | `FcmService` | Platform | Token lifecycle → Firestore; route foreground + background messages | UI, FCM |

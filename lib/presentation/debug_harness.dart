@@ -35,6 +35,17 @@ import '../platform/notification_service.dart';
 /// Gated on `kDebugMode` rather than `!kReleaseMode`: the latter leaves the
 /// harness in **profile** builds, which additionally carry the `INTERNET`
 /// permission that release does not.
+/// The sentinel day every *fire now* test notification is posted under.
+///
+/// The epoch, because it can never fall inside a rolling window: a test
+/// notification must not share an id with a real scheduled reminder, or posting
+/// one would silently replace an armed alarm on the device being measured.
+///
+/// Named rather than repeated, so the *"Dismiss test notifications"* control
+/// cancels the same ids the *"Fire … now"* controls post — two literals that
+/// drifted apart would leave notifications nothing could clear.
+final DayKey _testNotificationDay = DayKey(1970, 1, 1);
+
 class DebugHarnessButton extends StatelessWidget {
   const DebugHarnessButton({super.key});
 
@@ -161,16 +172,39 @@ class _DebugHarnessScreenState extends ConsumerState<DebugHarnessScreen> {
             // "Fire alarm now" is what makes a notification testable without
             // waiting for 12:00. It shows the real copy through the real
             // channel, so what is verified is what ships.
+            //
+            // The epoch day is a SENTINEL, deliberately outside any rolling
+            // window, so posting a test notification cannot collide with a real
+            // scheduled reminder's id and replace it. The cost is that nothing
+            // cancels it either — `toCancel` only ever holds days the window
+            // knows about — so it sits in the shade until somebody swipes it.
+            // Hence the control below.
             for (final slot in ReminderSlot.values)
               _Action('Fire ${slot.name} reminder now', () async {
                 await services.notifications.showNow(
-                  id: AlarmIds.reminder(DayKey(1970, 1, 1), slot),
+                  id: AlarmIds.reminder(_testNotificationDay, slot),
                   title: NotificationCopy.reminderTitle,
                   body: NotificationCopy.reminderBody(slot),
                   channel: NotificationService.remindersChannel,
                 );
                 return 'posted ${slot.name} on the reminders channel';
               }),
+            // Cancels exactly the three sentinel ids and nothing else.
+            //
+            // NOT `cancelAll()`, which would also disarm the whole rolling
+            // window — a destructive act wearing a tidying-up label, on the one
+            // device every alarm measurement is taken from. A test notification
+            // left in the shade looks exactly like a real reminder, and on
+            // 2026-08-17 that cost real time: it was a live candidate
+            // explanation for duplicate reminders until it was ruled out.
+            _Action('Dismiss test notifications', () async {
+              for (final slot in ReminderSlot.values) {
+                await services.notifications
+                    .cancelReminder(_testNotificationDay, slot);
+              }
+              return 'dismissed the three test notifications\n'
+                  'the armed window is untouched';
+            }),
             // Compares LocalStore against the notification plugin's own
             // record. Both are app-local: `pendingNotificationRequests()` reads
             // SharedPreferences, not AlarmManager, and no public API can list

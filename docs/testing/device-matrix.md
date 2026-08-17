@@ -127,8 +127,12 @@ fixable by onboarding guidance or not at all.
 Full evidence in [phase-2-summary.md](../phases/phase-2-summary.md).
 
 - [x] Reminders fire at 12:00, 18:00, 21:00 local — *registered with `AlarmManager` at exactly those
-      instants across 7 days; a reminder arriving unattended at 12:00 is still unobserved*
-- [x] A tap cancels the remaining reminders for that day
+      instants across 7 days.* **Observed unattended 2026-08-17 and it failed**: two / two / three
+      notifications instead of one each, the extras being identical copies. Cause was `AlarmIds`
+      deriving ids from `Object.hash`, which is seeded per process — fixed, and written up in
+      [phase-2-summary.md](../phases/phase-2-summary.md).
+- [x] A tap cancels the remaining reminders for that day — *within one process; reminders armed by an
+      earlier launch were uncancellable until the id fix*
 - [x] Alarms survive a reboot — **~76 s after `sys.boot_completed`, not immediately**
 - [x] The window re-arms for following days **without the app being opened**
 - [x] The tap target is disabled for the rest of the day and re-enables at local midnight
@@ -166,6 +170,15 @@ To poll for boot recovery, loop the above every 15 s for several minutes.
 >
 > **Boot recovery is delayed.** Checking at 60 s reads zero and looks like a hard failure; the alarms
 > arrive at ~76 s. Poll for several minutes before concluding anything.
+>
+> **Counting registered alarms is not the same as watching one fire, and the difference cost a
+> defect.** Every count in this run was taken from `dumpsys` inside one app session, and all of them
+> were right: 21 alarms, at the right instants, cancelled correctly on a tap. The reminders then fired
+> **two / two / three** when finally observed unattended, because the ids were regenerated on every
+> launch and orphans accumulated. **A count taken within a single process cannot see an id that
+> changes between processes.** Any run that spans an app restart must therefore compare the id set,
+> not the count — and at least one criterion per phase should be observed arriving, not inferred from
+> what is registered.
 >
 > **These two results do NOT compose, and the checklist above can be misread as saying they do.**
 > A force-stopped app is in the stopped state and receives **no broadcasts at all, including

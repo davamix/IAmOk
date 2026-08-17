@@ -8,7 +8,14 @@ it and made the app real: `LocalStore`, `AlarmScheduler`, `NotificationService` 
 `Clock`, the Tap screen, and the debug harness. It also landed the **two decisions carried in from
 the Phase 1 gate**, which are the parts most worth reading.
 
-**524 tests**, up from 328. `flutter analyze` clean. `flutter build apk --debug` succeeds.
+**530 tests**, up from 328. `flutter analyze` clean. `flutter build apk --debug` succeeds.
+
+> **Amended 2026-08-17, at the start of Phase 3.** Watching the reminders arrive unattended — the one
+> check this document originally listed as *not observed* — found a defect that invalidates part of
+> what is written below: **`AlarmIds` derived every id from `Object.hash`, which is seeded randomly
+> per process**, so no id survived an app launch. Fixed, guarded, and written up in
+> *[The second defect the unattended run found](#the-second-defect-the-unattended-run-found--and-it-is-worse-than-the-first)*.
+> Read that before trusting the alarm counts in the device table.
 
 ---
 
@@ -429,8 +436,8 @@ app was launched for the first time: not on the battery-optimisation whitelist, 
 
 | # | Criterion | Result |
 |---|---|---|
-| 1 | Reminders exist at 12:00 / 18:00 / 21:00 local | **PASS** — 21 alarms registered with `AlarmManager` as `RTC_WAKEUP`, at exactly 12:00/18:00/21:00 Europe/Madrid across 7 consecutive days. Read from `dumpsys alarm`, not from the app's own belief. |
-| 2 | A tap cancels the rest of the day | **PASS** — 21 → 18, that day's three gone, the following six untouched. |
+| 1 | Reminders exist at 12:00 / 18:00 / 21:00 local | **PASS** — 21 alarms registered with `AlarmManager` as `RTC_WAKEUP`, at exactly 12:00/18:00/21:00 Europe/Madrid across 7 consecutive days. Read from `dumpsys alarm`, not from the app's own belief. **But see the amendment**: they *fired* two/two/three, not one each, because the ids were not stable across launches. |
+| 2 | A tap cancels the rest of the day | **PASS, narrowly** — 21 → 18, that day's three gone, the following six untouched. Measured inside **one process**, which is the only place it worked before the id fix; a reminder armed by an earlier launch was uncancellable. |
 | 3 | Alarms survive a reboot | **PASS, with a caveat** — restored without the app being opened, but **~76 s after `sys.boot_completed`**. See below. |
 | 4 | The window re-arms without opening the app | **PASS** — the boot receiver restored the full set with the app never launched, and correctly kept that day's already-tapped reminders cancelled. |
 | 5 | Target disabled for the rest of the day, re-enables at local midnight | **PASS** — disabled immediately after the tap; enabled again after rolling the date forward with the harness. |
@@ -523,12 +530,80 @@ force-stop case, and only the daily tap is.
 is UTC by design. Debug-only and cosmetic, but it is the same "two zones on one screen" mistake the
 UI review found in the tap-time rendering, so it is named rather than quietly left.
 
+### The second defect the unattended run found — and it is worse than the first
+
+**Observed 2026-08-17, watching the reminders arrive at their natural times.** This is the check the
+first write-up listed as *not observed* and called "the obvious next check". It was, and it found the
+most serious defect in the project so far.
+
+| Slot | Notifications posted |
+|---|---|
+| 12:00 | **two** |
+| 18:00 | **two** |
+| 21:00 | **three** |
+
+Not one each. And the extras were **identical copies of the same line** — two *"Remember to tap I'm
+OK today."* at 12:00 — which is not accumulation in the shade, because the design's own accumulation
+would have produced one of each *different* line.
+
+**`Object.hash` is seeded randomly per process, and `AlarmIds` used it.** The same expression
+evaluated in three separate VMs:
+
+```
+run 1   reminder(2026-08-17, midday) =  69007203
+run 2   reminder(2026-08-17, midday) = 231827400
+run 3   reminder(2026-08-17, midday) = 198951794
+```
+
+`String.hashCode` is stable across runs; `Object.hash` combines its arguments with a per-process seed
+and is documented as *not* stable between runs. **An id that changes is not an id**, and every id in
+this app was derived that way.
+
+What that actually cost:
+
+- **Every launch armed the whole rolling window under fresh ids**, leaving the previous launch's
+  alarms armed and unreachable. `cancelReminder` computes the id in the current process, so nothing
+  could ever cancel them. They accumulated once per launch, and survived reboot because the plugin
+  re-arms from its own `SharedPreferences`.
+- **A tap could not fully cancel the day.** It cancelled this process's ids; every earlier process's
+  reminder still fired at her. Criterion 2 passed only because the tap and the count happened inside
+  one process.
+- **The harness's `store says 21 / platform has 24 / DIVERGED` reading is consistent with this** —
+  three orphans from an earlier launch — rather than with the benign explanation the first write-up
+  reached for. Both records are app-local, but the *divergence* had a cause and it was this.
+- **Worst, and the reason Phase 3 stopped to fix it before writing anything:** a correction
+  *replaces a warning by id*. With an unstable id it posts a **second** notification instead, leaving
+  *"No check-in from Mum yesterday"* standing directly above *"Correction: Mum did check in
+  yesterday"*. §10's correction path is the highest-value behaviour in this app and **it could not
+  have worked**. ADR-0004's access-lost cadence relies on the same replacement and would have stacked
+  a fresh notice at every milestone rather than replacing the standing one.
+
+**Fixed** by writing the hash out by hand: FNV-1a, 32-bit, over the UTF-8 bytes of a key whose parts
+are joined with an ASCII unit separator that cannot occur in any component. Not `String.hashCode`
+either — it is stable today, but nothing guarantees it across SDK versions, and an id that moves when
+Dart is upgraded orphans every alarm on every installed phone at once.
+
+**Why 524 tests could not see it.** Every assertion in `alarm_ids_test.dart` compared two calls made
+inside *one* process, and a seeded hash is perfectly self-consistent there — including the test named
+*"the same link and day give the same id"*, which is the exact property that was broken. A
+single-process suite can only assert cross-process stability by pinning **known values**, so the
+guard is now six golden constants plus an independent FNV-1a oracle anchored to the published test
+vectors. Both were **verified to fail against the old implementation** before being kept: reverting
+`_hash` to `Object.hash` turns all three golden tests and the oracle red while every pre-existing
+test in the file stays green.
+
+This is the same shape as the SQLite floor: a real property that the test harness is structurally
+incapable of observing. It is the **fourth** time in three phases that the thing no test could reach
+was the thing that mattered.
+
+**One consequence for the device.** The orphaned alarms from every previous launch are still
+registered with `AlarmManager` on the POCO and the app can never cancel them. **Uninstall and
+reinstall before the Phase 3 device run**, or every measurement inherits them. No migration code was
+added: the app has never been released, so there is no installed base to repair. A released app would
+have owed a one-time `cancelAll()` on first launch after the fix.
+
 ### Not observed
 
-- **A reminder firing at its natural 12:00 / 18:00 / 21:00.** The session ran from 00:06 to 00:30
-  local. What is verified is that the alarms are registered with the OS at exactly those instants,
-  and that firing one through the harness posts the approved copy on the right channel. Watching one
-  arrive unattended is a day's wait and is the obvious next check.
 - **The window draining past day 7 with the app never opened.** By design it would: the depth is
   seven days and the watched person opens the app daily to tap. §10's away extension to `through + 7`
   is what covers the one case where she genuinely does not.
@@ -541,6 +616,12 @@ UI review found in the tap-time rendering, so it is named rather than quietly le
 harshest mainstream case, every Phase 2 exit criterion passes.** That is the OEM risk this phase was
 scheduled second to retire, and it is substantially retired for display-only alarms. Phase 3's
 `android_alarm_manager_plus` isolate is a different mechanism and does not inherit this result.
+
+**And the headline correction: OEM power management was never the thing that was broken here.** The
+unattended run found a defect in this app's own code that the OEM pass had no way to surface, because
+every measurement in the table above was taken inside a single app process. The platform did exactly
+what it was asked; it was asked for the wrong alarms. Worth keeping in view for Phase 3, where the
+temptation to attribute a bad result to HyperOS will be strongest.
 
 ---
 
@@ -567,6 +648,19 @@ API 29 and it passed 500+ tests, because the test binding uses desktop SQLite an
 API 33. Anything touching SQL, `java.time`, or a permission model needs the API 28 AVD before it is
 believed. An API 28 run is owed before Phase 4.
 
+**A platform id must be a pure function of its inputs, and nothing else.** `Object.hash` is seeded
+per process; `String.hashCode` is stable today but unguaranteed across SDK versions. Anything that
+crosses a process boundary — a notification id, an alarm request code, a document id, a cache key —
+is hashed by code this repo owns and pins with known values. `AlarmIds` is the worked example, and
+the six golden constants are the guard. The same question is worth asking of anything Phase 4 keys
+on.
+
+**Watch a behaviour actually happen before believing a checklist about it.** Everything in the device
+table was measured by asking the OS what was *registered*, which was correct and insufficient: the
+alarms were registered perfectly and fired wrong. The unattended run cost a day of waiting and found
+the worst defect in the project. Phase 3's device criteria need at least one genuinely unattended
+observation for the same reason.
+
 **A defect fixed is a defect to re-review.** Three times across two phases, a fix introduced the next
 defect: the away clamp, the Stack that stopped the target moving and let text overlap it, and the
 UPSERT that fixed a cascade and broke Android 8. The reviewers caught all three; none was caught by
@@ -586,7 +680,7 @@ the app's actual foreground state rather than defaulting it.
 
 ```
 flutter analyze                                   No issues found!
-flutter test                                      All tests passed!  (524 tests)
+flutter test                                      All tests passed!  (530 tests)
 dart run tools/models/away_warning_model.dart     superseded: 4 failure(s)   decided: 0 failure(s)
 flutter build apk --debug                         Built app-debug.apk
   └─ GeneratedPluginRegistrant.java               3 registrations, timezone absent (ADR-0002 holds)

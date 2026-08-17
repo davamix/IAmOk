@@ -249,11 +249,11 @@ The full set. Everything the app says out loud is here.
 | No check-in yesterday, device online | Watcher | *"No check-in from Mum yesterday."* |
 | No check-in yesterday, server unreachable | Watcher | *"No check-in received from Mum yesterday — your phone has been offline since 22:10."* |
 | …and the device has **never** reconciled | Watcher | *"No check-in received from Mum yesterday — your phone has not been able to check even once."* |
-| Away cached, but unverified for over 2 days | Watcher | *"Can't check on Mum — your phone has been offline since Tuesday 10:14. She was marked away until Saturday 22 August."* |
-| …and the device has **never** reconciled | Watcher | *"Can't check on Mum — your phone has not been able to check even once. She was marked away until Saturday 22 August."* |
-| Read **refused** — the app has lost access ([ADR-0004](../architecture/decisions/0004-refused-is-not-unreachable.md)) | Watcher | *"Can't check on Mum — I Am Ok has lost access to her check-ins. Open the app to see what to do. Your phone last saw a check-in on Saturday 15 August."* |
-| …and no check-in has ever been seen | Watcher | *"Can't check on Mum — I Am Ok has lost access to her check-ins. Open the app to see what to do. Your phone has not seen a check-in yet."* |
-| …and an away period is cached for the day | Watcher | *"Can't check on Mum — I Am Ok has lost access to her check-ins. Open the app to see what to do. She was marked away until Saturday 22 August."* |
+| Away cached, but unverified for over 2 days | Watcher | *"Can't check on Mum — your phone has been offline since Tuesday 10:14. Mum was marked away until Saturday 22 August."* |
+| …and the device has **never** reconciled | Watcher | *"Can't check on Mum — your phone has not been able to check even once. Mum was marked away until Saturday 22 August."* |
+| Read **refused** — the app has lost access ([ADR-0004](../architecture/decisions/0004-refused-is-not-unreachable.md)) | Watcher | *"Can't check on Mum — I Am Ok has lost access to the check-ins. Open the app to see what to do. Your phone last saw a check-in on Saturday 15 August."* |
+| …and no check-in has ever been seen | Watcher | *"Can't check on Mum — I Am Ok has lost access to the check-ins. Open the app to see what to do. Your phone has not seen a check-in yet."* |
+| …and an away period is cached for the day | Watcher | *"Can't check on Mum — I Am Ok has lost access to the check-ins. Open the app to see what to do. Mum was marked away until Saturday 22 August."* |
 | Late check-in after a warning was shown | Watcher | *"Correction: Mum did check in yesterday, at 23:40."* Replaces the warning by id. |
 | Away set by a watcher | All other watchers, and the watched person | *"Ana marked Mum away until Sat 22 Aug."* |
 | Away set by the watched person | All watchers | *"Mum is away until Sat 22 Aug."* |
@@ -338,10 +338,44 @@ that already shows it. See the Phase 1 gate's decision 1 in
 [phase-2-brief.md](../phases/phase-2-brief.md), and note the same input closes a sharper hole — a
 phone with `POST_NOTIFICATIONS` revoked no longer burns silently through the access-lost cadence.
 
-**Still undecided, and owed before Phase 3 ships any of this:** the `contentTitle` / `contentText`
-split for all four warnings — the reminders' split is settled above and is the pattern to follow;
-where the refused notification routes on tap; and whether the copy set assumes "she" — nothing in
-the domain captures a pronoun, so a watched father currently gets the wrong one.
+### Settled at the Phase 3 gate — 2026-08-17
+
+**The `contentTitle` / `contentText` split for all four warnings: title is `"I Am Ok"`, and the whole
+approved line is the body.** Identical to the reminders, and it is what the convention two paragraphs
+below already requires — *"keep the differentiator in the first words of the body, because the
+collapsed shade shows one line"*. The first words survive truncation, so *"No check-in received from
+Mum yesterday — your…"* still tells the reader which kind of claim this is. No warning string is
+split, so all four ship verbatim as written above.
+
+Rejected: putting the claim in the title (*"No check-in from Mum"* / *"Can't check on Mum"*) with the
+detail in the body. It scans better for a watcher watching several people and it can never truncate
+the claim — but it turns four approved strings into eight, and it removes the app's name from the one
+place a worried reader at 3am can see which app is speaking. Revisit if Phase 7's multi-person layout
+makes the per-person title worth the cost.
+
+**The copy does not assume "she".** Only two clauses across the set carried a pronoun, both now
+replaced using `watchedName`, which is already denormalised onto the link:
+
+| Was | Is |
+|---|---|
+| *"**She** was marked away until Saturday 22 August."* | *"**Mum** was marked away until Saturday 22 August."* |
+| *"…has lost access to **her** check-ins."* | *"…has lost access to **the** check-ins."* |
+
+The second is not a substitution: *"Can't check on Mum — I Am Ok has lost access to Mum's check-ins"*
+says the name twice in one sentence. The opener already establishes whose check-ins are meant, so the
+possessive was carrying no information and dropping it costs nothing.
+
+No pronoun field was added to the data model. It would need a question at pairing that one family
+member answers about another, a §8 rules change, and it would make the copy depend on data that can
+be absent or wrong — for two clauses that read correctly without it. Recorded so it is not
+re-proposed; the cost of getting this wrong rises sharply after translation, which is why it was
+settled before Phase 3 wrote a single warning.
+
+**Still open — where the refused notification routes on tap.** It says *"Open the app to see what to
+do."* §13's health panel is Phase 7, so there is nothing yet for it to open. Proposed for Phase 3:
+it opens the watcher surface this phase builds, which carries the per-link access-lost state and its
+remediation from `LocalStore.accessLostCause`. That keeps the sentence honest — the app does show
+what to do — without pulling the panel forward. **Not yet approved.**
 
 **Owed before Phase 6 ships the away picker:** `TapCopy.away` names nobody, while this file also
 says *"every surface that displays an away period names who set it"*. Those two contradict, and the

@@ -1,6 +1,8 @@
 @TestOn('vm')
 library;
 
+import 'dart:convert';
+
 import 'package:i_am_ok/domain/domain.dart';
 import 'package:i_am_ok/platform/alarm_ids.dart';
 import 'package:test/test.dart';
@@ -104,6 +106,93 @@ void main() {
     test('a reminder and a warning on the same day differ', () {
       expect(AlarmIds.reminder(d, ReminderSlot.midday),
           isNot(AlarmIds.warning(mum, d)));
+    });
+  });
+
+  /// **The group that would have caught the defect, and the reason it is
+  /// written as constants rather than as comparisons.**
+  ///
+  /// `AlarmIds` used `Object.hash`, which combines its arguments with a
+  /// **per-process random seed**. Every id therefore changed on every app
+  /// launch. Nothing above could see it: each test compares two calls made
+  /// inside *one* process, and a seeded hash is perfectly self-consistent there.
+  /// All 524 tests passed while the shipped app re-armed its whole window under
+  /// fresh ids on every launch, could never cancel the previous launch's alarms,
+  /// and posted two identical *"Remember to tap I'm OK today."* notifications at
+  /// 12:00 on the POCO F3.
+  ///
+  /// A single-process suite can only assert cross-process stability by pinning
+  /// **known values**. If the derivation ever becomes process-dependent again,
+  /// these fail on the very next run — which is the point: they fail closed.
+  ///
+  /// **Changing one of these numbers is a breaking change**, not a test fix. It
+  /// orphans every alarm already armed on every installed phone: they stay
+  /// registered with `AlarmManager` under the old id, no longer match anything
+  /// the app computes, and can never be cancelled. If a key genuinely has to
+  /// change, the release that does it owes a one-time `cancelAll()` before its
+  /// first reconcile.
+  group('ids are stable across processes — known values', () {
+    test('reminder ids', () {
+      expect(AlarmIds.reminder(d, ReminderSlot.midday), 1546359976);
+      expect(AlarmIds.reminder(d, ReminderSlot.evening), 431848108);
+      expect(AlarmIds.reminder(d, ReminderSlot.night), 1872874278);
+    });
+
+    test('warning ids', () {
+      expect(AlarmIds.warning(mum, d), 1002178930);
+      expect(AlarmIds.warning(granddad, d), 742081992);
+    });
+
+    test('access-lost ids', () {
+      expect(AlarmIds.accessLost(mum), 1514605395);
+    });
+  });
+
+  /// An **independent oracle**. The constants above pin the values; this pins
+  /// the *algorithm* that produces them, so a change to either the hash or the
+  /// key construction is caught with a diagnosis rather than as six unexplained
+  /// numbers.
+  ///
+  /// The chain is deliberate: the published FNV-1a vectors prove the oracle is
+  /// real FNV-1a, and the oracle then proves production is. Neither half alone
+  /// would do — an oracle copied from the implementation asserts only that the
+  /// code equals itself.
+  group('the derivation is FNV-1a over a separated key', () {
+    // ASCII unit separator, matching AlarmIds._sep.
+    final sep = String.fromCharCode(0x1f);
+
+    int fnv1a32(String key) {
+      var hash = 0x811c9dc5;
+      for (final byte in utf8.encode(key)) {
+        hash ^= byte;
+        hash = (hash * 0x01000193) & 0xffffffff;
+      }
+      return hash;
+    }
+
+    int expected(String key) => fnv1a32(key) & 0x7fffffff;
+
+    test('the oracle matches the published FNV-1a 32-bit vectors', () {
+      expect(fnv1a32(''), 0x811c9dc5);
+      expect(fnv1a32('a'), 0xe40c292c);
+      expect(fnv1a32('foobar'), 0xbf9cf968);
+    });
+
+    test('production matches the oracle for all three kinds', () {
+      expect(AlarmIds.reminder(d, ReminderSlot.midday),
+          expected('reminder${sep}2026-08-05${sep}midday'));
+      expect(AlarmIds.warning(mum, d),
+          expected('warning$sep$mum${sep}2026-08-05'));
+      expect(AlarmIds.accessLost(mum), expected('access-lost$sep$mum'));
+    });
+
+    test('the separator cannot be forged out of the components', () {
+      // Without a separator absent from every component, `warning('a', 'b-c')`
+      // and `warning('a-b', 'c')` would meet — and a correction for one link
+      // would retract a true warning about another. The concatenations differ
+      // only in where the boundary falls.
+      expect(expected('warning${sep}a${sep}b-c'),
+          isNot(expected('warning${sep}a-b${sep}c')));
     });
   });
 

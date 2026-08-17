@@ -384,6 +384,57 @@ class _DebugHarnessScreenState extends ConsumerState<DebugHarnessScreen> {
                   '${before == after ? 'IDEMPOTENT' : 'NOT IDEMPOTENT'}\n\n'
                   'watch the shade: a second notification here is the bug';
             }),
+            // Two different questions, and only the second one answers the
+            // thing this phase exists to find out.
+            //
+            // This one runs the callback's LOGIC in the UI isolate. It proves
+            // the decision, the copy and the store writes, in one second rather
+            // than a day — and it proves nothing at all about whether Android
+            // wakes a background isolate on this handset.
+            _Action('Run the alarm logic now (this isolate)', () async {
+              await services.watcherReconcile
+                  .reconcile(selfUid: services.selfUid);
+              return 'reconciled in the UI isolate\n\n'
+                  'This does NOT test the isolate. Use the control below for '
+                  'that — it is the only one that asks the OS anything.';
+            }),
+            // THE control for Phase 3. Arms a real AlarmManager alarm through
+            // android_alarm_manager_plus, pointing at the real top-level entry
+            // point. When it fires, Android starts a fresh FlutterEngine and a
+            // bare Dart isolate that shares nothing with this one.
+            //
+            // Two minutes, not seconds: long enough to background the app,
+            // swipe it from recents, or lock the phone first — which is the
+            // state the answer actually depends on.
+            _Action('Arm a REAL warning alarm, 2 minutes out', () async {
+              final links =
+                  await services.store.linksWatchedBy(services.selfUid);
+              if (links.isEmpty) {
+                return 'seed a watched person first';
+              }
+              final link = links.first;
+              final zone = await _zone(services.store);
+              final fireAt = tz.TZDateTime.from(
+                services.clock.now().add(const Duration(minutes: 2)),
+                zone,
+              );
+              await services.warningAlarms.apply(
+                linkId: link.id,
+                toCancel: const {},
+                desired: {
+                  ScheduledWarning(
+                    day: DayKey.fromInstant(services.clock.now(), zone),
+                    at: fireAt,
+                  ),
+                },
+              );
+              return 'armed for $fireAt\n\n'
+                  'Now background the app — or swipe it from recents — and '
+                  'wait. A notification arriving means the OS woke a bare '
+                  'isolate that shares no memory with this screen.\n\n'
+                  'Ground truth for what is armed: adb shell dumpsys alarm, '
+                  'written to a file and pulled.';
+            }),
             _Action('Compare warning alarms: store vs armed', () async {
               final links =
                   await services.store.linksWatchedBy(services.selfUid);

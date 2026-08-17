@@ -75,9 +75,10 @@ void main() {
 
     test('a lock taken on one is visible on the other', () async {
       await a.acquireReconcileLock(
+          scope: 'watched',
           owner: 'alarm', now: t0, lease: const Duration(seconds: 30));
 
-      final holder = await b.reconcileLockHolder();
+      final holder = await b.reconcileLockHolder('watched');
       expect(holder?.owner, 'alarm');
     });
   });
@@ -85,8 +86,10 @@ void main() {
   group('the lock excludes', () {
     test('a second holder is refused while the lease is live', () async {
       final first = await a.acquireReconcileLock(
+          scope: 'watched',
           owner: 'ui', now: t0, lease: const Duration(seconds: 30));
       final second = await b.acquireReconcileLock(
+          scope: 'watched',
           owner: 'alarm', now: t0, lease: const Duration(seconds: 30));
 
       expect(first, isTrue);
@@ -98,11 +101,13 @@ void main() {
 
     test('the refused caller does not steal the lease', () async {
       await a.acquireReconcileLock(
+          scope: 'watched',
           owner: 'ui', now: t0, lease: const Duration(seconds: 30));
       await b.acquireReconcileLock(
+          scope: 'watched',
           owner: 'alarm', now: t0, lease: const Duration(seconds: 30));
 
-      expect((await b.reconcileLockHolder())?.owner, 'ui',
+      expect((await b.reconcileLockHolder('watched'))?.owner, 'ui',
           reason: 'a failed acquire that overwrote the row would hand the lock '
               'to the caller that was just told it could not have it');
     });
@@ -111,10 +116,12 @@ void main() {
   group('the lease expires', () {
     test('an expired lock may be taken by anyone', () async {
       await a.acquireReconcileLock(
+          scope: 'watched',
           owner: 'alarm', now: t0, lease: const Duration(seconds: 30));
 
       final later = t0.add(const Duration(seconds: 31));
       final taken = await b.acquireReconcileLock(
+          scope: 'watched',
           owner: 'ui', now: later, lease: const Duration(seconds: 30));
 
       expect(taken, isTrue,
@@ -130,11 +137,13 @@ void main() {
     // instant, over at it.
     test('one millisecond before expiry it is still held', () async {
       await a.acquireReconcileLock(
+          scope: 'watched',
           owner: 'alarm', now: t0, lease: const Duration(seconds: 30));
 
       final justBefore = t0.add(const Duration(seconds: 30, milliseconds: -1));
       expect(
         await b.acquireReconcileLock(
+            scope: 'watched',
             owner: 'ui', now: justBefore, lease: const Duration(seconds: 30)),
         isFalse,
       );
@@ -142,11 +151,13 @@ void main() {
 
     test('exactly at expiry it is available', () async {
       await a.acquireReconcileLock(
+          scope: 'watched',
           owner: 'alarm', now: t0, lease: const Duration(seconds: 30));
 
       final exactly = t0.add(const Duration(seconds: 30));
       expect(
         await b.acquireReconcileLock(
+            scope: 'watched',
             owner: 'ui', now: exactly, lease: const Duration(seconds: 30)),
         isTrue,
       );
@@ -154,10 +165,12 @@ void main() {
 
     test('a live lease refuses even the same owner string', () async {
       await a.acquireReconcileLock(
+          scope: 'watched',
           owner: 'ui', now: t0, lease: const Duration(seconds: 30));
 
       expect(
         await a.acquireReconcileLock(
+            scope: 'watched',
             owner: 'ui', now: t0, lease: const Duration(seconds: 30)),
         isFalse,
         reason: 'the first draft exempted the current holder so it could '
@@ -172,15 +185,71 @@ void main() {
     });
   });
 
+  /// **The regression the device found, and the reason the lease has a scope.**
+  ///
+  /// The watched and watcher sides are independent reconciles over disjoint
+  /// alarm sets — `kind='reminder'` against `kind='warning'`, different platform
+  /// ids, nothing shared — and both run when the app opens. With one global lock
+  /// the loser skipped its alarm work entirely, so **every launch re-armed one
+  /// side and left the other unarmed.** Measured on the POCO F3 after a
+  /// force-stop: 18 reminders and 0 warnings, then 0 reminders and 12 warnings
+  /// once the watcher reconcile was added to app open.
+  ///
+  /// Serialising work that cannot conflict is not caution — it is a second way
+  /// to leave alarms unarmed, which is the exact outcome the lease exists to
+  /// prevent.
+  group('scopes do not block each other', () {
+    test('the watcher may work while the watched side holds its lease',
+        () async {
+      final watched = await a.acquireReconcileLock(
+        scope: 'watched',
+        owner: 'ui',
+        now: t0,
+        lease: const Duration(seconds: 30),
+      );
+      final watcher = await b.acquireReconcileLock(
+        scope: 'watcher',
+        owner: 'ui',
+        now: t0,
+        lease: const Duration(seconds: 30),
+      );
+
+      expect(watched, isTrue);
+      expect(watcher, isTrue,
+          reason: 'one lock for both sides meant every app open re-armed one '
+              'and left the other unarmed');
+    });
+
+    test('releasing one scope leaves the other held', () async {
+      await a.acquireReconcileLock(
+          scope: 'watched',
+          owner: 'ui',
+          now: t0,
+          lease: const Duration(seconds: 30));
+      await a.acquireReconcileLock(
+          scope: 'watcher',
+          owner: 'ui',
+          now: t0,
+          lease: const Duration(seconds: 30));
+
+      await a.releaseReconcileLock('watched', 'ui');
+
+      expect(await b.reconcileLockHolder('watched'), isNull);
+      expect((await b.reconcileLockHolder('watcher'))?.owner, 'ui');
+    });
+  });
+
   group('release', () {
     test('frees the lock for another connection', () async {
       await a.acquireReconcileLock(
+          scope: 'watched',
           owner: 'ui', now: t0, lease: const Duration(seconds: 30));
-      await a.releaseReconcileLock('ui');
+      await a.releaseReconcileLock('watched', 'ui');
 
-      expect(await b.reconcileLockHolder(), isNull);
+      expect(await b.reconcileLockHolder('watched'), isNull);
       expect(
         await b.acquireReconcileLock(
+            scope: 'watched',
             owner: 'alarm', now: t0, lease: const Duration(seconds: 30)),
         isTrue,
       );
@@ -188,15 +257,16 @@ void main() {
 
     test('by a NON-holder does nothing', () async {
       await a.acquireReconcileLock(
+          scope: 'watched',
           owner: 'ui', now: t0, lease: const Duration(seconds: 30));
 
       // The case that matters: a slow run whose lease expired, finishing late
       // and releasing a lock that now belongs to a different isolate. Without
       // the owner guard the exclusion silently stops existing under exactly the
       // load that made it necessary.
-      await b.releaseReconcileLock('alarm');
+      await b.releaseReconcileLock('watched', 'alarm');
 
-      expect((await b.reconcileLockHolder())?.owner, 'ui');
+      expect((await b.reconcileLockHolder('watched'))?.owner, 'ui');
     });
   });
 
@@ -229,6 +299,7 @@ void main() {
         reason: 'the v1 row survived the upgrade');
     expect(
       await upgraded.acquireReconcileLock(
+          scope: 'watched',
           owner: 'ui', now: t0, lease: const Duration(seconds: 30)),
       isTrue,
       reason: 'and the v2 table exists',

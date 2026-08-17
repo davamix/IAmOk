@@ -581,7 +581,7 @@ void main() {
   group('the reconcile lock', () {
     test('is released, so the next reconcile does its work', () async {
       await service().reconcile(selfUid: selfUid);
-      expect(await store.reconcileLockHolder(), isNull,
+      expect(await store.reconcileLockHolder(WatchedReconcileService.lockScope), isNull,
           reason: 'a lease left behind would block every later reconcile for '
               'as long as it had to run, which reads exactly like the app '
               'being broken');
@@ -599,7 +599,7 @@ void main() {
         throwsA(isA<StateError>()),
       );
 
-      expect(await store.reconcileLockHolder(), isNull,
+      expect(await store.reconcileLockHolder(WatchedReconcileService.lockScope), isNull,
           reason: 'one platform failure must not lock the app out of its own '
               'alarms until the lease expires');
     });
@@ -608,7 +608,7 @@ void main() {
       // Only for legibility in a dump — but a lock whose holder is opaque is a
       // lock nobody can debug from a device at 03:00.
       scheduler.onApply = () async {
-        final holder = await store.reconcileLockHolder();
+        final holder = await store.reconcileLockHolder(WatchedReconcileService.lockScope);
         expect(holder!.owner, startsWith('alarm:'));
       };
 

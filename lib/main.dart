@@ -87,14 +87,14 @@ Future<void> main() async {
   );
 }
 
-class IAmOkApp extends StatefulWidget {
+class IAmOkApp extends ConsumerStatefulWidget {
   const IAmOkApp({super.key});
 
   @override
-  State<IAmOkApp> createState() => _IAmOkAppState();
+  ConsumerState<IAmOkApp> createState() => _IAmOkAppState();
 }
 
-class _IAmOkAppState extends State<IAmOkApp> {
+class _IAmOkAppState extends ConsumerState<IAmOkApp> {
   /// Lets a notification tap navigate without a `BuildContext` from a widget
   /// that may not be mounted yet.
   ///
@@ -109,8 +109,39 @@ class _IAmOkAppState extends State<IAmOkApp> {
     super.initState();
     NotificationRouter.instance.tappedLink.addListener(_openWatcherList);
     // After the first frame, so a payload captured before runApp is honoured.
-    WidgetsBinding.instance.addPostFrameCallback((_) => _openWatcherList());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _openWatcherList();
+      _reconcileBothSides();
+    });
   }
+
+  /// Reconciles the **watcher** side on app open, whatever screen is showing.
+  ///
+  /// §3 says `reconcile()` is called on app open. On the watched side that was
+  /// true because the Tap screen is home and its provider reconciles when it
+  /// builds. On the watcher side it was **not**: `watcherStateProvider` only
+  /// builds when the watcher list is shown, so nothing reconciled until someone
+  /// navigated there.
+  ///
+  /// **Measured on the POCO F3.** After a force-stop — an ordinary action on
+  /// HyperOS — every alarm is cancelled and nothing tells the app. Opening it
+  /// restored the 18 watched reminders and **none** of the 12 watcher warnings,
+  /// because home is the Tap screen. So the one repair path the design relies on
+  /// did not repair the half that matters: a watcher who opens the app was still
+  /// deaf, and nothing on any screen said so.
+  ///
+  /// That is worse than the Phase 3 brief assumed. Its argument was that a
+  /// watcher never opens the app; this was the case where they *do* and it still
+  /// does not help. It also matters permanently rather than only until Phase 5
+  /// routes on role — someone who is both watched and watcher lands on the Tap
+  /// screen by design (`screens.md`), so their watcher alarms would never be
+  /// re-armed by opening the app at all.
+  ///
+  /// Reading the provider is enough: that triggers its build, which is the
+  /// reconcile. The result is not needed here — whoever shows the list will read
+  /// it — and ADR-0006's lease makes the overlap with a screen doing the same
+  /// thing safe.
+  void _reconcileBothSides() => ref.read(watcherStateProvider);
 
   @override
   void dispose() {

@@ -111,6 +111,11 @@ class WatcherReconcileService {
 
   static const Duration lockLease = Duration(seconds: 30);
 
+  /// This side's lease scope. Disjoint from the watched side's: the two
+  /// reconcile different links into different alarm ids and cannot conflict, and
+  /// making them share one lock left one side unarmed on every launch.
+  static const String lockScope = 'watcher';
+
   static final int _isolateSalt = Random().nextInt(0x7fffffff);
   static int _sequence = 0;
 
@@ -129,6 +134,7 @@ class WatcherReconcileService {
 
     final owner = '$lockOwner:$_isolateSalt:${_sequence++}';
     final holdsLock = await store.acquireReconcileLock(
+      scope: lockScope,
       owner: owner,
       now: now,
       lease: lockLease,
@@ -146,7 +152,7 @@ class WatcherReconcileService {
         ));
       }
     } finally {
-      if (holdsLock) await store.releaseReconcileLock(owner);
+      if (holdsLock) await store.releaseReconcileLock(lockScope, owner);
     }
 
     return WatcherState(

@@ -137,6 +137,10 @@ class WatchedReconcileService {
   /// declines to touch alarms once.
   static const Duration lockLease = Duration(seconds: 30);
 
+  /// This side's lease scope. Disjoint from the watcher's — see
+  /// [LocalStore.acquireReconcileLock] for what one shared lock cost.
+  static const String lockScope = 'watched';
+
   /// Distinguishes this isolate's runs from another isolate's.
   ///
   /// **Randomness is correct here and would be a defect one file over.**
@@ -183,6 +187,7 @@ class WatchedReconcileService {
 
     final owner = '$lockOwner:$_isolateSalt:${_sequence++}';
     final holdsLock = await store.acquireReconcileLock(
+      scope: lockScope,
       owner: owner,
       now: now,
       lease: lockLease,
@@ -234,7 +239,7 @@ class WatchedReconcileService {
       } finally {
         // Released even if the platform threw, so one failure does not lock the
         // app out of its own alarms until the lease expires.
-        await store.releaseReconcileLock(owner);
+        await store.releaseReconcileLock(lockScope, owner);
       }
     }
 

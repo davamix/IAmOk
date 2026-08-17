@@ -28,8 +28,9 @@ class LocalStore {
   /// installed app that loses its store loses its `warningsShownFor`, and the
   /// visible symptom is every standing warning firing again.
   ///
-  /// **v2** adds `reconcile_lock`. See [acquireReconcileLock].
-  static const int schemaVersion = 2;
+  /// **v2** adds `reconcile_lock`; **v3** re-keys it by scope. See
+  /// [acquireReconcileLock].
+  static const int schemaVersion = 3;
 
   static const String defaultDatabaseName = 'i_am_ok.db';
 
@@ -72,8 +73,16 @@ class LocalStore {
         // Additive only, and deliberately not a drop-and-recreate: an installed
         // app that loses this store loses `warningsShownFor`, and every standing
         // warning fires again the next morning.
-        if (from < 2) await db.execute(_reconcileLockTable);
-        if (to > 2) throw StateError('no migration from v$from to v$to');
+        // `reconcile_lock` is the one table that may be dropped rather than
+        // migrated: it holds nothing but ephemeral leases, and the worst a lost
+        // row can do is let one reconcile run that would otherwise have waited.
+        // Every other table here is the opposite — losing `warnings_shown`
+        // fires every standing warning again the next morning.
+        if (from < 3) {
+          await db.execute('DROP TABLE IF EXISTS reconcile_lock');
+          await db.execute(_reconcileLockTable);
+        }
+        if (to > 3) throw StateError('no migration from v$from to v$to');
       },
     );
     return LocalStore._(db);
@@ -187,14 +196,15 @@ class LocalStore {
     _reconcileLockTable,
   ];
 
-  /// One row, or none. See [acquireReconcileLock] for why it exists.
+  /// One row **per scope**. See [acquireReconcileLock] for why it exists, and
+  /// why one global row was wrong.
   ///
   /// Deliberately carries **no** foreign key and nothing hangs off it, so the
   /// `INSERT OR REPLACE` used to take the lock cannot cascade — the failure
   /// `upsertLink` was fixed for.
   static const String _reconcileLockTable = '''
     CREATE TABLE reconcile_lock (
-      id         INTEGER PRIMARY KEY CHECK (id = 0),
+      scope      TEXT PRIMARY KEY,
       owner      TEXT NOT NULL,
       expires_at INTEGER NOT NULL
     )
@@ -685,7 +695,29 @@ class LocalStore {
   /// do not touch the alarm set. Failing closed is the safe direction, because a
   /// skipped reconcile is repaired by the next one and a double reconcile is
   /// what strands an alarm.
+  /// ## Why the lease is per [scope] and not one global row
+  ///
+  /// The first version had a single row, and the device showed what that costs.
+  /// The watched and watcher sides are **independent reconciles over disjoint
+  /// alarm sets** — `kind='reminder'` against `kind='warning'`, different
+  /// platform ids, nothing shared. Both run when the app opens. With one lock,
+  /// whichever lost the race skipped its alarm work entirely, so **every launch
+  /// re-armed one side and left the other unarmed**:
+  ///
+  /// ```
+  /// force-stop, then open the app
+  ///   before the fix   reminders 18   warnings  0     ← watched won
+  ///   after adding the watcher reconcile on open
+  ///                    reminders  0   warnings 12     ← watcher won
+  /// ```
+  ///
+  /// Neither is a race the lock exists to prevent. Serialising work that cannot
+  /// conflict is not caution, it is a second way to leave alarms unarmed — the
+  /// exact outcome the mechanism was added to stop. The lease is therefore per
+  /// scope: `'watched'` and `'watcher'` today, and a finer key later if a scope
+  /// ever needs splitting.
   Future<bool> acquireReconcileLock({
+    required String scope,
     required String owner,
     required DateTime now,
     required Duration lease,
@@ -693,7 +725,8 @@ class LocalStore {
     try {
       return await _db.transaction(
         (txn) async {
-          final rows = await txn.query('reconcile_lock', where: 'id = 0');
+          final rows = await txn
+              .query('reconcile_lock', where: 'scope = ?', whereArgs: [scope]);
           if (rows.isNotEmpty) {
             final until = rows.first['expires_at'] as int;
             // A live lease ALWAYS refuses, including to a caller presenting the
@@ -710,7 +743,7 @@ class LocalStore {
           await txn.insert(
             'reconcile_lock',
             {
-              'id': 0,
+              'scope': scope,
               'owner': owner,
               'expires_at': now.add(lease).millisecondsSinceEpoch,
             },
@@ -737,15 +770,18 @@ class LocalStore {
   /// finishes and releases. With a reused token it would free a lock that now
   /// belongs to somebody else, and the exclusion would stop existing under
   /// exactly the load that made it necessary.
-  Future<void> releaseReconcileLock(String owner) => _db.delete(
+  Future<void> releaseReconcileLock(String scope, String owner) => _db.delete(
         'reconcile_lock',
-        where: 'id = 0 AND owner = ?',
-        whereArgs: [owner],
+        where: 'scope = ? AND owner = ?',
+        whereArgs: [scope, owner],
       );
 
-  /// Who holds the lock and until when, or null. For the debug harness.
-  Future<({String owner, DateTime expiresAt})?> reconcileLockHolder() async {
-    final rows = await _db.query('reconcile_lock', where: 'id = 0');
+  /// Who holds one scope's lease and until when, or null. For the harness.
+  Future<({String owner, DateTime expiresAt})?> reconcileLockHolder(
+    String scope,
+  ) async {
+    final rows = await _db
+        .query('reconcile_lock', where: 'scope = ?', whereArgs: [scope]);
     if (rows.isEmpty) return null;
     return (
       owner: rows.first['owner'] as String,

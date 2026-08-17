@@ -49,12 +49,18 @@ class AppServices {
         notificationsEnabled: permissions.notificationsEnabled,
       );
 
+  /// The watcher's logic-bearing alarms. Exposed so the debug harness can arm
+  /// one directly — the only control that asks the OS whether it will actually
+  /// wake a bare isolate on this handset.
+  WarningAlarmScheduler get warningAlarms =>
+      const AndroidWarningAlarmScheduler(warningAlarmCallback);
+
   WatcherReconcileService get watcherReconcile => WatcherReconcileService(
         store: store,
         clock: clock,
         reader: SimulatedCheckInReader(store),
         notifications: notifications,
-        alarms: const AndroidWarningAlarmScheduler(warningAlarmCallback),
+        alarms: warningAlarms,
         // The real value, never a constant. `appInForeground: true` here because
         // this composition root only exists while the UI isolate is running —
         // and `canPost` is checked FIRST inside `NotificationDelivery.from`, so

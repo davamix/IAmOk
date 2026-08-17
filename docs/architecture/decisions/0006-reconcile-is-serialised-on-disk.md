@@ -52,8 +52,25 @@ consumed twice, so day 1 never fires.
 ## Decision
 
 **1. `reconcile()` takes a lease in `LocalStore` before it changes any alarm, and releases it after.**
-A single-row `reconcile_lock` table holding an owner and an expiry, taken inside a `BEGIN EXCLUSIVE`
-transaction so the compare-and-set is one atomic step rather than a read that races an upgrade.
+A `reconcile_lock` table holding an owner and an expiry, taken inside a `BEGIN EXCLUSIVE` transaction
+so the compare-and-set is one atomic step rather than a read that races an upgrade.
+
+**The lease is keyed by *scope*, not global, and the first version got that wrong.** The watched and
+watcher sides are independent reconciles over **disjoint** alarm sets — `kind='reminder'` against
+`kind='warning'`, different platform ids, nothing shared — and both run when the app opens. With one
+row, the loser skipped its alarm work entirely:
+
+```
+force-stop, then open the app        reminders   warnings
+  one global lease, watched won            18          0
+  one global lease, watcher won             0         12
+  per-scope lease                          18         12
+```
+
+Only the device showed it, and only after the app-open repair below existed to make both sides run at
+once. **Serialising work that cannot conflict is not caution — it is a second way to leave alarms
+unarmed**, which is precisely the outcome this decision exists to prevent. Scopes are `'watched'` and
+`'watcher'`; a finer key is available if one ever needs splitting.
 
 **2. The lock lives in the store because that is the only thing all three isolates can see.** §4 is
 explicit that the UI, alarm and FCM isolates share no memory, so a Dart mutex in the UI isolate is

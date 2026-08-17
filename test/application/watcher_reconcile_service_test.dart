@@ -493,6 +493,7 @@ void main() {
     // decision — silence is the failure this app cannot detect — so a run that
     // cannot take the lock still reads, still decides and still speaks.
     await store.acquireReconcileLock(
+      scope: WatcherReconcileService.lockScope,
       owner: 'someone-else',
       now: clock.now(),
       lease: const Duration(seconds: 30),

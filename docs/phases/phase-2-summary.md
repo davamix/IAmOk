@@ -602,6 +602,54 @@ reinstall before the Phase 3 device run**, or every measurement inherits them. N
 added: the app has never been released, so there is no installed base to repair. A released app would
 have owed a one-time `cancelAll()` on first launch after the fix.
 
+### A third defect, found while verifying the second — a fresh install strands an alarm
+
+**Measured on the POCO F3, 2026-08-17 ~21:56 CEST, on a clean uninstall/reinstall of the fixed
+build. Reproduced on a second fresh install.**
+
+| | |
+|---|---|
+| `settings.device_timezone` | `Europe/Madrid` |
+| `pending_alarms` rows | **18**, every one `Europe/Madrid` |
+| Alarms actually registered | **19** |
+| The extra | `2026-08-17 23:00 CEST` = **21:00 UTC**, tagged `ScheduledNotificationReceiver` |
+
+The store has no row for it, so **no future reconcile can ever cancel it**: `toCancel` is
+`currentlyScheduled − desired`, and that day has already left the desired window.
+
+**Why it happens.** On a fresh install `LocalStore.deviceTimezone()` is null, so the first
+`reconcile()` takes `_deviceZone()`'s documented UTC fallback and arms the window at **UTC** wall
+times. The UI then resolves the zone, stores `Europe/Madrid`, and reconciles again. For days 18–23
+that is harmless and in fact by design — the id is `hash(day, slot)` and deliberately excludes the
+zone, so the Madrid schedule *replaces* the UTC one, which is exactly `alarm_ids_test.dart`'s *"a
+MOVED reminder keeps its id"*. But `(2026-08-17, night)` is wanted **only** in UTC: 21:00 UTC was
+still an hour away while 21:00 CEST had already passed. So the Madrid reconcile does not want it, and
+it is left stranded.
+
+It escaped `toCancel` because the two reconciles **overlapped** — the second computed its diff
+against a store snapshot that did not yet hold the first's `replacePendingReminders` write.
+`build()` and the resume-triggered `refresh()` both call `reconcile()`, and on a cold start they land
+within milliseconds of each other. *The orphan is measured and reproducible; that interleaving is the
+reading most consistent with the evidence rather than something directly observed.*
+
+**It is not a narrow window.** The orphan appears whenever a slot is already past in the device zone
+but still ahead in UTC — for Europe/Madrid at UTC+2, that is the two hours after each of 12:00,
+18:00 and 21:00 local. Roughly six hours a day, on the first launch after any install.
+
+**Severity is low on this side and is the point on the next one.** §10 rates a spurious reminder as
+costing nothing, and that holds: the watched person gets one extra nudge, with the correct wording,
+on install day. What matters is the shape. This is an alarm **the app can never cancel** — the exact
+direction `LocalStore.replacePendingReminders` names as the one that must never occur — and the
+force-stop fix does not repair it, because re-asserting the whole desired set cannot remove something
+that is no longer in the desired set. **Phase 3 puts a logic-bearing warning alarm through the same
+code path, and there §10 rates a false fire as costing "everything".**
+
+**Deliberately not fixed here.** Serialising `reconcile()` is a real decision rather than a patch:
+Phase 3 adds an alarm isolate and Phase 4 an FCM isolate, both calling the same entry point, so the
+question is cross-**isolate** exclusion and not merely an in-process mutex — and §4 is explicit that
+the three isolates share no memory. Settling that belongs with the Phase 3 alarm design. Recorded
+here so it is not rediscovered from the symptom.
+
 ### Not observed
 
 - **The window draining past day 7 with the app never opened.** By design it would: the depth is
@@ -647,6 +695,13 @@ false OEM finding once already. The recipe is in `docs/testing/device-matrix.md`
 API 29 and it passed 500+ tests, because the test binding uses desktop SQLite and the only handset is
 API 33. Anything touching SQL, `java.time`, or a permission model needs the API 28 AVD before it is
 believed. An API 28 run is owed before Phase 4.
+
+**`reconcile()` is not safe to run concurrently, and Phase 3 doubles the number of callers.** Two
+overlapping runs each compute `toCancel` against their own stale snapshot, and the loser's alarms are
+stranded on the platform with no store row — unreachable, because re-asserting the desired set cannot
+cancel something outside it. Measured on a fresh install, where the UTC-fallback reconcile and the
+zone-corrected one raced. **Decide the exclusion mechanism before the alarm isolate is written**: it
+has to hold across isolates, which rules out an in-process lock and points at the store itself.
 
 **A platform id must be a pure function of its inputs, and nothing else.** `Object.hash` is seeded
 per process; `String.hashCode` is stable today but unguaranteed across SDK versions. Anything that

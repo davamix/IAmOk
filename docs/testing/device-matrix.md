@@ -187,6 +187,13 @@ To poll for boot recovery, loop the above every 15 s for several minutes.
 > still leaves zero alarms until the app is opened. Both rows were measured on a non-force-stopped
 > app and both are true; the conjunction is not.
 
+> **A fresh install strands one alarm the app can never cancel**, measured 2026-08-17 and reproduced.
+> The first `reconcile()` runs before the device zone is cached, so it arms the window in **UTC**; the
+> zone-corrected reconcile then replaces days that share an id and leaves behind any slot that was
+> wanted only under UTC. Store said 18, `dumpsys` said 19. **So `pm clear` — not just relaunching —
+> between runs**, or a measurement inherits it. Full write-up in
+> [phase-2-summary.md](../phases/phase-2-summary.md).
+
 **Phase 3 — watcher side**
 
 - [ ] A warning fires when it should

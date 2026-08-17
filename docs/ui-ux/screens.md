@@ -210,6 +210,57 @@ followed by three weeks of check-ins is history.
 
 Multiple watched people is supported by the data model and **not yet designed** as a layout.
 
+### Built in Phase 3 — approved copy
+
+The screen exists from Phase 3 because it is **where the *lost access* notification lands**, and
+that message promises *"Open the app to see what to do."* Layout stays as above: undesigned, and
+Phase 7's problem. What follows is the wording.
+
+| When | Text |
+|---|---|
+| Screen title | *"People you're looking after"* |
+| Nobody is watched | *"You're not looking after anyone yet. Ask a family member to help you add someone."* |
+| No warning standing | *"Everything OK"* |
+| …with a check-in read | *"Your phone last saw a check-in on Saturday 15 August."* |
+| …with none ever read | *"Your phone has not seen a check-in yet."* |
+| A warning standing | **The notification's own sentence, verbatim** |
+| Spoken (TalkBack), per row | *"Mum. "* followed by the row's lines |
+| Spoken, while loading | *"Checking"* |
+
+**The title echoes onboarding screen 2**, *"Who are you looking after?"* — the same trick the Tap
+screen's audience line uses, so the words that asked the question at setup answer it here.
+
+**The empty line mirrors `TapCopy.nobodyYet` deliberately**, including naming a next human: the
+pairing flow assumes a family member sets up both phones, so *"ask a family member"* is the real
+next step rather than a polite dead end. It is styled as ordinary text, never as a warning — an
+empty list is not an alarm.
+
+**A standing warning reuses the notification's sentence rather than a shorter list variant.** Two
+string sets would be two things to keep true, reviewed separately, and the failure is the row and
+the notification disagreeing about the same day — a contradiction the reader cannot resolve. The
+cost is naming the person in a row that already names them, which is accepted.
+
+**"Your phone last saw"**, never *"last checked in"* — the same rule ADR-0004 applies to the
+notification. The date is the newest check-in **this device managed to read**; during an access
+failure she may be tapping daily, and the shorter phrasing reads as a claim about her behaviour.
+
+### The lost-access row
+
+§13's backend-access item, brought forward because the notification routes here. The full panel is
+still Phase 7.
+
+| | |
+|---|---|
+| Label | *"Access to Mum's check-ins"* |
+| Consequence, all causes | *"You will not be warned if Mum misses a day."* |
+| `unauthenticated` | *"Sign in again."* |
+| `appCheckRejected` | *"Update I Am Ok in the Play Store."* |
+| `permissionDenied` / `unknown` | *"Nothing can be fixed on this phone. If it is still red tomorrow, ask whoever set up the app."* |
+
+It **outranks a standing warning in the row**, for the same reason ADR-0004 puts a refusal above the
+away branch: it is a fault in this app rather than a claim about her, and it is the thing the reader
+tapped through to understand.
+
 ## Health panel
 
 Always reachable, green/red per item, re-checked on every app resume — not an onboarding gate,

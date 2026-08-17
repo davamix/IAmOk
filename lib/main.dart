@@ -13,6 +13,7 @@ import 'platform/notification_router.dart';
 import 'platform/notification_service.dart';
 import 'platform/permission_service.dart';
 import 'presentation/tap_screen.dart';
+import 'presentation/watcher_screen.dart';
 
 /// The **UI isolate's** entry point.
 ///
@@ -86,11 +87,58 @@ Future<void> main() async {
   );
 }
 
-class IAmOkApp extends StatelessWidget {
+class IAmOkApp extends StatefulWidget {
   const IAmOkApp({super.key});
 
   @override
+  State<IAmOkApp> createState() => _IAmOkAppState();
+}
+
+class _IAmOkAppState extends State<IAmOkApp> {
+  /// Lets a notification tap navigate without a `BuildContext` from a widget
+  /// that may not be mounted yet.
+  ///
+  /// The cold-start path needs exactly that: the payload is captured in `main()`
+  /// before `runApp`, and nothing is on screen to react to it. §13's argument is
+  /// that a low-usage watcher never opens the app, so for this notification the
+  /// cold start is the *normal* arrival rather than the edge case.
+  final _navigator = GlobalKey<NavigatorState>();
+
+  @override
+  void initState() {
+    super.initState();
+    NotificationRouter.instance.tappedLink.addListener(_openWatcherList);
+    // After the first frame, so a payload captured before runApp is honoured.
+    WidgetsBinding.instance.addPostFrameCallback((_) => _openWatcherList());
+  }
+
+  @override
+  void dispose() {
+    NotificationRouter.instance.tappedLink.removeListener(_openWatcherList);
+    super.dispose();
+  }
+
+  /// Opens the watcher list, which is where every notification this app posts to
+  /// a *watcher* is explained.
+  ///
+  /// The routing is deliberately not per-notification-kind. All three — warning,
+  /// correction, lost access — are about one watched person, and the list row is
+  /// what carries the current truth about them. Sending a correction somewhere
+  /// different from the warning it replaced would be its own small confusion.
+  void _openWatcherList() {
+    if (NotificationRouter.instance.tappedLink.value == null) return;
+    final navigator = _navigator.currentState;
+    if (navigator == null) return;
+    // Phase 5 routes on role; until then the watched screen is home and this is
+    // pushed on top, so Back returns where the reader came from.
+    navigator.push(
+      MaterialPageRoute<void>(builder: (_) => const WatcherScreen()),
+    );
+  }
+
+  @override
   Widget build(BuildContext context) => MaterialApp(
+        navigatorKey: _navigator,
         title: 'I Am Ok',
         debugShowCheckedModeBanner: false,
         theme: ThemeData(

@@ -4,8 +4,12 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:timezone/timezone.dart' as tz;
+
 import '../application/providers.dart';
 import '../copy/notification_copy.dart';
+import '../data/check_in_reader.dart';
+import '../data/local_store.dart';
 import '../domain/domain.dart';
 import '../platform/alarm_ids.dart';
 import '../platform/clock.dart';
@@ -35,6 +39,39 @@ import '../platform/notification_service.dart';
 /// Gated on `kDebugMode` rather than `!kReleaseMode`: the latter leaves the
 /// harness in **profile** builds, which additionally carry the `INTERNET`
 /// permission that release does not.
+/// Reads, transforms and re-stores the simulated backend.
+///
+/// Read-modify-write rather than a setter per field, so setting the refusal
+/// cause does not silently drop the check-in days somebody seeded a minute
+/// earlier — which on a device reads as the app losing state rather than as the
+/// harness overwriting it.
+Future<void> _updateBackend(
+  LocalStore store,
+  SimulatedBackend Function(SimulatedBackend) change,
+) async {
+  final current = SimulatedBackend.decode(await store.simulatedBackendRaw());
+  await store.setSimulatedBackendRaw(change(current).encode());
+}
+
+/// The device's cached zone, or UTC. Same fallback as every isolate uses.
+Future<tz.Location> _zone(LocalStore store) async {
+  final name = await store.deviceTimezone();
+  if (name == null) return TimeZones.utc;
+  return TimeZones.tryLocation(name) ?? TimeZones.utc;
+}
+
+/// Every standing warning across every watched link, as one comparable string.
+Future<String> _standing(LocalStore store, String selfUid) async {
+  final links = await store.linksWatchedBy(selfUid);
+  final parts = <String>[];
+  for (final link in links) {
+    final cache = await store.watcherCache(link.id);
+    parts.add('${link.watchedName}=${cache.warningsShownFor}'
+        '/${cache.accessLostNotifiedOn ?? '-'}');
+  }
+  return parts.join(' ');
+}
+
 /// The sentinel day every *fire now* test notification is posted under.
 ///
 /// The epoch, because it can never fall inside a rolling window: a test
@@ -233,6 +270,142 @@ class _DebugHarnessScreenState extends ConsumerState<DebugHarnessScreen> {
             }),
           ]),
 
+          // ------------------------------------------------------- Phase 3
+          //
+          // The watcher side runs on a simulated backend, and these controls
+          // are what make its FOUR outcomes reachable on a device. Two of them
+          // — unreachable and refused — are close to impossible to produce on
+          // demand against a real backend, and they are exactly the two whose
+          // wording is a correctness requirement rather than copy polish.
+          //
+          // The simulated state lives in LocalStore, so the alarm isolate sees
+          // whatever is set here. Setting it in memory would leave the one
+          // isolate this phase exists to test reading something else.
+          _section('Watcher — simulated backend', [
+            for (final outcome in SimulatedReadOutcome.values)
+              _Action('Backend answers: ${outcome.name}', () async {
+                await _updateBackend(
+                  services.store,
+                  (b) => b.copyWith(outcome: outcome),
+                );
+                return 'the next read will be ${outcome.name}';
+              }),
+            for (final cause in RefusedCause.values)
+              _Action('Refusal cause: ${cause.name}', () async {
+                await _updateBackend(
+                  services.store,
+                  (b) => b.copyWith(
+                    outcome: SimulatedReadOutcome.refused,
+                    refusedCause: cause,
+                  ),
+                );
+                return 'refused with ${cause.name}\n'
+                    'each cause implies a DIFFERENT remediation, so a change '
+                    'must replace the standing notice rather than stack';
+              }),
+            _Action('Backend holds a check-in for yesterday', () async {
+              final zone = await _zone(services.store);
+              final yesterday =
+                  DayKey.fromInstant(services.clock.now(), zone).plusDays(-1);
+              await _updateBackend(
+                services.store,
+                (b) => b.copyWith(
+                  outcome: SimulatedReadOutcome.succeeded,
+                  checkInDays: {...b.checkInDays, yesterday},
+                ),
+              );
+              return 'added $yesterday\n'
+                  'run reconcile() — a standing warning for that day should be '
+                  'REPLACED by a correction, not joined by one';
+            }),
+            _Action('Backend holds an away period covering yesterday',
+                () async {
+              final zone = await _zone(services.store);
+              final today = DayKey.fromInstant(services.clock.now(), zone);
+              await _updateBackend(
+                services.store,
+                (b) => b.copyWith(
+                  outcome: SimulatedReadOutcome.succeeded,
+                  away: AwayPeriod(
+                    from: today.plusDays(-3),
+                    through: today.plusDays(3),
+                  ),
+                ),
+              );
+              return 'away ${today.plusDays(-3)} … ${today.plusDays(3)}';
+            }),
+            _Action('Clear the simulated backend', () async {
+              await services.store.setSimulatedBackendRaw(null);
+              return 'back to: read succeeds, holding nothing\n'
+                  'which produces a warning — the noisy direction, on purpose';
+            }),
+            _Action('Show the simulated backend', () async {
+              final raw = await services.store.simulatedBackendRaw();
+              return '${SimulatedBackend.decode(raw)}\n\nraw: ${raw ?? '(unset)'}';
+            }),
+          ]),
+
+          _section('Watcher — reconcile', [
+            _Action('Run the watcher reconcile', () async {
+              final state = await services.watcherReconcile
+                  .reconcile(selfUid: services.selfUid);
+              if (state.isEmpty) {
+                return 'no links where you are the WATCHER\n'
+                    'seed one first — a watched-side link is the other '
+                    'direction and will not appear here';
+              }
+              final buffer = StringBuffer('today ${state.today}\n');
+              for (final person in state.people) {
+                buffer
+                  ..writeln('')
+                  ..writeln('${person.name}  (${person.link.id})')
+                  ..writeln('  outcome    ${person.decision.outcome.name}')
+                  ..writeln('  about day  ${person.decision.day}')
+                  ..writeln('  silence    ${person.decision.silenceReason?.name ?? '-'}')
+                  ..writeln('  confirmed  ${person.cache.lastConfirmedDay ?? '-'}')
+                  ..writeln('  standing   ${person.cache.warningsShownFor}')
+                  ..writeln('  lostAccess ${person.cache.accessLostSince ?? '-'}'
+                      ' ${person.cache.accessLostCause?.name ?? ''}');
+              }
+              return buffer.toString();
+            }),
+            // The idempotence check that matters most on this side: a warning
+            // already standing must NOT fire again on app open, on boot, or on
+            // the next alarm. Every entry point calls reconcile.
+            _Action('Run it twice — no second notification', () async {
+              await services.watcherReconcile
+                  .reconcile(selfUid: services.selfUid);
+              final before = await _standing(services.store, services.selfUid);
+              await services.watcherReconcile
+                  .reconcile(selfUid: services.selfUid);
+              final after = await _standing(services.store, services.selfUid);
+              return 'standing after 1st  $before\n'
+                  'standing after 2nd  $after\n'
+                  '${before == after ? 'IDEMPOTENT' : 'NOT IDEMPOTENT'}\n\n'
+                  'watch the shade: a second notification here is the bug';
+            }),
+            _Action('Compare warning alarms: store vs armed', () async {
+              final links =
+                  await services.store.linksWatchedBy(services.selfUid);
+              if (links.isEmpty) return 'no watcher links';
+              final buffer = StringBuffer();
+              for (final link in links) {
+                final stored = await services.store.pendingWarnings(link.id);
+                buffer.writeln('${link.watchedName}  store says '
+                    '${stored.length}');
+                for (final w in stored.toList()
+                  ..sort((a, b) => a.at.compareTo(b.at))) {
+                  buffer.writeln('  ${w.at}');
+                }
+              }
+              buffer.writeln('');
+              buffer.writeln('Ground truth is `adb shell dumpsys alarm`, '
+                  'written to a file and pulled. No public API can enumerate '
+                  'an app\'s pending alarms.');
+              return buffer.toString();
+            }),
+          ]),
+
           _section('Store', [
             _Action('Dump LocalStore', () async {
               const encoder = JsonEncoder.withIndent('  ');
@@ -264,6 +437,50 @@ class _DebugHarnessScreenState extends ConsumerState<DebugHarnessScreen> {
                 ));
               }
               return 'seeded Ana and Beto';
+            }),
+            // The OTHER direction, and it is a different thing entirely.
+            // "Seed fake watchers" makes links where this user is WATCHED —
+            // people who get told about her. These are links where this user is
+            // the WATCHER, which is what the whole of Phase 3 operates on. The
+            // two are easy to confuse from the harness, and seeding the wrong
+            // one produces a watcher reconcile that finds nothing and reports
+            // success.
+            _Action('Seed fake watched people', () async {
+              final now = services.clock.now();
+              final zoneName =
+                  await services.store.deviceTimezone() ?? 'Etc/UTC';
+              for (final name in ['Mum', 'Granddad']) {
+                await services.store.upsertLink(Link(
+                  watchedUid: name.toLowerCase(),
+                  watcherUid: services.selfUid,
+                  status: LinkStatus.accepted,
+                  watchedName: name,
+                  watcherName: 'Me',
+                  watchedTimezone: zoneName,
+                  // Yesterday, so `D` is never before activeFrom and the
+                  // beforeActiveFrom branch does not silently swallow every
+                  // test — a silence that looks exactly like the app working.
+                  activeFrom: DayKey.fromInstant(
+                    now,
+                    await _zone(services.store),
+                  ).plusDays(-1),
+                  warningLocalTime: const LocalTimeOfDay(10, 0),
+                  createdAt: now,
+                ));
+              }
+              return 'seeded Mum and Granddad as WATCHED by you\n'
+                  'the watcher reconcile operates on these';
+            }),
+            _Action('Revoke every watched person', () async {
+              final links =
+                  await services.store.linksWatchedBy(services.selfUid);
+              for (final link in links) {
+                await services.store
+                    .upsertLink(link.copyWith(status: LinkStatus.revoked));
+              }
+              return 'revoked ${links.length} link(s)\n'
+                  'run the watcher reconcile — standing warnings should be '
+                  'WITHDRAWN, never corrected';
             }),
             _Action('Revoke every watcher', () async {
               // Reaches the empty-audience state without uninstalling, which is

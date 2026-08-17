@@ -177,6 +177,13 @@ abstract final class NotificationCopy {
       'Correction: $watchedName did check in yesterday, '
       'at ${_time(tappedAt, watcherZone)}.';
 
+  /// *"Saturday 22 August"*, for a surface outside this file.
+  ///
+  /// Exposed rather than duplicated so the watcher list and the notification
+  /// about the same day cannot render it differently — two date formatters is
+  /// two things to keep true, and the reader compares them directly.
+  static String dayLabel(DayKey day) => _date(day);
+
   /// *"Saturday 22 August"*. Written out, never `22/08` — ambiguous and hard to
   /// scan, and this is read at 3am by someone who has just been told bad news.
   static String _date(DayKey day) {

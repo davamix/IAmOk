@@ -33,6 +33,18 @@ class LocalStore {
 
   static const String defaultDatabaseName = 'i_am_ok.db';
 
+  /// Phase 3 has no sign-in, so identity is a fixed local uid.
+  ///
+  /// It lives here, on the one thing every isolate opens, because the **alarm
+  /// isolate and the UI must agree whose links these are** — and they have no
+  /// other way to agree, sharing no memory (§4). Two literals in two composition
+  /// roots would drift, and the symptom would be an alarm isolate that finds
+  /// zero links, reconciles nothing, and reports success.
+  ///
+  /// Phase 4 replaces this with the Firebase uid, which survives reinstall and
+  /// phone replacement so links never break (§1).
+  static const String defaultSelfUid = 'local-watched-user';
+
   final Database _db;
 
   Database get database => _db;
@@ -192,6 +204,7 @@ class LocalStore {
 
   static const String _keyDeviceTimezone = 'device_timezone';
   static const String _keyClockOffsetMs = 'debug_clock_offset_ms';
+  static const String _keySimulatedBackend = 'debug_simulated_backend';
 
   Future<String?> _setting(String key) async {
     final rows = await _db.query(
@@ -240,6 +253,18 @@ class LocalStore {
         _keyClockOffsetMs,
         offset == Duration.zero ? null : '${offset.inMilliseconds}',
       );
+
+  /// Phase 3's simulated backend, as JSON. See `CheckInReader`.
+  ///
+  /// On disk rather than in memory for the same reason as the clock offset: the
+  /// alarm isolate shares no memory with the UI (§4), and a simulated backend
+  /// the alarm could not see would leave this phase's whole point untested.
+  ///
+  /// Deleted entirely in Phase 4, along with `SimulatedCheckInReader`.
+  Future<String?> simulatedBackendRaw() => _setting(_keySimulatedBackend);
+
+  Future<void> setSimulatedBackendRaw(String? encoded) =>
+      _putSetting(_keySimulatedBackend, encoded);
 
   // ------------------------------------------------------------------- links
 
@@ -554,6 +579,65 @@ class LocalStore {
             'link_id': '',
             'fires_at': reminder.at.toUtc().millisecondsSinceEpoch,
             'zone': reminder.at.location.name,
+          });
+        }
+      });
+
+  /// What we believe is armed for one link's warning alarm.
+  ///
+  /// Scoped by `link_id`, because a watcher with two watched people has two
+  /// independent windows and reconciles them one link at a time. A query that
+  /// ignored the link would hand one link's reconcile the other's alarms, and
+  /// the diff would cancel them.
+  Future<Set<ScheduledWarning>> pendingWarnings(String linkId) async {
+    final rows = await _db.query(
+      'pending_alarms',
+      where: 'kind = ? AND link_id = ?',
+      whereArgs: ['warning', linkId],
+    );
+    final result = <ScheduledWarning>{};
+    for (final row in rows) {
+      final zone = TimeZones.tryLocation(row['zone']! as String);
+      // Dropped rather than thrown on, as in [pendingReminders]: the reconciler
+      // then believes it is not armed and schedules over the same platform id,
+      // which is a replacement. The recoverable direction, and this runs inside
+      // an alarm isolate that cannot report a throw to anyone.
+      if (zone == null) continue;
+      result.add(ScheduledWarning(
+        day: DayKey.parse(row['day']! as String),
+        at: tz.TZDateTime.from(_instant(row['fires_at'])!, zone),
+      ));
+    }
+    return result;
+  }
+
+  /// Replaces the pending warning set **for one link**.
+  ///
+  /// The delete is scoped to the link for the same reason the read is: a
+  /// wholesale delete would silently disarm every other watched person the
+  /// moment two links existed, and the symptom is a warning that never fires.
+  Future<void> replacePendingWarnings(
+    String linkId,
+    Set<ScheduledWarning> warnings,
+  ) =>
+      _db.transaction((txn) async {
+        await txn.delete(
+          'pending_alarms',
+          where: 'kind = ? AND link_id = ?',
+          whereArgs: ['warning', linkId],
+        );
+        for (final warning in warnings) {
+          await txn.insert('pending_alarms', {
+            'kind': 'warning',
+            'day': warning.day.toString(),
+            // Empty rather than NULL — see the table definition. A warning
+            // belongs to a link and has no slot, and NULLs compare distinct in
+            // a primary key, so the same alarm could otherwise be inserted
+            // repeatedly and counted twice by the diff that cancels.
+            'slot': '',
+            'link_id': linkId,
+            'fires_at': warning.at.toUtc().millisecondsSinceEpoch,
+            'zone': warning.at.location.name,
           });
         }
       });

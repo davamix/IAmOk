@@ -1,3 +1,4 @@
+import 'package:android_alarm_manager_plus/android_alarm_manager_plus.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -8,6 +9,7 @@ import 'domain/domain.dart';
 import 'platform/alarm_scheduler.dart';
 import 'platform/clock.dart';
 import 'platform/clock_service.dart';
+import 'platform/notification_router.dart';
 import 'platform/notification_service.dart';
 import 'platform/permission_service.dart';
 import 'presentation/tap_screen.dart';
@@ -27,9 +29,28 @@ Future<void> main() async {
   // alarm isolate never runs app startup (see TimeZones).
   TimeZones.ensureInitialized();
 
+  // Registers the plugin's own AlarmService and starts the background executor
+  // that the alarm isolate is launched from. It must run in the UI isolate
+  // before anything is armed — without it `oneShotAt` reports success and the
+  // callback is never invoked, which is a silent failure of exactly the kind
+  // this side exists to avoid.
+  await AndroidAlarmManager.initialize();
+
   final store = await LocalStore.open();
-  final notifications = await NotificationService.initialize();
+  final notifications = await NotificationService.initialize(
+    // Only the UI isolate routes taps. The alarm isolate posts notifications and
+    // wires nothing, because there is no screen to open from there.
+    onTap: NotificationRouter.instance.onTap,
+  );
   final permissions = PermissionService(notifications);
+
+  // A notification that launched the app from cold is not delivered through the
+  // callback above — the app was not running to receive it. This is the normal
+  // case for the watcher's *lost access* notice, which exists precisely for
+  // someone whose app has been closed, so reading it is not an edge case here.
+  NotificationRouter.instance.captureLaunch(
+    await notifications.launchPayload(),
+  );
 
   // The debug harness's forced date, if one is set. Read from disk rather than
   // held in memory so every isolate agrees about what day it is.
@@ -51,10 +72,10 @@ Future<void> main() async {
     alarms: NotificationAlarmScheduler(notifications),
     permissions: permissions,
     clockService: const ClockService(),
-    // Phase 2 has no backend and no sign-in. Phase 4 replaces this with the
-    // Firebase uid, which survives reinstall and phone replacement so links
-    // never break (§1).
-    selfUid: 'local-watched-user',
+    // Shared with the alarm isolate through LocalStore, because the two share
+    // no memory and an isolate looking up a different uid finds zero links,
+    // reconciles nothing, and reports success.
+    selfUid: LocalStore.defaultSelfUid,
   );
 
   runApp(

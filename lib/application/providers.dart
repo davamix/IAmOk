@@ -1,12 +1,17 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../data/check_in_reader.dart';
 import '../data/local_store.dart';
+import '../domain/domain.dart';
 import '../platform/alarm_scheduler.dart';
 import '../platform/clock.dart';
 import '../platform/clock_service.dart';
 import '../platform/notification_service.dart';
 import '../platform/permission_service.dart';
+import '../platform/warning_alarm_scheduler.dart';
+import 'warning_alarm_handler.dart';
 import 'watched_reconcile_service.dart';
+import 'watcher_reconcile_service.dart';
 
 /// Everything built once at app start, in one place.
 ///
@@ -43,6 +48,26 @@ class AppServices {
         alarms: alarms,
         notificationsEnabled: permissions.notificationsEnabled,
       );
+
+  WatcherReconcileService get watcherReconcile => WatcherReconcileService(
+        store: store,
+        clock: clock,
+        reader: SimulatedCheckInReader(store),
+        notifications: notifications,
+        alarms: const AndroidWarningAlarmScheduler(warningAlarmCallback),
+        // The real value, never a constant. `appInForeground: true` here because
+        // this composition root only exists while the UI isolate is running —
+        // and `canPost` is checked FIRST inside `NotificationDelivery.from`, so
+        // a watcher with notifications revoked still comes out `unavailable`
+        // rather than `redundant`. That order is what stops an open app
+        // consuming the access-lost cadence in silence.
+        delivery: () async => NotificationDelivery.from(
+          canPost: await notifications.canPost(
+            channel: NotificationService.warningsChannel,
+          ),
+          appInForeground: true,
+        ),
+      );
 }
 
 /// Overridden in `main()`. Reading it without that override is a wiring bug,
@@ -61,6 +86,36 @@ final watchedStateProvider =
     AsyncNotifierProvider<WatchedStateNotifier, WatchedState>(
   WatchedStateNotifier.new,
 );
+
+/// The watcher list's state, recomputed by a full reconcile.
+///
+/// Same shape as [watchedStateProvider] and for the same reason: §3's rule is
+/// *reconcile, don't mutate*, so opening the app re-reads everything and
+/// re-derives the whole answer rather than rendering a remembered one. On this
+/// side that also means **opening the app is a real dead-man's-switch check** —
+/// it attempts tier 1, corrects a false warning if a late check-in has arrived,
+/// and clears a stale access-lost notice.
+final watcherStateProvider =
+    AsyncNotifierProvider<WatcherStateNotifier, WatcherState>(
+  WatcherStateNotifier.new,
+);
+
+class WatcherStateNotifier extends AsyncNotifier<WatcherState> {
+  @override
+  Future<WatcherState> build() {
+    final services = ref.watch(appServicesProvider);
+    return services.watcherReconcile.reconcile(selfUid: services.selfUid);
+  }
+
+  /// Re-reads everything. Called on resume, and after the harness changes the
+  /// simulated backend underneath.
+  Future<void> refresh() async {
+    final services = ref.read(appServicesProvider);
+    state = await AsyncValue.guard(
+      () => services.watcherReconcile.reconcile(selfUid: services.selfUid),
+    );
+  }
+}
 
 class WatchedStateNotifier extends AsyncNotifier<WatchedState> {
   @override

@@ -46,6 +46,16 @@ dependencies:
   flutter_timezone: ^5.1.0
   flutter_riverpod: ^3.4.2
 
+  # The watcher's LOGIC-BEARING alarm (§10, §15). Unlike the watched side's
+  # display-only `zonedSchedule`, this wakes a real Dart isolate so the warning
+  # can verify before it speaks — a false "she didn't check in" is the worst bug
+  # this app can have, so cancellation alone is not trusted.
+  #
+  # It brings a second background entry point with it. Anything that entry point
+  # reaches must be bare-isolate safe: no Flutter, no Riverpod, no
+  # flutter_timezone. `test/domain/domain_purity_test.dart` holds that list.
+  android_alarm_manager_plus: ^4.0.7
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

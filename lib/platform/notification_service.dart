@@ -25,7 +25,40 @@ import 'alarm_ids.dart';
 /// different phone, and a false one costs nothing (§10's asymmetry table).
 ///
 /// [ADR-0004]: ../../docs/architecture/decisions/0004-refused-is-not-unreachable.md
-class NotificationService {
+/// What the watcher's reconcile needs to say out loud.
+///
+/// An interface for the same reason [AlarmScheduler] is one: the composition
+/// above it — *correct before warning, withdraw without correcting, cancel the
+/// access notice when access returns* — is orderly logic that must be testable
+/// without a device, and the five calls below are exactly where getting the
+/// order wrong produces a false all-clear.
+///
+/// Deliberately **not** a general "post a notification" method. Each call names
+/// what is being said, so the id derivation and the channel choice live here
+/// rather than at every call site — and a correction posting at a fresh id, or a
+/// missed-day warning landing on the *App problems* channel, become impossible
+/// rather than merely unlikely.
+abstract interface class WatcherNotifications {
+  Future<void> showWarning({
+    required String linkId,
+    required DayKey day,
+    required String body,
+  });
+
+  Future<void> showCorrection({
+    required String linkId,
+    required DayKey day,
+    required String body,
+  });
+
+  Future<void> cancelWarning(String linkId, DayKey day);
+
+  Future<void> showAccessLost({required String linkId, required String body});
+
+  Future<void> cancelAccessLost(String linkId);
+}
+
+class NotificationService implements WatcherNotifications {
   NotificationService(this._plugin);
 
   final FlutterLocalNotificationsPlugin _plugin;
@@ -206,6 +239,136 @@ class NotificationService {
 
   Future<void> cancelReminder(DayKey day, ReminderSlot slot) =>
       _plugin.cancel(id: AlarmIds.reminder(day, slot));
+
+  // -------------------------------------------------------- watcher: warnings
+
+  /// Posts a warning about one link on one day, at `hash(link, D)`.
+  ///
+  /// **The id is what makes the correction path work.** A later
+  /// [showCorrection] for the same `(link, day)` posts at this same id, so
+  /// Android *replaces* the notification rather than stacking a second one — the
+  /// family sees one corrected message instead of *"No check-in from Mum
+  /// yesterday"* with *"Correction: Mum did check in yesterday"* sitting beneath
+  /// it. Both halves of the key are load-bearing: keyed on the day alone, a
+  /// correction for one watched person would retract a **true** standing warning
+  /// about another.
+  ///
+  /// [payload] carries the link id so a tap can open that person's row. It is
+  /// read back on a cold start too, which is the normal case here — this
+  /// notification exists for a watcher whose app has been closed.
+  @override
+  Future<void> showWarning({
+    required String linkId,
+    required DayKey day,
+    required String body,
+  }) =>
+      _show(
+        id: AlarmIds.warning(linkId, day),
+        body: body,
+        channel: warningsChannel,
+        payload: linkId,
+      );
+
+  /// Replaces a standing warning with the correction, at the **same id**.
+  ///
+  /// Deliberately the same call shape as [showWarning] rather than a variant
+  /// flag: the identity is the whole mechanism, so making the two share one id
+  /// derivation is what stops them drifting apart.
+  @override
+  Future<void> showCorrection({
+    required String linkId,
+    required DayKey day,
+    required String body,
+  }) =>
+      _show(
+        id: AlarmIds.warning(linkId, day),
+        body: body,
+        channel: warningsChannel,
+        payload: linkId,
+      );
+
+  /// Withdraws a standing warning with **no replacement message** (§10 step 2).
+  ///
+  /// Used on revocation, where nothing disproves the warning — it is simply no
+  /// longer this watcher's business, and *"Mum did check in yesterday"* would be
+  /// a claim the device cannot support. Without this a warning standing at the
+  /// moment of revocation sits in the tray forever, because every later read is
+  /// refused and no correction can ever run.
+  @override
+  Future<void> cancelWarning(String linkId, DayKey day) =>
+      _plugin.cancel(id: AlarmIds.warning(linkId, day));
+
+  /// ADR-0004's notice, on the **App problems** channel rather than the warning
+  /// one.
+  ///
+  /// The separation is the structural half of ADR-0004: a watcher who mutes app
+  /// faults must still be told when their relative misses a day, and training a
+  /// family to swipe the channel that carries the real warning cannot be undone.
+  ///
+  /// Keyed on the link and **not** the day, so the decaying cadence replaces one
+  /// standing notice rather than stacking a new one at every milestone — and a
+  /// changed cause replaces the now-wrong remediation instead of leaving two
+  /// contradictory instructions in the tray.
+  @override
+  Future<void> showAccessLost({
+    required String linkId,
+    required String body,
+  }) =>
+      _show(
+        id: AlarmIds.accessLost(linkId),
+        body: body,
+        channel: accessChannel,
+        payload: linkId,
+      );
+
+  /// Clears a standing access-lost notice.
+  ///
+  /// There is deliberately no *"access restored"* message — quiet confirm, loud
+  /// miss. But **not notifying and not cancelling are different decisions**, and
+  /// only the first was made: without this the tray goes on telling a watcher to
+  /// open the app and fix something already fixed, beside the next real warning.
+  @override
+  Future<void> cancelAccessLost(String linkId) =>
+      _plugin.cancel(id: AlarmIds.accessLost(linkId));
+
+  Future<void> _show({
+    required int id,
+    required String body,
+    required AndroidNotificationChannel channel,
+    required String payload,
+  }) =>
+      _plugin.show(
+        id: id,
+        title: NotificationCopy.warningTitle,
+        body: body,
+        notificationDetails: NotificationDetails(
+          android: AndroidNotificationDetails(
+            channel.id,
+            channel.name,
+            channelDescription: channel.description,
+            importance: channel.importance,
+            priority: Priority.high,
+            // The body is a whole sentence and the collapsed shade shows one
+            // line, so an expanded style is what lets a reader see the rest
+            // without opening anything. The first words still carry the claim.
+            styleInformation: BigTextStyleInformation(body),
+          ),
+        ),
+        payload: payload,
+      );
+
+  /// The payload of the notification that **launched** the app, or null.
+  ///
+  /// A tap that starts the app from cold never reaches
+  /// `onDidReceiveNotificationResponse` — there was no app running to receive
+  /// it. Without this the *lost access* notice's *"Open the app to see what to
+  /// do"* opens the app to nothing in particular, for the watcher whose app is
+  /// closed almost by definition.
+  Future<String?> launchPayload() async {
+    final details = await _plugin.getNotificationAppLaunchDetails();
+    if (details == null || !details.didNotificationLaunchApp) return null;
+    return details.notificationResponse?.payload;
+  }
 
   /// Everything currently armed, as the platform sees it.
   ///

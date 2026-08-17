@@ -278,11 +278,25 @@ void main() {
   /// stops the reconcile service importing `package:flutter` tomorrow. It would
   /// pass the clock check and then throw in the isolate that cannot report
   /// anything.
+  /// **Phase 3 is the first phase where this list is load-bearing rather than
+  /// precautionary.** Until now no background isolate existed, so a stray
+  /// `package:flutter` import would have been wrong but harmless. The alarm
+  /// entry point below runs in a real bare isolate on a real phone, where the
+  /// failure is an exception nobody sees, in the one code path whose job is to
+  /// notice that nothing has been heard.
+  ///
+  /// Everything `warningAlarmCallback` can reach, transitively, belongs here.
   const bareIsolateSafe = <String>[
+    'lib/application/warning_alarm_handler.dart',
     'lib/application/watched_reconcile_service.dart',
+    'lib/application/watcher_reconcile_service.dart',
+    'lib/data/check_in_reader.dart',
     'lib/data/local_store.dart',
+    'lib/copy/notification_copy.dart',
     'lib/platform/clock.dart',
     'lib/platform/alarm_ids.dart',
+    'lib/platform/notification_service.dart',
+    'lib/platform/warning_alarm_scheduler.dart',
   ];
 
   group('runs in a bare isolate', () {
@@ -292,20 +306,50 @@ void main() {
         expect(file.existsSync(), isTrue, reason: 'listed but missing: $path');
 
         final code = _withoutComments(file.readAsStringSync());
-        for (final banned in const [
-          'package:flutter/',
-          'package:flutter_riverpod',
-          'dart:ui',
-          'flutter_timezone',
-        ]) {
-          expect(code.contains(banned), isFalse,
-              reason: '$path must not reach $banned — it runs where there is '
-                  'no widget tree and no plugin registrant');
+        for (final banned in _bannedInBareIsolate.entries) {
+          expect(code.contains(banned.key), isFalse,
+              reason: '$path must not reach ${banned.key} — ${banned.value}');
         }
       });
     }
   });
 }
+
+/// What a bare background isolate genuinely cannot provide — **the widget
+/// layer**, and nothing wider than that.
+///
+/// The first version of this list banned `package:flutter/` outright, on the
+/// stated grounds that a background isolate has "no widget tree and no plugin
+/// registrant". Phase 3 established that the second half of that is **false**:
+/// `android_alarm_manager_plus` starts its isolate on a `new FlutterEngine(
+/// context)`, and that constructor registers plugins automatically. It has to —
+/// the alarm isolate reads `LocalStore` through `sqflite` and posts through
+/// `flutter_local_notifications`, both of which are method-channel plugins, and
+/// neither would work at all otherwise.
+///
+/// So `package:flutter/services.dart` — the method-channel layer itself, which
+/// `NotificationService` needs for `PlatformException` — is legitimate here, and
+/// banning it would have forced either a pointless wrapper or an exemption that
+/// re-opened the whole rule. `foundation.dart` is the same case.
+///
+/// What is genuinely absent is the **widget tree**: no `runApp`, no
+/// `BuildContext`, no rendering surface, no `MediaQuery`. Those are banned by
+/// name, so the rule now says what it means instead of approximating it.
+///
+/// `dart:ui` stays banned. It technically resolves in a background engine, but
+/// nothing on this path has any business touching it, and reaching for it is a
+/// reliable sign that code meant for a screen has drifted into an isolate that
+/// has none.
+const _bannedInBareIsolate = <String, String>{
+  'package:flutter/material.dart': 'there is no widget tree',
+  'package:flutter/widgets.dart': 'there is no widget tree',
+  'package:flutter/cupertino.dart': 'there is no widget tree',
+  'package:flutter_riverpod':
+      'providers live in the UI isolate and are invisible here (§4)',
+  'dart:ui': 'nothing on this path renders anything',
+  'flutter_timezone':
+      'ADR-0002 decision 2 — the zone is read from LocalStore, never a plugin',
+};
 
 String _path(File file) => file.path.replaceAll(r'\', '/');
 

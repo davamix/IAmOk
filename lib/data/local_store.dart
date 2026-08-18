@@ -240,6 +240,8 @@ class LocalStore {
   static const String _keyClockOffsetMs = 'debug_clock_offset_ms';
   static const String _keySimulatedBackend = 'debug_simulated_backend';
   static const String _keyWarningAlarmsExact = 'warning_alarms_exact';
+  static const String _keyWatchedZoneUnknown = 'watched_zone_unknown';
+  static const String _keyLinkReconcileFailed = 'link_reconcile_failed';
 
   Future<String?> _setting(String key) async {
     final rows = await _db.query(
@@ -323,6 +325,44 @@ class LocalStore {
 
   Future<void> setWarningAlarmsExact(bool exact) =>
       _putSetting(_keyWarningAlarmsExact, '$exact');
+
+  /// Whether any watched link carries a timezone this build cannot resolve.
+  ///
+  /// The day is then computed against the watcher's own zone — a guess, and
+  /// wrong by up to a day for a family on opposite sides of the world. The
+  /// reconcile continues rather than throwing, because one bad string must not
+  /// stop every other watched person being checked inside an isolate that
+  /// reports nothing.
+  ///
+  /// Recorded so the guess is not also invisible. §13's health panel reads it in
+  /// Phase 7; until then it is in `dump`, which is the difference between a
+  /// known fault and one nobody can ever be told about.
+  ///
+  /// Written for the **whole** watched set on every reconcile, so it clears
+  /// itself once the offending link is gone.
+  Future<bool> watchedZoneUnknown() async =>
+      await _setting(_keyWatchedZoneUnknown) == 'true';
+
+  Future<void> setWatchedZoneUnknown(bool unknown) => _putSetting(
+        _keyWatchedZoneUnknown,
+        unknown ? 'true' : null,
+      );
+
+  /// Whether the last reconcile failed on at least one watched link.
+  ///
+  /// The pass carries on with the rest — one bad link must not cost every other
+  /// watched person their check — but a link the app silently stopped checking
+  /// is precisely the failure this side cannot detect in itself, so it is not
+  /// allowed to be invisible as well.
+  ///
+  /// Cleared by the next reconcile in which every link succeeds.
+  Future<bool> linkReconcileFailed() async =>
+      await _setting(_keyLinkReconcileFailed) == 'true';
+
+  Future<void> setLinkReconcileFailed(bool failed) => _putSetting(
+        _keyLinkReconcileFailed,
+        failed ? 'true' : null,
+      );
 
   // ------------------------------------------------------------------- links
 

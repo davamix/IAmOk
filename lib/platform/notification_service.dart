@@ -6,25 +6,6 @@ import '../copy/notification_copy.dart';
 import '../domain/domain.dart';
 import 'alarm_ids.dart';
 
-/// Channels, display, cancellation, and replace-by-id (§6).
-///
-/// ## Why three channels and not one
-///
-/// A channel is the unit Android gives the user for switching us off, so the
-/// split is a correctness decision rather than a tidiness one.
-///
-/// [ADR-0004][] argues that notifying about lost access *daily* "lands in the
-/// same channel as the real *No check-in from Mum yesterday*", and that
-/// **training a family to swipe that channel cannot be undone**. The cadence was
-/// the fix for the frequency; separating the channels is the fix for the
-/// collision. A watcher who mutes "app problems" still gets told when their
-/// relative misses a day, which is the one message this app exists to deliver.
-///
-/// Reminders are separated from warnings for the opposite reason: they are the
-/// *only* frequent notification here, they go to a different person on a
-/// different phone, and a false one costs nothing (§10's asymmetry table).
-///
-/// [ADR-0004]: ../../docs/architecture/decisions/0004-refused-is-not-unreachable.md
 /// What the watcher's reconcile needs to say out loud.
 ///
 /// An interface for the same reason [AlarmScheduler] is one: the composition
@@ -58,6 +39,28 @@ abstract interface class WatcherNotifications {
   Future<void> cancelAccessLost(String linkId);
 }
 
+/// Channels, display, cancellation, and replace-by-id (§6).
+///
+/// ## Why three channels and not one
+///
+/// A channel is the unit Android gives the user for switching us off, so the
+/// split is a correctness decision rather than a tidiness one.
+///
+/// [ADR-0004][] argues that notifying about lost access *daily* "lands in the
+/// same channel as the real *No check-in from Mum yesterday*", and that
+/// **training a family to swipe that channel cannot be undone**. The cadence was
+/// the fix for the frequency; separating the channels is the fix for the
+/// collision. A watcher who mutes "app problems" still gets told when their
+/// relative misses a day, which is the one message this app exists to deliver.
+///
+/// Reminders are separated from warnings for the opposite reason: they are the
+/// *only* frequent notification here, they go to a different person on a
+/// different phone, and a false one costs nothing (§10's asymmetry table).
+///
+/// That separation is only real if the app **measures** it per channel, which
+/// is why [watcherDelivery] lives here too rather than in each composition root.
+///
+/// [ADR-0004]: ../../docs/architecture/decisions/0004-refused-is-not-unreachable.md
 class NotificationService implements WatcherNotifications {
   NotificationService(this._plugin);
 
@@ -131,13 +134,12 @@ class NotificationService implements WatcherNotifications {
     return NotificationService(plugin);
   }
 
-  /// Whether the OS will actually show anything we post.
+  /// Whether [channel] would actually show something — and so whether anything
+  /// decided now becomes [NotificationDelivery.unavailable].
   ///
-  /// This is what becomes [NotificationDelivery.unavailable]. On API 33+ a user
-  /// can revoke `POST_NOTIFICATIONS` at any time, and Android auto-revokes it
-  /// from apps nobody opens — §13 rates that High precisely because it happens
-  /// to the watcher who never opens the app.
-  /// Whether [channel] would actually show something.
+  /// On API 33+ a user can revoke `POST_NOTIFICATIONS` at any time, and Android
+  /// auto-revokes it from apps nobody opens — §13 rates that High precisely
+  /// because it happens to the watcher who never opens the app.
   ///
   /// **App-level `areNotificationsEnabled()` is not enough**, and the gap is
   /// the one Decision 1 exists to close, left open on a different axis. That

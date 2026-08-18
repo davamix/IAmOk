@@ -41,6 +41,30 @@ Future<void> main() async {
   await AndroidAlarmManager.initialize();
 
   final store = await LocalStore.open();
+
+  // **The device's IANA zone, cached before anything reconciles.**
+  //
+  // `WatchedStateNotifier.build()` already awaited this before its own first
+  // reconcile — the fix for a defect measured on the POCO F3, where a fresh
+  // install armed 19 alarms at UTC wall times, an hour or two late each. But
+  // `_reconcileBothSides` runs from a post-frame callback and awaits nothing, so
+  // on the watcher side the same race was still open: `deviceTimezone()` is null
+  // on a fresh install, `_watcherZone()` takes ADR-0002's documented UTC
+  // fallback, and seven warning alarms are armed at 10:00 **UTC**.
+  //
+  // It self-heals on the first fire, which is precisely the fire that is two
+  // hours late — on a dead man's switch, on day one. Doing it here removes the
+  // ordering dependency from both call sites instead of repeating the fix.
+  //
+  // Swallowed, never fatal: a plugin hiccup must not stop the app starting, and
+  // every reader below has a documented fallback.
+  try {
+    final zone = await const ClockService().deviceTimezone();
+    if (zone != null) await store.setDeviceTimezone(zone);
+  } on Object {
+    // Deliberate; see above.
+  }
+
   final notifications = await NotificationService.initialize(
     // Only the UI isolate routes taps. The alarm isolate posts notifications and
     // wires nothing, because there is no screen to open from there.

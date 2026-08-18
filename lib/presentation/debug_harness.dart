@@ -653,9 +653,16 @@ channel - is the finding.''';
           _section('Permissions', [
             _Action('Read permissions', () async {
               final snapshot = await services.permissions.snapshot();
-              final delivery = await services.permissions.delivery();
-              return '$snapshot\n\ndelivery handed to the domain: '
-                  '${delivery.name}';
+              // Both sides, named by channel. Printing one number labelled
+              // "delivery handed to the domain" was wrong from the moment the
+              // watcher side went per-channel — and this screen is what someone
+              // reads while diagnosing a muted channel on a device, so a
+              // plausible-looking wrong number here costs more than none.
+              final reminders = await services.permissions.reminderDelivery();
+              final watcher = await services.notifications
+                  .watcherDelivery(appInForeground: false);
+              return '$snapshot\n\nreminders (watched): ${reminders.name}\n'
+                  'watcher: $watcher';
             }),
             _Action('Request notifications', () async {
               final granted =

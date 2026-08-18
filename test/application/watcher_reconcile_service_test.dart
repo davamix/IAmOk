@@ -145,9 +145,15 @@ class _StubReader implements CheckInReader {
   /// prove the reconcile lease is released on the way out.
   bool throwOnRead = false;
 
+  /// Throws for **one** link, leaving the rest answerable — which is the only
+  /// arrangement that can tell per-link isolation from an abort.
+  String? throwOnLink;
+
   @override
   Future<FirestoreRead> read(Link link) async {
-    if (throwOnRead) throw StateError('the backend blew up');
+    if (throwOnRead || link.id == throwOnLink) {
+      throw StateError('the backend blew up');
+    }
     return perLink[link.id] ?? result;
   }
 }
@@ -683,6 +689,66 @@ void main() {
     });
   });
 
+  group('one link failing does not cost the others their check', () {
+    /// A second watched person, so "the rest of the loop" is a real thing.
+    Future<void> seedGranddad() => store.upsertLink(Link(
+          watchedUid: 'granddad',
+          watcherUid: selfUid,
+          status: LinkStatus.accepted,
+          watchedName: 'Granddad',
+          watcherName: 'Ana',
+          watchedTimezone: 'Europe/Madrid',
+          activeFrom: day('2026-08-01'),
+          warningLocalTime: const LocalTimeOfDay(10, 0),
+          createdAt: DateTime.utc(2026, 8, 1),
+        ));
+
+    test('the surviving link is still reconciled and still warned about',
+        () async {
+      // **Links come back ordered by id**, so `granddad_ana` precedes
+      // `mum_ana`. Before the per-link guard, a throw on Granddad aborted the
+      // pass and Mum was never checked at all — no warning, no alarm, no
+      // symptom. One bad row starves every link after it alphabetically,
+      // forever.
+      await seedGranddad();
+      reader.perLink['granddad_ana'] = const FirestoreRead.succeeded();
+      reader.throwOnLink = 'granddad_ana';
+
+      final state = await service().reconcile(selfUid: selfUid);
+
+      expect(notifications.calls, contains('warn:$mumLink:$d'),
+          reason: 'Mum is fine and must still be warned about');
+      expect(state.people.map((p) => p.link.id), [mumLink],
+          reason: 'the failed link is omitted rather than rendered from a '
+              'half-built reconcile — a row assembled out of a failure is the '
+              'false claim this side exists to avoid');
+    });
+
+    test('and the failure is recorded rather than swallowed', () async {
+      await seedGranddad();
+      reader.throwOnLink = 'granddad_ana';
+
+      await service().reconcile(selfUid: selfUid);
+
+      expect(await store.linkReconcileFailed(), isTrue,
+          reason: 'a link the app silently stopped checking is exactly the '
+              'failure it cannot detect in itself');
+    });
+
+    test('and it clears once every link succeeds again', () async {
+      await seedGranddad();
+      reader.throwOnLink = 'granddad_ana';
+      await service().reconcile(selfUid: selfUid);
+      expect(await store.linkReconcileFailed(), isTrue);
+
+      reader.throwOnLink = null;
+      await service().reconcile(selfUid: selfUid);
+
+      expect(await store.linkReconcileFailed(), isFalse,
+          reason: 'a flag that never clears is a flag nobody trusts');
+    });
+  });
+
   group('a link with an unrenderable timezone', () {
     /// A zone name this build's compiled-in tzdata does not carry. Reachable
     /// from a store written by a newer build, a restore, or a zone renamed
@@ -791,14 +857,13 @@ void main() {
               'killed as its normal ending, nothing would ever release it');
     });
 
-    test('even when the run throws', () async {
+    test('even when a link throws', () async {
       // The isolate must not die holding the lease. It is released in a
       // `finally` precisely because there is no screen to report the throw and
       // no second chance until the next alarm fires.
       reader.throwOnRead = true;
 
-      await expectLater(
-          service().reconcile(selfUid: selfUid), throwsA(anything));
+      await service().reconcile(selfUid: selfUid);
 
       expect(await store.reconcileLockHolder(WatcherReconcileService.lockScope),
           isNull);

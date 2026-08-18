@@ -74,6 +74,7 @@ class WatcherReconcileResult {
     required this.shouldNotify,
     required this.corrections,
     required this.shouldPostCorrections,
+    required this.watchedZoneUnknown,
     required this.withdrawnWarnings,
     required this.cancelAccessLostNotice,
     required this.previousAway,
@@ -103,29 +104,51 @@ class WatcherReconcileResult {
   /// [shouldPostCorrections] is false, simply taken down.
   final List<Correction> corrections;
 
+  /// This build's tzdata does not carry `link.watchedTimezone`, so the day was
+  /// computed against a **guess**.
+  ///
+  /// Reachable from a store written by a newer build, a restore, or a zone
+  /// renamed upstream between tzdata releases. Nothing here can fix it — the
+  /// link is what it is — so the reconcile continues against the watcher's own
+  /// zone rather than throwing and taking every remaining link down with it.
+  ///
+  /// **Carried out because guessing quietly is not the same as guessing.** This
+  /// repo's own constraint is that the app's record is not evidence of what the
+  /// platform holds; the mirror of that is that a fault the app cannot see is a
+  /// fault nobody will ever fix. §13's health panel reads it in Phase 7; until
+  /// then the service persists it so it is at least in `dump`.
+  final bool watchedZoneUnknown;
+
   /// Whether [corrections] may be **spoken**, or must be carried out as a bare
   /// cancellation of the warning they retract.
   ///
   /// The warning channel's [NotificationDelivery.postsNotification], and it is
   /// not the same question as whether the retraction is owed. Two states reach
-  /// this, and a correction posted in either is a message with nothing behind
-  /// it:
+  /// this, for two different reasons:
   ///
-  /// * **`redundant`.** The warning was consumed without ever being posted —
-  ///   the watcher was looking at the list, which is the whole meaning of the
-  ///   state. Nothing is in the tray, so *"Correction: Mum did check in
-  ///   yesterday"* arrives alone, correcting something the reader was never
-  ///   told. At 3am that is worse than silence: it implies a warning they
-  ///   somehow missed.
-  /// * **`unavailable`.** Whatever is in the tray was posted before the channel
-  ///   was muted, and Android will not accept the replacement.
+  /// * **`redundant`.** The watcher is looking at the list — that is the whole
+  ///   meaning of the state — and the list renders the retraction itself: the
+  ///   row goes from the warning to *"Everything OK"* in the same reconcile. A
+  ///   notification would be telling someone what they are already reading.
+  /// * **`unavailable`.** Nothing can be posted at all, so there is no
+  ///   replacement to make.
   ///
-  /// **Cancelling still happens in both.** `cancel` needs no permission and is
-  /// a no-op when nothing is showing, so the muted case genuinely takes the
-  /// stale warning down and the redundant case costs one binder call. The
-  /// cache is cleared either way — she checked in, the day is no longer warned,
-  /// and leaving it would have the list render a warning about a day she is on
-  /// record as having tapped.
+  /// **Cancelling still happens in both**, and it is the load-bearing half.
+  /// `cancel` needs no permission, so the muted case genuinely takes a stale
+  /// warning out of the tray — on the phone least likely ever to be opened,
+  /// which is the one that would otherwise keep a false claim about her
+  /// forever. When nothing is showing it is a no-op costing one binder call.
+  ///
+  /// **An earlier version of this comment argued that `redundant` means the
+  /// warning was never posted.** That is wrong in the common case: the standing
+  /// warning was typically posted by yesterday's 10:00 alarm under `available`,
+  /// and `redundant` describes only *this* reconcile. The tray really does hold
+  /// something, and it is cancelled rather than replaced — which is right for
+  /// the reason above, not for the reason first given.
+  ///
+  /// The cache is cleared either way: she checked in, the day is no longer
+  /// warned, and leaving it would have the list render a warning about a day
+  /// she is on record as having tapped.
   final bool shouldPostCorrections;
 
   /// Standing warnings to **cancel outright, with no replacement message**,
@@ -329,9 +352,19 @@ abstract final class WatcherReconciler {
     // country — while UTC is wrong by up to a day at the far end of the world,
     // which moves `D` and can warn about a day she has not finished yet.
     //
-    // It is still a fault, and a silent one: §13's health panel is owed a row
-    // for it in Phase 7. Guessing quietly is the lesser of the two, not a good
-    // outcome.
+    // **That argument does not hold on a fresh install**, where the watcher's
+    // own zone has not been cached yet and `_watcherZone()` is itself the
+    // documented UTC fallback — so the composed answer lands exactly where this
+    // comment says it must not. `main()` now caches the device zone before
+    // anything reconciles, which closes that window rather than arguing about
+    // it; the fallback is stated honestly here so nobody re-derives a guarantee
+    // from a preference.
+    //
+    // It is a fault either way, and [WatcherReconcileResult.watchedZoneUnknown]
+    // carries it out so §13's panel has something to render in Phase 7. Guessing
+    // quietly is the lesser of two bad outcomes, not a good one — and an
+    // unrecorded guess would leave the app with no belief at all about a link it
+    // cannot compute the day for.
     final watchedZone = link.tryWatchedZone ?? watcherZone;
 
     // 1. Reconcile. A failed read leaves the cache exactly as it was.
@@ -343,8 +376,24 @@ abstract final class WatcherReconciler {
     // a missed Monday followed by a tapped Tuesday would satisfy that test and
     // retract a warning that was true. Only a check-in for the warned day
     // itself disproves it.
-    final confirmed =
-        read is ReadSucceeded ? read.checkInDays : const <DayKey>{};
+    // **`link.isAccepted` is part of the guard, not a separate branch below.**
+    // §10 step 2: a revoked link's standing warning is *withdrawn* — cancelled
+    // outright, never corrected — because nothing disproves it and *"Mum did
+    // check in yesterday"* is a claim the device cannot support about a person
+    // this watcher is no longer entitled to read about.
+    //
+    // Without this, a successful read arriving alongside a revoked link
+    // corrected the day here, which removed it from `warnedDays` **before** the
+    // withdrawal branch ran — so the day was never withdrawn, and the retraction
+    // §10 forbids was posted instead of the cancellation it requires. Reachable
+    // today: `SimulatedCheckInReader` answers whatever the harness set,
+    // regardless of status, and the harness has a *Revoke every watcher*
+    // action. In Phase 4 a revoked link normally reads `permission-denied` — but
+    // this function must be correct over its explicit inputs, not over what one
+    // backend happens to produce.
+    final confirmed = link.isAccepted && read is ReadSucceeded
+        ? read.checkInDays
+        : const <DayKey>{};
     final corrections = <Correction>[];
     for (final day in cache.warnedDays.toList()) {
       if (confirmed.contains(day)) {
@@ -519,6 +568,7 @@ abstract final class WatcherReconciler {
       shouldNotify: shouldNotify,
       corrections: corrections,
       shouldPostCorrections: delivery.warning.postsNotification,
+      watchedZoneUnknown: link.tryWatchedZone == null,
       withdrawnWarnings: withdrawn,
       cancelAccessLostNotice: cancelAccessLostNotice,
       previousAway: cache.away,

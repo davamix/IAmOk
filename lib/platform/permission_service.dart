@@ -67,14 +67,23 @@ class PermissionService {
         exactAlarms: await canScheduleExactAlarms(),
       );
 
-  /// The delivery state to hand the reconciler.
+  /// The **reminders** channel's delivery state — the watched side's.
   ///
-  /// [appInForeground] is the caller's business, because only the caller knows
-  /// whether the screen currently showing already answers the notification —
-  /// that is what makes it [NotificationDelivery.redundant] rather than merely
-  /// undelivered.
-  /// A value read, with the decision itself in the domain where it is tested.
-  Future<NotificationDelivery> delivery({bool appInForeground = false}) async =>
+  /// Named for the channel it measures, because it was called `delivery()` and
+  /// the debug harness printed it as *"delivery handed to the domain"*, which
+  /// stopped being true the moment the watcher side went per-channel. A watcher
+  /// diagnosing a muted *Missed check-ins* channel on a device would have read
+  /// this number and been told about a third channel entirely.
+  ///
+  /// **The watcher's answer is [NotificationService.watcherDelivery]**, and
+  /// there is deliberately only one of those: two roots each deriving it is how
+  /// the two of them drifted. This is the other side's question, kept separate
+  /// rather than merged, because §10's asymmetry means they are not the same
+  /// question — a missed reminder costs nothing, a missed warning costs
+  /// everything.
+  Future<NotificationDelivery> reminderDelivery({
+    bool appInForeground = false,
+  }) async =>
       NotificationDelivery.from(
         canPost: await notificationsEnabled(),
         appInForeground: appInForeground,

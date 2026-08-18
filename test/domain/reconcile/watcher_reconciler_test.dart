@@ -137,6 +137,29 @@ void main() {
       expect(result.corrections, [Correction(linkId: mum.id, day: theDay)]);
     });
 
+    test('a REVOKED link withdraws rather than corrects, even on a good read',
+        () {
+      // §10 step 2: nothing disproves the warning — the link simply ended — so
+      // *"Mum did check in yesterday"* is a claim the device cannot support
+      // about someone this watcher is no longer entitled to read about.
+      //
+      // The corrections loop runs before the revocation branch, so an
+      // unguarded correction removed the day from `warnedDays` first and the
+      // withdrawal then had nothing to withdraw. The retraction §10 forbids
+      // was posted instead of the cancellation it requires.
+      final result = reconcile(
+        link: mum.copyWith(status: LinkStatus.revoked),
+        cache: warned,
+        read: FirestoreRead.succeeded(checkInDays: {theDay}),
+      );
+
+      expect(result.corrections, isEmpty,
+          reason: 'no claim about her may be made on a revoked link');
+      expect(result.withdrawnWarnings, [theDay],
+          reason: 'cancelled outright, with no replacement message');
+      expect(result.cache.warningsShownFor, isEmpty);
+    });
+
     test('a later check-in does NOT retract an earlier true warning', () {
       // Mum missed Monday and tapped Tuesday. The Monday warning was true and
       // must stand. A "lastConfirmedDay >= warned day" test would wrongly

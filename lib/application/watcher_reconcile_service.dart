@@ -54,7 +54,37 @@ class WatchedPersonState {
   /// The consequence is that the list shows **today only**, which settles
   /// `guidelines.md`'s open question about what a watcher sees on cold open
   /// after weeks away. Recorded in `screens.md`.
-  WarningOutcome? get standingWarning => cache.warningsShownFor[decision.day];
+  ///
+  /// ## Why the decision is a fallback, and not merely a tidier source
+  ///
+  /// `warningsShownFor` is a **delivery ledger** — §10 step 8's record of which
+  /// message is standing in the tray. It answers *what did we say*, not *what is
+  /// true about her*, and it is written only under
+  /// `owed && delivery.warning.consumesReminder`.
+  ///
+  /// So on a phone that cannot post — the *Missed check-ins* channel switched
+  /// off, or `POST_NOTIFICATIONS` auto-revoked from an app nobody opens, which
+  /// §13 rates **High** precisely because that describes a watcher — the day is
+  /// correctly *not* recorded, because nothing was delivered and the warning is
+  /// still owed. The row then found nothing standing and rendered **"Everything
+  /// OK"** about a relative who missed yesterday, on the one surface that
+  /// watcher still had. A muted phone is exactly the phone whose screen has to
+  /// carry the whole message.
+  ///
+  /// The same asymmetry was already resolved the other way one field along:
+  /// `accessLostSince` is written **ungated**, with the reconciler's own comment
+  /// saying a phone with notifications revoked "is precisely the phone whose
+  /// panel must still be able to explain itself when it is next opened". The
+  /// warning half had the opposite treatment and nothing caught it.
+  ///
+  /// So the ledger is consulted first — it can hold a *superseding* outcome a
+  /// later silent reconcile would otherwise drop — and the current decision
+  /// answers when the ledger is empty. A silent decision still yields null, so
+  /// *"Everything OK"* survives for the days it is true of, and `warnAccessLost`
+  /// never reaches here because the lost-access row outranks it.
+  WarningOutcome? get standingWarning =>
+      cache.warningsShownFor[decision.day] ??
+      (decision.isWarning ? decision.outcome : null);
 }
 
 /// Everything the watcher's screen needs, as of one reconcile.
@@ -174,19 +204,58 @@ class WatcherReconcileService {
     );
 
     final people = <WatchedPersonState>[];
+    var anyZoneUnknown = false;
+    var anyLinkFailed = false;
     try {
       for (final link in links) {
-        people.add(await _reconcileLink(
-          link: link,
-          now: now,
-          watcherZone: watcherZone,
-          delivery: canDeliver,
-          mayChangeAlarms: holdsLock,
-        ));
+        // **One link's failure must not cost every other watched person their
+        // check.**
+        //
+        // The argument was already written out for the timezone case — a throw
+        // from `link.watchedZone` would abort the pass inside an isolate with no
+        // screen, no user and nothing that reports a throw, and the only symptom
+        // is silence. That fix removed one *instance*; the class is wider. A
+        // malformed `watcher_cache` row (`DayKey.parse`, `LocalTimeOfDay.parse`
+        // both throw), a plugin fault in `showWarning`, a binder failure in
+        // `alarms.apply` — each aborts the loop identically. Links come back
+        // ordered by id, so one persistently failing link starves every link
+        // after it alphabetically, forever, and nothing anywhere says so.
+        //
+        // Cheap today, with one link. It stops being cheap the moment pairing
+        // lands in Phase 5, and by then the failure is invisible and permanent.
+        //
+        // The person is **omitted from the returned state** rather than
+        // rendered from a half-built value: a row assembled out of a failed
+        // reconcile is exactly the false claim this side spends everything
+        // avoiding. The list is short by one, and the health flag below is what
+        // says why.
+        try {
+          final (state, zoneUnknown) = await _reconcileLink(
+            link: link,
+            now: now,
+            watcherZone: watcherZone,
+            delivery: canDeliver,
+            mayChangeAlarms: holdsLock,
+          );
+          people.add(state);
+          anyZoneUnknown |= zoneUnknown;
+        } on Object {
+          anyLinkFailed = true;
+        }
       }
     } finally {
       if (holdsLock) await store.releaseReconcileLock(lockScope, owner);
     }
+
+    // Recorded for the same reason as the zone guess: a link this app silently
+    // stopped checking is the failure it cannot detect in itself. §13's panel
+    // reads it in Phase 7; until then it is in `dump`.
+    await store.setLinkReconcileFailed(anyLinkFailed);
+
+    // Across the whole watched set, and written on every pass so it clears
+    // itself once the offending link is gone. A guess the app cannot see is a
+    // fault nobody will ever be told about — §13's panel reads this in Phase 7.
+    await store.setWatchedZoneUnknown(anyZoneUnknown);
 
     return WatcherState(
       people: people,
@@ -195,7 +264,8 @@ class WatcherReconcileService {
     );
   }
 
-  Future<WatchedPersonState> _reconcileLink({
+  /// The person's state, and whether their link's zone had to be guessed.
+  Future<(WatchedPersonState, bool)> _reconcileLink({
     required Link link,
     required DateTime now,
     required tz.Location watcherZone,
@@ -335,10 +405,13 @@ class WatcherReconcileService {
     // 6. One write, after the platform calls returned.
     await store.saveWatcherCache(link.id, result.cache);
 
-    return WatchedPersonState(
-      link: link,
-      cache: result.cache,
-      decision: result.decision,
+    return (
+      WatchedPersonState(
+        link: link,
+        cache: result.cache,
+        decision: result.decision,
+      ),
+      result.watchedZoneUnknown,
     );
   }
 

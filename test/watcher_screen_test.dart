@@ -242,6 +242,54 @@ void main() {
     });
   });
 
+  group('a phone that cannot post still shows the warning on screen', () {
+    testWidgets('the row does NOT say Everything OK when the day is warned',
+        (tester) async {
+      // **`warningsShownFor` is a delivery ledger, not a status field.** It is
+      // written only when something was actually delivered, so on a phone with
+      // *Missed check-ins* switched off — or `POST_NOTIFICATIONS` auto-revoked
+      // from an app nobody opens, which §13 rates High because that describes a
+      // watcher — the day is correctly not recorded and the row found nothing
+      // standing.
+      //
+      // It then rendered "Everything OK" about a relative who missed yesterday,
+      // on the one surface that watcher still had. A muted phone is exactly the
+      // phone whose screen has to carry the whole message.
+      await pump(tester, [
+        person(
+          cache: WatcherCache(lastConfirmedDay: DayKey(2026, 8, 14)),
+          outcome: WarningOutcome.warnOnline,
+        ),
+      ]);
+
+      expect(find.text(WatcherCopy.everythingOk), findsNothing);
+      expect(find.text('No check-in from Mum yesterday.'), findsOneWidget);
+    });
+
+    testWidgets('and it says which of the four messages it is', (tester) async {
+      // Not a generic "something is wrong". §10's four outcomes are a
+      // correctness requirement rather than copy polish, and the row reuses the
+      // notification's own sentence so the two cannot disagree.
+      await pump(tester, [
+        person(
+          cache: const WatcherCache.empty(),
+          outcome: WarningOutcome.warnOffline,
+        ),
+      ]);
+
+      expect(find.textContaining('No check-in received from Mum yesterday'),
+          findsOneWidget);
+    });
+
+    testWidgets('a silent decision still reads Everything OK', (tester) async {
+      // The other half. The fallback must not turn every empty ledger into a
+      // warning — she checked in, and the row says so.
+      await pump(tester, [person(cache: WatcherCache(lastConfirmedDay: d))]);
+
+      expect(find.text(WatcherCopy.everythingOk), findsOneWidget);
+    });
+  });
+
   group('the revoked row', () {
     WatchedPersonState revoked({WatcherCache? cache}) => person(
           status: LinkStatus.revoked,

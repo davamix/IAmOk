@@ -130,6 +130,49 @@ void main() {
     });
   });
 
+  group('the surface half of "accept, prevent and surface"', () {
+    // A force-stopped watcher goes deaf with the row still reading "Everything
+    // OK" — true of the last thing this phone read, and silent about whether it
+    // has read anything since. This line is the only thing that distinguishes
+    // WORKING from STOPPED before §13's panel arrives in Phase 7, so it is on
+    // every row rather than only the unhealthy ones.
+    testWidgets('every row says when this phone last checked', (tester) async {
+      final checkedAt = DateTime.utc(2026, 8, 16, 8);
+      await pump(tester, [
+        person(
+          cache: WatcherCache(
+            lastConfirmedDay: d,
+            lastReconcileAt: checkedAt,
+          ),
+        ),
+      ]);
+      expect(find.textContaining('This phone last checked'), findsOneWidget);
+    });
+
+    testWidgets('a row that has never checked says so, not a null',
+        (tester) async {
+      await pump(tester, [person()]);
+      expect(find.text(WatcherCopy.neverChecked), findsOneWidget);
+    });
+
+    testWidgets('it is present on an unhealthy row too', (tester) async {
+      // The row that matters most: lost access AND a stalled phone are
+      // different faults, and a reader needs to tell them apart.
+      await pump(tester, [
+        person(
+          cache: WatcherCache(
+            accessLostSince: d,
+            accessLostCause: RefusedCause.unauthenticated,
+            lastReconcileAt: DateTime.utc(2026, 8, 16, 8),
+          ),
+          outcome: WarningOutcome.warnAccessLost,
+        ),
+      ]);
+      expect(find.textContaining('This phone last checked'), findsOneWidget);
+      expect(find.text('Sign in again.'), findsOneWidget);
+    });
+  });
+
   group('the lost-access row', () {
     WatchedPersonState refused(RefusedCause cause) => person(
           cache: WatcherCache(

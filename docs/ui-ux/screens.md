@@ -224,6 +224,8 @@ Phase 7's problem. What follows is the wording.
 | …with a check-in read | *"Your phone last saw a check-in on Saturday 15 August."* |
 | …with none ever read | *"Your phone has not seen a check-in yet."* |
 | A warning standing | **The notification's own sentence, verbatim** |
+| Every row, always | *"This phone last checked Tuesday 10:14."* |
+| …and none has ever succeeded | *"This phone has not been able to check even once."* |
 | Spoken (TalkBack), per row | *"Mum. "* followed by the row's lines |
 | Spoken, while loading | *"Checking"* |
 
@@ -239,6 +241,14 @@ empty list is not an alarm.
 string sets would be two things to keep true, reviewed separately, and the failure is the row and
 the notification disagreeing about the same day — a contradiction the reader cannot resolve. The
 cost is naming the person in a row that already names them, which is accepted.
+
+**The last-checked line is on every row, healthy or not, and that is the point.** A watcher whose app
+was force-stopped goes deaf with every row still reading *"Everything OK"* — which is true of the
+last thing this phone managed to read, and says nothing about whether it has read anything since.
+This is the **surface** half of "accept, prevent and surface": §13's full health panel is Phase 7,
+and this one line is what makes the accepted force-stop risk visible in the meantime rather than a
+year from now. It says *"This phone last checked"*, never *"last updated"* — a fact about this
+device's own effort, not about her and not about the data.
 
 **"Your phone last saw"**, never *"last checked in"* — the same rule ADR-0004 applies to the
 notification. The date is the newest check-in **this device managed to read**; during an access

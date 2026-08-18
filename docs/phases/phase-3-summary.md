@@ -304,6 +304,23 @@ standing, so `shouldNotify` was false — which is the idempotence this design r
 entry point calls reconcile and boot recovery would otherwise be a duplicate-notification bug. The
 fire is evidenced by the store, not by the shade.
 
+## The surface half, brought forward from Phase 7
+
+"Accept, prevent and surface" was the leading answer to the force-stop exposure, and its third word
+did not exist: §13's health panel is Phase 7. Choosing it today would have accepted a window where
+the failure is both silent **and** unsurfaced.
+
+So every watcher row now carries **"This phone last checked Tuesday 10:14."** — or *"has not been
+able to check even once"* when no read has ever succeeded. It is on healthy rows too, and that is the
+point: a force-stopped watcher goes deaf with every row still reading *"Everything OK"*, which is
+true of the last thing this phone managed to read and says nothing about whether it has read anything
+since. This one line is the only thing that distinguishes **working** from **stopped** before the
+panel lands.
+
+*"This phone last checked"*, never *"last updated"* — a fact about this device's own effort, not
+about her and not about the data. It shares the moment formatter with the notification, so the row
+and the message about the same instant cannot render it differently.
+
 ## Deviations, recorded rather than made quietly
 
 **The correction's time is when the check-in was *learned*, not when she tapped.** Phase 3's fake

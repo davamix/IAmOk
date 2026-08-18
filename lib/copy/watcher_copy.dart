@@ -54,6 +54,31 @@ abstract final class WatcherCopy {
   /// simply never have managed a successful read.
   static const String neverSeen = 'Your phone has not seen a check-in yet.';
 
+  /// When this phone last managed a successful read — shown on **every** row,
+  /// healthy or not.
+  ///
+  /// `screens.md` already specifies it for the stale row ("Last successful
+  /// update, honestly dated"); it is shown always because the failure it exists
+  /// to expose does not announce itself. A watcher whose app has been
+  /// force-stopped goes deaf with every row still reading *"Everything OK"* —
+  /// which is true of the last thing this phone managed to read, and says
+  /// nothing about whether it has read anything since.
+  ///
+  /// This is the **surface** half of "accept, prevent and surface". §13's full
+  /// health panel is Phase 7; this is the one row that makes the accepted risk
+  /// visible in the meantime rather than a year from now.
+  ///
+  /// *"This phone last checked"*, never *"last updated"* — it is a fact about
+  /// this device's own effort, not about her and not about the data.
+  static String lastChecked(String when) => 'This phone last checked $when.';
+
+  /// No successful read has ever happened on this device.
+  ///
+  /// Deliberately the same sentence the offline warning uses, so the two
+  /// surfaces cannot drift into describing the same state differently.
+  static const String neverChecked =
+      'This phone has not been able to check even once.';
+
   // ------------------------------------------------------------ lost access
 
   /// §13's backend-access row, brought forward to Phase 3 as the destination

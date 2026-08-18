@@ -265,6 +265,7 @@ class _PersonRow extends StatelessWidget {
           WatcherCopy.accessLostLabel(person.name),
           WatcherCopy.accessLostConsequence(person.name),
           WatcherCopy.accessLostRemedy(cache.accessLostCause),
+          _lastChecked(cache),
         ],
         isBad: true,
       );
@@ -283,6 +284,7 @@ class _PersonRow extends StatelessWidget {
             lastConfirmedDay: cache.lastConfirmedDay,
             watcherZone: person.link.watchedZone,
           ),
+          _lastChecked(cache),
         ],
         isBad: true,
       );
@@ -295,10 +297,25 @@ class _PersonRow extends StatelessWidget {
             ? WatcherCopy.neverSeen
             : WatcherCopy.lastSeen(
                 NotificationCopy.dayLabel(cache.lastConfirmedDay!)),
+        _lastChecked(cache),
       ],
       isBad: false,
     );
   }
+
+  /// When this phone last managed a successful read.
+  ///
+  /// On **every** row, healthy or not, and that is the point. A watcher whose
+  /// app was force-stopped goes deaf with the row still reading *"Everything
+  /// OK"* — which is true of the last thing this phone read and says nothing
+  /// about whether it has read anything since. This is the only surface that
+  /// distinguishes *working* from *stopped* before §13's panel lands in Phase 7.
+  String _lastChecked(WatcherCache cache) => cache.lastReconcileAt == null
+      ? WatcherCopy.neverChecked
+      : WatcherCopy.lastChecked(NotificationCopy.momentLabel(
+          cache.lastReconcileAt!,
+          person.link.watchedZone,
+        ));
 }
 
 class _RowStatus {

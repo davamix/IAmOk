@@ -435,6 +435,84 @@ class _DebugHarnessScreenState extends ConsumerState<DebugHarnessScreen> {
                   'Ground truth for what is armed: adb shell dumpsys alarm, '
                   'written to a file and pulled.';
             }),
+            // **The control that makes the unattended warning testable at all.**
+            //
+            // Phase 2's worst defect was found by watching reminders arrive
+            // rather than by counting registered alarms, and that check cost a
+            // day of waiting. The equivalent here is a warning arriving at its
+            // natural `warningLocalTime` with nobody looking — and the seeded
+            // links use 10:00, so observing it naturally means waiting until
+            // tomorrow morning.
+            //
+            // This seeds the same links with a warning time a few minutes out
+            // and clears everything that would suppress the notification, so
+            // the whole path — OS wakes the isolate, it reads, decides, picks
+            // one of four messages, posts it on the right channel at the right
+            // id — is observable in the time it takes to make coffee. That is
+            // what the harness is for: without it, verifying a 24-hour
+            // behaviour takes 24 hours.
+            _Action('Arm the natural warning 3 minutes out', () async {
+              final zone = await _zone(services.store);
+              final now = services.clock.now();
+              final fireAt = tz.TZDateTime.from(
+                now.add(const Duration(minutes: 3)),
+                zone,
+              );
+              final today = DayKey.fromInstant(now, zone);
+
+              // A standing warning for D correctly suppresses a second one, so
+              // a stale cache from an earlier run makes this test silently
+              // prove nothing. Cleared rather than merged.
+              for (final link
+                  in await services.store.linksWatchedBy(services.selfUid)) {
+                await services.store
+                    .saveWatcherCache(link.id, const WatcherCache.empty());
+              }
+
+              for (final name in ['Mum', 'Granddad']) {
+                await services.store.upsertLink(Link(
+                  watchedUid: name.toLowerCase(),
+                  watcherUid: services.selfUid,
+                  status: LinkStatus.accepted,
+                  watchedName: name,
+                  watcherName: 'Me',
+                  watchedTimezone: zone.name,
+                  activeFrom: today.plusDays(-1),
+                  warningLocalTime:
+                      LocalTimeOfDay(fireAt.hour, fireAt.minute),
+                  createdAt: now,
+                ));
+              }
+
+              // The backend answers successfully and holds nothing, so D is
+              // genuinely unconfirmed and the outcome is warnOnline — the one
+              // message that claims something about her, and therefore the one
+              // worth watching arrive.
+              await _updateBackend(
+                services.store,
+                (b) => b.copyWith(
+                  outcome: SimulatedReadOutcome.succeeded,
+                  checkInDays: const {},
+                  clearAway: true,
+                ),
+              );
+
+              await services.watcherReconcile
+                  .reconcile(selfUid: services.selfUid);
+
+              final hh = fireAt.hour.toString().padLeft(2, '0');
+              final mm = fireAt.minute.toString().padLeft(2, '0');
+              return '''
+warning time set to $hh:$mm
+cache cleared, backend holds nothing
+
+Now CLOSE the app and wait. Two notifications should arrive:
+  "No check-in from Mum yesterday."
+  "No check-in from Granddad yesterday."
+
+Anything else - one, three, the wrong wording, the wrong
+channel - is the finding.''';
+            }),
             _Action('Compare warning alarms: store vs armed', () async {
               final links =
                   await services.store.linksWatchedBy(services.selfUid);

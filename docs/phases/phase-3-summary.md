@@ -406,6 +406,36 @@ that *were* armed, not the ones that *should* be. If the two had diverged before
 reboot would faithfully restore the divergence, and only the next `reconcile()` would repair it. That
 is the correct division of labour — but it means a reboot is not a repair.
 
+### "Swiping from recents" is not a force-stop, and that changes ADR-0007's premise
+
+The whole force-stop exposure has been argued from one line in the device matrix — that swiping the
+app from recents "kills it and its alarms", making an ordinary thumb movement enough to leave a
+watcher permanently deaf. Measured directly, with 35 alarms armed and 3 notifications standing:
+
+| Action | Process | Alarms | Notifications | `stopped` flag |
+|---|---|---|---|---|
+| **Clear all** in recents | killed | **35** | **3** | **false** |
+| `am force-stop` | killed | **0** | **0** | **true** |
+
+**Clear-all is an ordinary process kill.** Alarms survive, notifications survive, the app is not in the
+stopped state, and it goes on receiving broadcasts — and the isolate test independently proves
+delivery from exactly that state, a dead process with alarms intact.
+
+A force-stop is a materially different act: every alarm cancelled, **every standing notification
+erased**, and `stopped=true`, after which the app receives nothing at all until someone launches it
+by hand.
+
+So the exposure is **narrower and more deliberate** than the brief assumed. It is not a thumb
+movement; it is Settings → Force stop, or a third-party task killer that invokes it. That strengthens
+"accept, prevent and surface" considerably — prevention now has to cover a deliberate act rather than
+an everyday one — and it weakens the case for un-deferring §9, whose whole justification was how
+routine this was believed to be.
+
+**Method caveat, stated because it bounds the claim.** `adb shell input swipe` would not register as a
+card-dismissal fling on this launcher, so what was measured is the **clear-all button** rather than an
+individual card swipe. Both go through the same recents dismissal path, but that is an inference. Ten
+seconds with the phone in hand settles it, and it should be settled before ADR-0007 is signed.
+
 ### Deliberately not proven by this
 
 **A notification did not appear on that fire, and that is correct.** A warning for `D` was already

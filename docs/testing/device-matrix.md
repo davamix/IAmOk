@@ -102,7 +102,7 @@ target rather than a bad one.
 |---|---|---|
 | **Autostart** | **Off** | The app cannot be woken by an alarm or a broadcast after being swiped away or rebooted. This is separate from Android's battery optimisation and is the single most common cause of "my alarm app stopped working" on Xiaomi. |
 | **Battery saver** (per-app) | "Battery saver" — restricted | Background work is throttled or killed. "No restrictions" is the permissive setting. |
-| **Lock in recents** | Off | Swiping the app from recents kills it and its alarms. |
+| **Lock in recents** | Off | Kills the **process**. Measured 2026-08-18: it does **not** cancel alarms, does not clear notifications, and does not put the app in the stopped state — see the correction below. |
 | **Install via USB** | Off | Cannot sideload at all until enabled. |
 | **MIUI Optimization** (developer options) | On | Changes permission and notification behaviour in ways that do not match stock Android. |
 
@@ -166,6 +166,30 @@ reminder. Use the harness's *"Dismiss test notifications"* control, which cancel
 leaves the armed window alone. On 2026-08-17 a leftover test notification was a live candidate
 explanation for duplicate reminders and cost real time to rule out.
 
+> **CORRECTION, 2026-08-18 — "swiping from recents" is not a force-stop on this device.**
+>
+> Phase 2 recorded that swiping the app from recents "kills it and its alarms", and the whole
+> force-stop exposure has been reasoned about on that basis — that an ordinary thumb movement makes
+> the watcher permanently deaf. Measured directly, with 35 alarms armed and 3 notifications standing:
+>
+> | Action | Process | Alarms | Notifications | `stopped` flag |
+> |---|---|---|---|---|
+> | **Clear all** in recents | killed | **35** | **3** | **false** |
+> | `am force-stop` | killed | **0** | **0** | **true** |
+>
+> Clear-all is an **ordinary process kill**. The alarms survive, the notifications survive, and the
+> app is *not* in the stopped state, so it still receives broadcasts and its alarms still fire — which
+> the isolate test independently confirms from exactly that state (process gone, alarms intact).
+>
+> A force-stop is a different act: it cancels every alarm, **erases the standing notifications**, and
+> sets `stopped=true`, after which the app receives nothing at all — including `BOOT_COMPLETED` —
+> until launched by hand.
+>
+> **Method caveat, stated because it bounds the claim.** `adb shell input swipe` would not register
+> as a card-dismissal fling on this launcher, so what was measured is the **clear-all button**, not an
+> individual card swipe. Both go through the same recents dismissal path, but that is an inference,
+> not an observation. Someone with the phone in their hand can settle it in ten seconds.
+>
 > **Two things this run established that anyone repeating it needs.**
 >
 > **A force-stop cancels every alarm the app has registered**, and nothing tells the app. Before the

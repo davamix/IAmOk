@@ -229,6 +229,11 @@ in [phase-3-summary.md](../phases/phase-3-summary.md).
       from the harness, but **not yet driven end-to-end on the device**. The `warnOnline` path now
       has been; the other three have not.
 - [ ] Tapping the *lost access* notification opens the watcher list **from a cold start**
+- [x] **The warning alarm survives a reboot**, 2026-08-18 — 35 armed, rebooted, and the **identical
+      35 instants** back at uptime 100 s (0 at 39 s, 59 s and 79 s, so poll for minutes). Restored by
+      the plugin's `RebootBroadcastReceiver` from its own record: `last_reconcile_at` was unchanged
+      afterwards, so **a reboot restores what was armed, not what should be** — only a reconcile
+      repairs a divergence.
 - [ ] Two isolates contending for the reconcile lease on Android's SQLite (the desktop-FFI gap)
 - [ ] **Two isolates contend for the reconcile lease and only one changes the alarm set** —
       [ADR-0006](../architecture/decisions/0006-reconcile-is-serialised-on-disk.md). Asserted in

@@ -375,6 +375,37 @@ Not merely stale — **the wrong thing to do**, on the one message whose entire 
 is actionable. Fixed by checking transition-or-changed-cause before the dedupe, with tests for both
 directions.
 
+### Reboot recovery for the warning alarm
+
+The one §10 promises with `rescheduleOnReboot: true` and which nothing had ever exercised. Run
+2026-08-18 with 35 alarms armed — 21 reminders and 14 warnings across two links:
+
+```
+sys.boot_completed        uptime  19s
+alarms at uptime  39s      0
+alarms at uptime  59s      0
+alarms at uptime  79s      0
+alarms at uptime 100s     35     ← full set restored
+
+pre-reboot instants   35
+post-reboot instants  35
+identical sets        True
+```
+
+Not merely the same count — **the same instants**, exactly. The 10:00 entries come back ×2, one per
+link, which is the warning alarm specifically rather than the reminders carrying the total.
+
+**A check at 60 s would have read zero and looked like total failure.** Phase 2 recorded that trap for
+the reminders (~76 s there) and it holds here; anyone repeating this must poll for several minutes
+before concluding anything.
+
+**Recovery happens without our code deciding anything, and that is worth knowing.** `last_reconcile_at`
+was still 09:30:24 afterwards — pre-reboot — and the store already held 14 + 21 matching the platform.
+So both boot receivers restore from **their own records** rather than from a reconcile: the alarms
+that *were* armed, not the ones that *should* be. If the two had diverged before the reboot, the
+reboot would faithfully restore the divergence, and only the next `reconcile()` would repair it. That
+is the correct division of labour — but it means a reboot is not a repair.
+
 ### Deliberately not proven by this
 
 **A notification did not appear on that fire, and that is correct.** A warning for `D` was already

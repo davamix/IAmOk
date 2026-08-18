@@ -167,6 +167,15 @@ switch, the false-warning suppression, and the late-arrival correction.
 suppressed when away covers the day; is replaced by a correction when a late check-in arrives; and
 says something **different and honest** when the device cannot reach the network.
 
+> **Status: implemented and covered by tests; the mechanism is verified on hardware; the phase is
+> NOT signed off.** All five exit criteria are asserted at the composition level and every
+> assertion is on *which* message rather than that something fired. On the POCO F3 with stock
+> HyperOS settings the alarm isolate wakes — including from a killed process, where Android
+> cold-started a new one to run it. What is **not** yet done: the five reviewer agents (they hit a
+> session limit before reporting), driving the four outcomes end-to-end on the device rather than
+> from tests, and ADR-0007 recording the force-stop response now that there are numbers for it.
+> Evidence in [phases/phase-3-summary.md](phases/phase-3-summary.md).
+
 ---
 
 ## Phase 4 — Firebase backbone

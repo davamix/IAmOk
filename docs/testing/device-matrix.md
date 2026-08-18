@@ -201,14 +201,30 @@ explanation for duplicate reminders and cost real time to rule out.
 > between runs**, or a measurement inherits it. Full write-up in
 > [phase-2-summary.md](../phases/phase-2-summary.md).
 
-**Phase 3 — watcher side**
+**Phase 3 — watcher side** · **run 2026-08-17 on the POCO F3, stock power settings.** Full evidence
+in [phase-3-summary.md](../phases/phase-3-summary.md).
 
-- [ ] A warning fires when it should
-- [ ] Suppressed when a check-in is cached
-- [ ] Suppressed when an away period covers the day
-- [ ] Replaced by a correction when a late check-in arrives
-- [ ] A *different and honest* message when the device cannot reach the network
-- [ ] The alarm isolate survives the app being swiped away from recents
+- [x] **The alarm isolate wakes.** Armed two minutes out; `last_reconcile_at` moved to exactly the
+      armed instant on both links with the app backgrounded — and again at 23:36:59 for an alarm
+      armed at 23:36:58 with the **process killed beforehand**, where Android cold-started a new
+      process (pid 22348) to run it. The timestamp is written inside the reconcile, so it is
+      evidence our Dart ran rather than that a broadcast arrived.
+- [x] Warning alarms are registered — 12 `AlarmBroadcastReceiver` entries, matching the store's 12
+      exactly, at 10:00 Europe/Madrid across six days × two links
+- [x] The three channels exist with `warnings` at **max** importance, separate from `access` —
+      ADR-0004's structural half, asserted against the system's record rather than our constants
+- [x] **Force-stop cancels every warning alarm** (12 → 0), exactly as it does the reminders. `am
+      kill` does **not** — it is an ordinary process kill and leaves alarms armed. Anyone repeating
+      these measurements needs that distinction.
+- [x] Opening the app repairs **both** sides after a force-stop — 0/0 → 18 reminders and 12
+      warnings. It did **not** before this run; see the summary.
+- [ ] A warning **arriving unattended** at its natural `warningLocalTime` — the equivalent of the
+      check that found Phase 2's worst defect, and still unobserved here
+- [ ] Suppressed when a check-in is cached · suppressed when away covers the day · replaced by a
+      correction · a different and honest message when unreachable — all four are covered by tests
+      and reachable from the harness, but **not yet driven end-to-end on the device**
+- [ ] Tapping the *lost access* notification opens the watcher list **from a cold start**
+- [ ] Two isolates contending for the reconcile lease on Android's SQLite (the desktop-FFI gap)
 - [ ] **Two isolates contend for the reconcile lease and only one changes the alarm set** —
       [ADR-0006](../architecture/decisions/0006-reconcile-is-serialised-on-disk.md). Asserted in
       `test/data/local_store_lock_test.dart` across two connections to one file, but that runs on

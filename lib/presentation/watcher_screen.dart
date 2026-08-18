@@ -85,9 +85,10 @@ class _WatcherScreenState extends ConsumerState<WatcherScreen>
         error: (_, _) => _Failed(
           onRetry: () => ref.invalidate(watcherStateProvider),
         ),
-        data: (watcher) => watcher.isEmpty
-            ? const _Empty()
-            : _People(people: watcher.people),
+        data: (watcher) => WatcherBody(
+          state: watcher,
+          onRefresh: ref.read(watcherStateProvider.notifier).refresh,
+        ),
       ),
     );
   }
@@ -136,16 +137,29 @@ class _Empty extends StatelessWidget {
       );
 }
 
-class _People extends ConsumerStatefulWidget {
-  const _People({required this.people});
+/// The list itself, split out from [WatcherScreen] so it can be pumped in a
+/// widget test with a plain [WatcherState] and no provider container.
+///
+/// The same seam `TapBody` has, and for the same reason: every question about
+/// this widget is a question about **rendering** — does an unresolved warning
+/// show instead of "Everything OK", does the lost-access row outrank it, does a
+/// screen reader get the person's name and their state in one utterance — and
+/// `docs/testing/strategy.md`'s rule is that if a test needs a device to answer
+/// a question about logic, the logic is in the wrong layer.
+class WatcherBody extends StatefulWidget {
+  const WatcherBody({super.key, required this.state, this.onRefresh});
 
-  final List<WatchedPersonState> people;
+  final WatcherState state;
+
+  /// Pull-to-refresh. Optional so a test can pump the body without a container;
+  /// the screen supplies the real reconcile.
+  final Future<void> Function()? onRefresh;
 
   @override
-  ConsumerState<_People> createState() => _PeopleState();
+  State<WatcherBody> createState() => _WatcherBodyState();
 }
 
-class _PeopleState extends ConsumerState<_People> {
+class _WatcherBodyState extends State<WatcherBody> {
   @override
   void initState() {
     super.initState();
@@ -166,7 +180,7 @@ class _PeopleState extends ConsumerState<_People> {
   void _onTapped() {
     final linkId = NotificationRouter.instance.tappedLink.value;
     if (linkId == null || !mounted) return;
-    final index = widget.people.indexWhere((p) => p.link.id == linkId);
+    final index = widget.state.people.indexWhere((p) => p.link.id == linkId);
     if (index < 0) return;
     NotificationRouter.instance.consume();
     setState(() => _highlighted = linkId);
@@ -175,23 +189,25 @@ class _PeopleState extends ConsumerState<_People> {
   String? _highlighted;
 
   @override
-  Widget build(BuildContext context) => RefreshIndicator(
-        onRefresh: () => ref.read(watcherStateProvider.notifier).refresh(),
+  Widget build(BuildContext context) {
+    if (widget.state.isEmpty) return const _Empty();
+    return RefreshIndicator(
+        onRefresh: () async => widget.onRefresh?.call(),
         child: ListView.separated(
           // Always scrollable, so pull-to-refresh works with one short row.
           physics: const AlwaysScrollableScrollPhysics(),
           padding: const EdgeInsets.symmetric(vertical: 8),
-          itemCount: widget.people.length,
+          itemCount: widget.state.people.length,
           separatorBuilder: (_, _) => const Divider(height: 1),
           itemBuilder: (context, i) {
-            final person = widget.people[i];
+            final person = widget.state.people[i];
             return _PersonRow(
               person: person,
               highlighted: person.link.id == _highlighted,
             );
           },
-        ),
-      );
+        ));
+  }
 }
 
 class _PersonRow extends StatelessWidget {

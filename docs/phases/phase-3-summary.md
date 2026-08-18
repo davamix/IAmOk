@@ -8,7 +8,14 @@ Phase 3 built the edge around a decision that already existed. `WarningPolicy` a
 isolate to wake them, somewhere to persist what they concluded, the words to say it in, and a
 surface to explain it on.
 
-**598 tests**, up from 547. `flutter analyze` clean. `flutter build apk --debug` succeeds.
+**614 tests**, up from 547. `flutter analyze` clean. `flutter build apk --debug` succeeds.
+
+> **This phase is NOT signed off.** The five reviewer agents were launched and all five terminated
+> on a session limit before producing a report — not on findings. Phase 2's gate produced
+> thirty-two defects across five reviewers, and three times in this project a fix has introduced
+> the next defect, so the absence of a review here is a real gap rather than a formality. What
+> follows is a self-review, which is exactly the thing this project's own record says does not
+> work: *"the reviewers caught all three; the author caught none of them."*
 
 ---
 
@@ -310,6 +317,12 @@ of thing that quietly becomes permanent.
 `BuildContext`, which a notification posted from a bare isolate does not have. The approved strings
 are 24-hour and the owner's locale is 24-hour, so nothing is wrong today. It becomes wrong for the
 first user whose phone is set to 12-hour.
+
+**Two device criteria are still unobserved**, and one of them is the shape that found Phase 2's
+worst defect: a warning **arriving unattended** at its natural `warningLocalTime`, and a cold-start
+tap on the *lost access* notification. Both are reachable from the harness; neither has been driven
+end-to-end on hardware. Counting registered alarms is not the same as watching one fire, and that
+distinction has already cost this project one serious defect.
 
 **The watcher list layout is deliberately plain.** `screens.md` marks the multi-person layout as
 Phase 7 and undesigned; what is settled is the row *content*, which is what this renders.

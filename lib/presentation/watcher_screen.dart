@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:timezone/timezone.dart' as tz;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../application/providers.dart';
@@ -203,6 +204,7 @@ class _WatcherBodyState extends State<WatcherBody> {
             final person = widget.state.people[i];
             return _PersonRow(
               person: person,
+              watcherZone: widget.state.watcherZone,
               highlighted: person.link.id == _highlighted,
             );
           },
@@ -211,9 +213,20 @@ class _WatcherBodyState extends State<WatcherBody> {
 }
 
 class _PersonRow extends StatelessWidget {
-  const _PersonRow({required this.person, required this.highlighted});
+  const _PersonRow({
+    required this.person,
+    required this.watcherZone,
+    required this.highlighted,
+  });
 
   final WatchedPersonState person;
+
+  /// **The reader's own zone.** Every time on this row is a claim about *this
+  /// device*, so it is rendered where the person reading it lives — not in the
+  /// watched person's zone, which is a different question and was what the row
+  /// used before.
+  final tz.Location watcherZone;
+
   final bool highlighted;
 
   @override
@@ -282,7 +295,7 @@ class _PersonRow extends StatelessWidget {
             away: person.decision.away,
             unverifiedSince: person.decision.unverifiedSince,
             lastConfirmedDay: cache.lastConfirmedDay,
-            watcherZone: person.link.watchedZone,
+            watcherZone: watcherZone,
           ),
           _lastChecked(cache),
         ],
@@ -312,10 +325,8 @@ class _PersonRow extends StatelessWidget {
   /// distinguishes *working* from *stopped* before §13's panel lands in Phase 7.
   String _lastChecked(WatcherCache cache) => cache.lastReconcileAt == null
       ? WatcherCopy.neverChecked
-      : WatcherCopy.lastChecked(NotificationCopy.momentLabel(
-          cache.lastReconcileAt!,
-          person.link.watchedZone,
-        ));
+      : WatcherCopy.lastChecked(
+          NotificationCopy.momentLabel(cache.lastReconcileAt!, watcherZone));
 }
 
 class _RowStatus {

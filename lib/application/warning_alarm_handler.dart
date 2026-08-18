@@ -1,3 +1,5 @@
+import 'package:flutter/foundation.dart';
+
 import '../data/check_in_reader.dart';
 import '../data/local_store.dart';
 import '../domain/domain.dart';
@@ -52,7 +54,17 @@ Future<void> warningAlarmCallback(int id) async {
     // The clock offset comes off disk so this isolate agrees with the UI about
     // what day it is. A forced date in the harness that the alarm did not share
     // would test nothing.
-    final clock = SystemClock(offset: await store.clockOffset());
+    //
+    // **Gated on `kDebugMode`, exactly as `main()` gates the same read.** That
+    // gate exists so "zero offset in every release build" is enforced by the
+    // code rather than resting on the only writer being compiled out — anything
+    // that could put a row under `debug_clock_offset_ms` would otherwise shift
+    // this app's entire notion of now. Phase 3 originally left the read ungated
+    // on the one path that decides whether to tell a family something is wrong,
+    // which is the worst possible place to have missed it.
+    final clock = SystemClock(
+      offset: kDebugMode ? await store.clockOffset() : Duration.zero,
+    );
 
     final service = WatcherReconcileService(
       store: store,

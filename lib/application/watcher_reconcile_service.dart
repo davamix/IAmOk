@@ -30,25 +30,54 @@ class WatchedPersonState {
   /// (ADR-0004). Drives the row that the *lost access* notification opens onto.
   bool get hasLostAccess => cache.hasLostAccess;
 
-  /// A standing warning, if one is unresolved.
+  /// A standing warning for the day this reconcile is **about**, or null.
   ///
   /// **State, not history** — `docs/ui-ux/guidelines.md`. A warning from three
   /// weeks ago followed by three weeks of check-ins is history, and rendering it
   /// as status would have the app reporting a crisis that resolved itself.
-  WarningOutcome? get standingWarning =>
-      cache.warningsShownFor[decision.day] ??
-      (cache.warningsShownFor.isEmpty
-          ? null
-          : cache.warningsShownFor[cache.warnedDays
-              .reduce((a, b) => a > b ? a : b)]);
+  ///
+  /// **The first version wrote that rule in this comment and then broke it one
+  /// line below**, falling back to the newest day in `warningsShownFor` when
+  /// today's `D` had none. A day only leaves that map by a correction — a
+  /// check-in *for that exact day* — or by revocation, so a genuinely missed day
+  /// stays in it forever. Mum missing 1 August and tapping every day since
+  /// produced a row reading **"No check-in from Mum yesterday."** on the 18th,
+  /// permanently, suppressing "Everything OK", about a day she had checked in
+  /// on. Every string in the set says *yesterday*, and only `decision.day` is
+  /// yesterday — so only `decision.day` can be rendered honestly.
+  ///
+  /// It compounded: the outcome came from the old day while the interpolated
+  /// values came from the current decision, so a stored `warnOffline` rendered
+  /// *"your phone has not been able to check even once"* on a phone that had
+  /// reconciled seconds earlier.
+  ///
+  /// The consequence is that the list shows **today only**, which settles
+  /// `guidelines.md`'s open question about what a watcher sees on cold open
+  /// after weeks away. Recorded in `screens.md`.
+  WarningOutcome? get standingWarning => cache.warningsShownFor[decision.day];
 }
 
 /// Everything the watcher's screen needs, as of one reconcile.
 class WatcherState {
-  const WatcherState({required this.people, required this.today});
+  const WatcherState({
+    required this.people,
+    required this.today,
+    required this.watcherZone,
+  });
 
   final List<WatchedPersonState> people;
   final DayKey today;
+
+  /// **The watcher's own zone, not the watched person's.**
+  ///
+  /// Every time this screen renders is a claim about *this device* — *"This
+  /// phone last checked Tuesday 10:14"*, *"your phone has been offline since
+  /// …"* — so it must be shown in the zone of the person reading it. The screen
+  /// had no other way to reach it and used `link.watchedZone`, which is a
+  /// different question entirely: a watcher in London watching Mum in Madrid saw
+  /// the row and the notification give different times for the same instant,
+  /// and different weekdays across midnight.
+  final tz.Location watcherZone;
 
   bool get isEmpty => people.isEmpty;
 }
@@ -158,6 +187,7 @@ class WatcherReconcileService {
     return WatcherState(
       people: people,
       today: DayKey.fromInstant(now, watcherZone),
+      watcherZone: watcherZone,
     );
   }
 

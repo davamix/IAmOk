@@ -161,8 +161,13 @@ class _IAmOkAppState extends ConsumerState<IAmOkApp> {
       services
           .watcherReconcile(watcherListShowing: false)
           .reconcile(selfUid: services.selfUid)
-          .catchError((Object _, StackTrace _) =>
-              WatcherState(people: const [], today: DayKey(1970, 1, 1))),
+          .catchError(
+            (Object _, StackTrace _) => WatcherState(
+              people: const [],
+              today: DayKey(1970, 1, 1),
+              watcherZone: TimeZones.utc,
+            ),
+          ),
     );
   }
 
@@ -192,22 +197,22 @@ class _IAmOkAppState extends ConsumerState<IAmOkApp> {
 
   @override
   Widget build(BuildContext context) => MaterialApp(
-        navigatorKey: _navigator,
-        title: 'I Am Ok',
-        debugShowCheckedModeBanner: false,
-        theme: ThemeData(
-          colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF00658F)),
-          useMaterial3: true,
-        ),
-        darkTheme: ThemeData(
-          colorScheme: ColorScheme.fromSeed(
-            seedColor: const Color(0xFF00658F),
-            brightness: Brightness.dark,
-          ),
-          useMaterial3: true,
-        ),
-        // PLAN.md routes on the two onboarding selections in Phase 5. Until
-        // then the watched side is the whole app, which is what Phase 2 is for.
-        home: const TapScreen(),
-      );
+    navigatorKey: _navigator,
+    title: 'I Am Ok',
+    debugShowCheckedModeBanner: false,
+    theme: ThemeData(
+      colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF00658F)),
+      useMaterial3: true,
+    ),
+    darkTheme: ThemeData(
+      colorScheme: ColorScheme.fromSeed(
+        seedColor: const Color(0xFF00658F),
+        brightness: Brightness.dark,
+      ),
+      useMaterial3: true,
+    ),
+    // PLAN.md routes on the two onboarding selections in Phase 5. Until
+    // then the watched side is the whole app, which is what Phase 2 is for.
+    home: const TapScreen(),
+  );
 }

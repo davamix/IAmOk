@@ -73,7 +73,11 @@ void main() {
                 .copyWith(textScaler: TextScaler.linear(textScale)),
             child: Scaffold(
               body: WatcherBody(
-                state: WatcherState(people: people, today: today),
+                state: WatcherState(
+                  people: people,
+                  today: today,
+                  watcherZone: TimeZones.location('Europe/Madrid'),
+                ),
               ),
             ),
           ),
@@ -116,6 +120,30 @@ void main() {
     testWidgets('never seen says so rather than blaming her', (tester) async {
       await pump(tester, [person()]);
       expect(find.text(WatcherCopy.neverSeen), findsOneWidget);
+    });
+
+    testWidgets('an OLDER unresolved warning is history, not status',
+        (tester) async {
+      // The regression both reviewers found independently, and the one this
+      // getter's own docstring already forbade. `warningsShownFor` loses a day
+      // only to a correction for THAT day or to revocation, so a genuinely
+      // missed day stays in it forever. The first version fell back to the
+      // newest day in the map, so Mum missing 1 August and tapping every day
+      // since produced "No check-in from Mum yesterday." on the 18th — a false
+      // claim about a specific day, to a family, permanently.
+      //
+      // Every string in the set says "yesterday", and only `decision.day` is
+      // yesterday, so only `decision.day` can be rendered honestly.
+      await pump(tester, [
+        person(
+          cache: WatcherCache(
+            warningsShownFor: {DayKey(2026, 8, 1): WarningOutcome.warnOnline},
+            lastConfirmedDay: d,
+          ),
+        ),
+      ]);
+      expect(find.textContaining('No check-in'), findsNothing);
+      expect(find.text(WatcherCopy.everythingOk), findsOneWidget);
     });
 
     testWidgets('a standing warning replaces Everything OK', (tester) async {

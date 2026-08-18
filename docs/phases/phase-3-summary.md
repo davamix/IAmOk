@@ -431,10 +431,12 @@ movement; it is Settings → Force stop, or a third-party task killer that invok
 an everyday one — and it weakens the case for un-deferring §9, whose whole justification was how
 routine this was believed to be.
 
-**Method caveat, stated because it bounds the claim.** `adb shell input swipe` would not register as a
-card-dismissal fling on this launcher, so what was measured is the **clear-all button** rather than an
-individual card swipe. Both go through the same recents dismissal path, but that is an inference. Ten
-seconds with the phone in hand settles it, and it should be settled before ADR-0007 is signed.
+**Both gestures are now measured.** The dismissal gesture on this handset is **horizontal**; a
+vertical swipe scrolls the carousel, which is why the first attempts changed nothing — and why the
+first reading of "nothing happened" proved nothing rather than proving safety. Re-run correctly, an
+individual horizontal card swipe kills the process and leaves **35 alarms and 3 notifications intact
+with `stopped=false`**, identical to clear-all. Neither gesture is a force-stop, and the caveat this
+paragraph used to carry is closed.
 
 ### Deliberately not proven by this
 

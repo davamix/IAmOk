@@ -185,10 +185,11 @@ explanation for duplicate reminders and cost real time to rule out.
 > sets `stopped=true`, after which the app receives nothing at all — including `BOOT_COMPLETED` —
 > until launched by hand.
 >
-> **Method caveat, stated because it bounds the claim.** `adb shell input swipe` would not register
-> as a card-dismissal fling on this launcher, so what was measured is the **clear-all button**, not an
-> individual card swipe. Both go through the same recents dismissal path, but that is an inference,
-> not an observation. Someone with the phone in their hand can settle it in ten seconds.
+> **Both gestures measured, 2026-08-18.** The dismissal gesture on this phone is **horizontal** — a
+> vertical swipe scrolls the carousel, which is why the first attempts changed nothing and proved
+> nothing. Re-run with a horizontal swipe on the card: process killed, **35 alarms and 3 notifications
+> intact, `stopped=false`** — identical to clear-all. The individual swipe and clear-all behave the
+> same, and neither is a force-stop.
 >
 > **Two things this run established that anyone repeating it needs.**
 >

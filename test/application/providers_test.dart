@@ -1,6 +1,7 @@
 @TestOn('vm')
 library;
 
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:i_am_ok/application/providers.dart';
@@ -46,6 +47,36 @@ class _FakeNotifications extends NotificationService {
       allowed[channel?.id] ?? true;
 }
 
+/// Answers Madrid without touching `flutter_timezone`, which has no platform
+/// side in a test process.
+class _MadridClockService extends ClockService {
+  const _MadridClockService();
+
+  @override
+  Future<String?> deviceTimezone() async => 'Europe/Madrid';
+}
+
+class _RecordingAlarms implements AlarmScheduler {
+  final Set<ScheduledReminder> armed = {};
+
+  @override
+  Future<bool> apply({
+    required Set<ScheduledReminder> toCancel,
+    required Set<ScheduledReminder> desired,
+  }) async {
+    armed
+      ..removeAll(toCancel)
+      ..addAll(desired);
+    return true;
+  }
+
+  @override
+  Future<void> cancelAll() async => armed.clear();
+
+  @override
+  Future<int> armedAccordingToPlugin() async => armed.length;
+}
+
 void main() {
   sqfliteFfiInit();
   databaseFactory = databaseFactoryFfi;
@@ -81,6 +112,24 @@ void main() {
     return services
         .watcherReconcile(watcherListShowing: listShowing)
         .delivery();
+  }
+
+  /// The same derivation as the alarm isolate reaches — literally the same
+  /// method, which is the point of it living on `NotificationService`.
+  ///
+  /// **The isolate's root is the one that matters most and the one nothing can
+  /// watch.** It serves the watcher who never opens the app, which is the entire
+  /// population `NotificationDelivery` exists for, and while it built its own
+  /// copy of this expression it drifted from the UI's copy exactly once. Now
+  /// there is one derivation and one `appInForeground` argument between them, so
+  /// the isolate's wiring is covered by every case below plus the one here.
+  Future<WatcherDelivery> deliveryInAlarmIsolate({
+    bool warnings = true,
+    bool access = true,
+  }) {
+    notifications.allowed[NotificationService.warningsChannel.id] = warnings;
+    notifications.allowed[NotificationService.accessChannel.id] = access;
+    return notifications.watcherDelivery(appInForeground: false);
   }
 
   group('watcherListShowing decides `redundant`, and only the list may say yes',
@@ -142,6 +191,95 @@ void main() {
       // cadence for a notice nobody received.
       final delivery = await deliveryWhen(listShowing: false, access: false);
       expect(delivery.accessLost, isNot(NotificationDelivery.available));
+    });
+  });
+
+  group('the device zone is cached BEFORE the first reconcile', () {
+    /// A fresh install: `LocalStore.deviceTimezone()` is null, and the platform
+    /// is about to say Madrid.
+    ///
+    /// This ordering is the fix for a defect measured on the POCO F3 on
+    /// 2026-08-17 — 19 alarms, every one an hour or two late, with
+    /// `device_timezone` already correctly stored beside them — and it had no
+    /// test. Reverse the two lines in `WatchedStateNotifier.build()` and the
+    /// first reconcile takes ADR-0002's documented UTC fallback, arming the
+    /// whole window at UTC wall times: 14:00 / 20:00 / 23:00 in Madrid rather
+    /// than 12:00 / 18:00 / 21:00.
+    ///
+    /// It used to be self-correcting — a second reconcile fixed the times — and
+    /// ADR-0006 correctly stopped that second run as concurrent. So nothing
+    /// repairs it now until the next resume: a 23:00 nudge to someone who may
+    /// well be asleep, for up to the depth of the window.
+    late _RecordingAlarms alarms;
+    late ProviderContainer container;
+
+    setUp(() {
+      alarms = _RecordingAlarms();
+      container = ProviderContainer(
+        overrides: [
+          appServicesProvider.overrideWithValue(
+            AppServices(
+              store: store,
+              clock: FixedClock(at(madrid, 2026, 8, 17, 9)),
+              notifications: notifications,
+              alarms: alarms,
+              permissions: PermissionService(notifications),
+              clockService: const _MadridClockService(),
+              selfUid: LocalStore.defaultSelfUid,
+            ),
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+    });
+
+    test('so the window is armed at the device\'s wall times, not UTC\'s',
+        () async {
+      expect(await store.deviceTimezone(), isNull, reason: 'fresh install');
+
+      await container.read(watchedStateProvider.future);
+
+      expect(alarms.armed, isNotEmpty);
+      for (final reminder in alarms.armed) {
+        expect(reminder.at.location.name, 'Europe/Madrid');
+        expect(reminder.at.hour, reminder.slot.time.hour,
+            reason: '${reminder.slot.name} fired at ${reminder.at.hour}:00 — '
+                'the UTC fallback would put it two hours late in August');
+      }
+    });
+
+    test('and the zone is on disk afterwards, for the bare isolates', () async {
+      await container.read(watchedStateProvider.future);
+      expect(await store.deviceTimezone(), 'Europe/Madrid');
+    });
+  });
+
+  group('the alarm isolate\'s root', () {
+    test('is never in the foreground, whatever else is true', () async {
+      // Not a preference — a fact about how this isolate came to exist. A
+      // `redundant` here would consume the day claiming a reader was looking at
+      // a screen that is not running.
+      expect(
+        await deliveryInAlarmIsolate(),
+        const WatcherDelivery.uniform(NotificationDelivery.available),
+      );
+    });
+
+    test('and measures both channels, exactly as the UI root does', () async {
+      expect(await deliveryInAlarmIsolate(access: false),
+          await deliveryWhen(listShowing: false, access: false),
+          reason: 'one derivation, so the two roots cannot answer differently '
+              'about the same phone — which they did');
+      expect(await deliveryInAlarmIsolate(warnings: false),
+          await deliveryWhen(listShowing: false, warnings: false));
+    });
+
+    test('a muted App problems channel still leaves it able to warn', () async {
+      // The case the whole split exists for, on the path that serves the
+      // watcher who never opens the app.
+      final delivery = await deliveryInAlarmIsolate(access: false);
+      expect(delivery.warning, NotificationDelivery.available);
+      expect(delivery.accessLost, NotificationDelivery.unavailable);
     });
   });
 }

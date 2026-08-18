@@ -233,7 +233,32 @@ void main() {
       );
     });
 
-    test('the correction renders the time in the watcher\'s zone', () {
+    test('the correction omits the time when the read carries none', () {
+      // **This is what ships.** Phase 3's read has no per-check-in timestamp,
+      // so `WatcherReconcileService` passes null and the time clause is absent
+      // — see `screens.md`. The retraction is complete without it.
+      expect(
+        NotificationCopy.correctionBody(
+          watchedName: 'Mum',
+          tappedAt: null,
+          watcherZone: madrid,
+        ),
+        'Correction: Mum did check in yesterday.',
+      );
+    });
+
+    test('STAGED FOR PHASE 4 — with a real tap time, it says so', () {
+      // **Not reachable from the app today**, and named so nobody reads it as
+      // evidence of current behaviour. It is the only test of a dead branch in
+      // the suite, and it is here because the branch is not speculative: Phase 4
+      // carries `deviceTappedAt` through the read, at which point this becomes
+      // the shipping variant and the one above becomes the fallback.
+      //
+      // The value must be HER tap, from her phone. The reason the clause was
+      // removed rather than approximated is that the only instant available on
+      // this side is when this device managed the read — a different fact
+      // wearing the same words, and a fabricated claim about a person on the one
+      // message whose purpose is to withdraw one.
       expect(
         NotificationCopy.correctionBody(
           watchedName: 'Mum',

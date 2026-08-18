@@ -41,8 +41,12 @@ class _RecordingNotifications extends NotificationService {
   @override
   Future<void> cancelAll() async => calls.add('cancelAll');
 
+  /// What the plugin's own record says is pending. Settable, so a test can
+  /// arrange a non-empty answer — without which the counting is unobservable.
+  List<PendingNotificationRequest> pendingRequests = const [];
+
   @override
-  Future<List<PendingNotificationRequest>> pending() async => const [];
+  Future<List<PendingNotificationRequest>> pending() async => pendingRequests;
 }
 
 void main() {
@@ -156,12 +160,34 @@ void main() {
     expect(notifications.calls, ['cancelAll']);
   });
 
-  test('armedAccordingToPlugin reports the PLUGIN record, not AlarmManager',
-      () async {
+  group('armedAccordingToPlugin reports the PLUGIN record, not AlarmManager',
+      () {
     // Named for what it can actually answer. `pendingNotificationRequests()`
     // reads the plugin's SharedPreferences; no public API enumerates an app's
     // pending alarms, so nothing in-process is ground truth. Correctness does
     // not depend on it — `apply` re-asserts the whole desired set regardless.
-    expect(await scheduler.armedAccordingToPlugin(), 0);
+    //
+    // **The first version asserted `0` against a fake whose `pending()` returned
+    // `const []`.** The expected value was manufactured entirely by the double:
+    // it held for `=> 0`, for a method that ignored `pending()` altogether, and
+    // for one that always answered zero. Nothing the test could arrange would
+    // make it fail, while the name promised a distinction — plugin record versus
+    // AlarmManager — that an empty list cannot express either way.
+    test('an empty plugin record is zero', () async {
+      expect(await scheduler.armedAccordingToPlugin(), 0);
+    });
+
+    test('and a populated one is counted', () async {
+      // The arrangement the old test had no way to make. This is what makes the
+      // zero above mean "we read the plugin and it was empty" rather than "we
+      // returned a constant".
+      notifications.pendingRequests = const [
+        PendingNotificationRequest(1, null, null, null),
+        PendingNotificationRequest(2, null, null, null),
+        PendingNotificationRequest(3, null, null, null),
+      ];
+
+      expect(await scheduler.armedAccordingToPlugin(), 3);
+    });
   });
 }

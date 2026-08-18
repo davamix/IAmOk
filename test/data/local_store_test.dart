@@ -384,6 +384,105 @@ void main() {
     });
   });
 
+  group('pending WARNINGS — the same round-trip, on the logic-bearing side', () {
+    /// The reminder side has had these two tests since Phase 2; the warning
+    /// side got its round-trip only incidentally, through a service test at a
+    /// non-DST instant that asserts against the alarm fake rather than the
+    /// store.
+    ///
+    /// It matters more here. `ScheduledWarning` equality covers the instant, and
+    /// the store's answer is what `currentlyScheduled` diffs against — so a
+    /// warning that came back with a different `at` looks like a change on every
+    /// single reconcile, and the window is cancelled and re-armed forever. On
+    /// the side where each of those is a binder call from a woken isolate, and
+    /// where a mis-ordered churn is a warning that never fires.
+    const mum = 'mum_ana';
+
+    setUp(() => store.upsertLink(Link(
+          watchedUid: 'mum',
+          watcherUid: 'ana',
+          status: LinkStatus.accepted,
+          watchedName: 'Mum',
+          watcherName: 'Ana',
+          watchedTimezone: 'Europe/Madrid',
+          activeFrom: day('2026-08-01'),
+          createdAt: DateTime.utc(2026, 8, 1),
+        )));
+
+    test('round-trip, instant included', () async {
+      final warnings = {
+        for (var i = 0; i < 3; i++)
+          ScheduledWarning(
+            day: day('2026-08-17').plusDays(i),
+            at: day('2026-08-17')
+                .plusDays(i)
+                .at(const LocalTimeOfDay(10, 0), madrid),
+          ),
+      };
+      await store.replacePendingWarnings(mum, warnings);
+      expect(await store.pendingWarnings(mum), warnings);
+    });
+
+    test('the zone survives a DST-era instant', () async {
+      // 2026-10-26 is the day after Madrid falls back to CET. An instant
+      // re-derived against the wrong offset lands an hour out, and the diff
+      // churns the whole window every reconcile from then on.
+      final warning = ScheduledWarning(
+        day: day('2026-10-26'),
+        at: day('2026-10-26').at(const LocalTimeOfDay(10, 0), madrid),
+      );
+      await store.replacePendingWarnings(mum, {warning});
+
+      final read = (await store.pendingWarnings(mum)).single;
+      expect(read.at, warning.at);
+      expect(read.at.location.name, 'Europe/Madrid');
+      expect(read.at.hour, 10);
+      expect(read.at.timeZoneOffset.inHours, 1, reason: 'CET, not CEST');
+    });
+
+    test('replacing one link leaves another link\'s warnings alone', () async {
+      // Warnings are per link, unlike reminders. A replace that cleared the
+      // whole table would leave every other watched person with no record of
+      // what is armed — and the next reconcile would diff against nothing.
+      await store.upsertLink(Link(
+        watchedUid: 'granddad',
+        watcherUid: 'ana',
+        status: LinkStatus.accepted,
+        watchedName: 'Granddad',
+        watcherName: 'Ana',
+        watchedTimezone: 'Europe/Madrid',
+        activeFrom: day('2026-08-01'),
+        createdAt: DateTime.utc(2026, 8, 1),
+      ));
+      final granddads = {
+        ScheduledWarning(
+          day: day('2026-08-18'),
+          at: day('2026-08-18').at(const LocalTimeOfDay(10, 0), madrid),
+        ),
+      };
+      await store.replacePendingWarnings('granddad_ana', granddads);
+      await store.replacePendingWarnings(mum, {
+        ScheduledWarning(
+          day: day('2026-08-18'),
+          at: day('2026-08-18').at(const LocalTimeOfDay(8, 0), madrid),
+        ),
+      });
+
+      expect(await store.pendingWarnings('granddad_ana'), granddads);
+    });
+
+    test('replacing with an empty set clears that link', () async {
+      await store.replacePendingWarnings(mum, {
+        ScheduledWarning(
+          day: day('2026-08-18'),
+          at: day('2026-08-18').at(const LocalTimeOfDay(10, 0), madrid),
+        ),
+      });
+      await store.replacePendingWarnings(mum, const {});
+      expect(await store.pendingWarnings(mum), isEmpty);
+    });
+  });
+
   group('settings', () {
     test('the device timezone round-trips', () async {
       // The only way a bare alarm isolate ever learns the device's zone

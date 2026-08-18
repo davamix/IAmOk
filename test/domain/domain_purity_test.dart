@@ -384,14 +384,25 @@ void main() {
 
 /// Every project file reachable from [entry] by following `import`s.
 ///
-/// Deliberately crude — a regex over import lines rather than a real parser.
-/// The alternative is a dependency on `analyzer` for one test, and this repo's
-/// imports are all plain single-quoted literals. A conditional or deferred
-/// import would need this revisited, and there are none.
+/// Deliberately crude — a regex over directive lines rather than a real parser.
+/// The alternative is a dependency on `analyzer` for one test.
 ///
 /// Resolves the two forms this codebase uses — `package:i_am_ok/…` and a
 /// relative path — and ignores everything else, because `package:flutter/…` and
 /// `dart:…` are what the ban list is for rather than something to walk into.
+///
+/// **It fails closed rather than shrinking quietly.** An under-reporting walker
+/// makes the closure comparison vacuous in exactly the direction it exists to
+/// catch: a newly added file, imported in a form the regex does not match, is
+/// reached by the isolate and checked by nothing, while both assertions still
+/// pass. The first version matched single quotes only — and
+/// `analysis_options.yaml` does not enable `prefer_single_quotes`, so a
+/// double-quoted import is legal here and this file says so forty lines above,
+/// where the *other* import regex accepts both.
+///
+/// So both quote styles are matched, and every `import`/`export`/`part` line is
+/// counted and reconciled against the URIs actually extracted. A directive this
+/// cannot parse is a failure with a diagnosis, never a smaller answer.
 Set<String> _reachableFrom(String entry) {
   final seen = <String>{};
   final queue = <String>[entry];
@@ -404,9 +415,27 @@ Set<String> _reachableFrom(String entry) {
     if (!file.existsSync()) continue;
     final source = _withoutComments(file.readAsStringSync());
 
-    for (final match
-        in RegExp("""^\\s*(?:import|export)\\s+'([^']+)'""", multiLine: true)
-            .allMatches(source)) {
+    final matches = RegExp(
+      '''^\\s*(?:import|export|part)\\s+['"]([^'"]+)['"]''',
+      multiLine: true,
+    ).allMatches(source).toList();
+
+    // `part of` carries no URI and is the one directive form that legitimately
+    // does not match. Everything else must.
+    final directives = RegExp(r'''^\s*(?:import|export|part)\s+(?!of\b)''',
+            multiLine: true)
+        .allMatches(source)
+        .length;
+    if (matches.length != directives) {
+      throw StateError(
+        '$path: found $directives import/export/part directives but could only '
+        'read ${matches.length} URIs. The walker does not understand one of '
+        'them, and a closure it cannot compute is worse than no closure — it '
+        'reads as coverage. Teach it the form, do not delete this check.',
+      );
+    }
+
+    for (final match in matches) {
       final target = match.group(1)!;
       String? resolved;
       if (target.startsWith('package:i_am_ok/')) {

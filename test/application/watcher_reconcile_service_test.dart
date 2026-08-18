@@ -628,14 +628,25 @@ void main() {
               'on the POCO — see ADR-0006');
     });
 
-    test('a second reconcile arms nothing new', () async {
+    test('a second reconcile cancels nothing, and changes nothing', () async {
+      // **The old name was "arms nothing new", which is false by design.** The
+      // service passes the whole desired set on every run — that IS the
+      // force-stop repair, asserted below — so the second reconcile re-arms all
+      // six, deliberately. Only the cancel half is idempotent in the
+      // no-platform-calls sense, and a name promising otherwise contradicts the
+      // repair test forty lines down.
       await service().reconcile(selfUid: selfUid);
+      final before = Set.of(alarms.armed[mumLink]!);
       alarms.calls.clear();
 
       await service().reconcile(selfUid: selfUid);
 
       expect(alarms.calls.where((c) => c.startsWith('cancel')), isEmpty,
-          reason: 'idempotent: nothing is cancelled on an unchanged window');
+          reason: 'nothing is cancelled on an unchanged window — a cancel here '
+              'would disarm a warning the app still wants');
+      expect(alarms.armed[mumLink], before,
+          reason: 'and the window that ends up armed is the same one, which is '
+              'the idempotence that actually matters');
     });
 
     test('an INEXACT arming is recorded, not discarded', () async {

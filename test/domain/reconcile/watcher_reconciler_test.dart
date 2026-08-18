@@ -116,18 +116,20 @@ void main() {
       expect(result.decision.silenceReason, SilenceReason.checkInRecorded);
     });
 
-    test('both causes are the same handler — offline sync', () {
-      // The watched phone was offline and Firestore only just synced.
-      final result = reconcile(
-        cache: warned,
-        read: FirestoreRead.succeeded(checkInDays: {theDay}),
-      );
-      expect(result.corrections, hasLength(1));
-    });
-
-    test('both causes are the same handler — FCM deferred until morning', () {
-      // The nudge arrives late; the reconcile it triggers reads the same
-      // document and reaches the same conclusion.
+    test('the warned day is picked out of a read carrying several', () {
+      // **This was two tests, named "offline sync" and "FCM deferred until
+      // morning".** Neither expressed a cause: the reconciler takes a
+      // `FirestoreRead`, and there is no offline-sync input and no FCM input to
+      // vary. They were the same test written twice with two names, and they
+      // read as satisfying `strategy.md`'s "two causes, one handler; test both"
+      // while asserting one thing once.
+      //
+      // The half worth keeping is the one difference between them: the read
+      // carried an unrelated extra day, so this pins that the correction is for
+      // the **warned** day rather than for whatever the read happened to
+      // contain. `the push carries no authority` (above) is the real second
+      // case, and the genuine two-causes test belongs in Phase 4, where an FCM
+      // payload exists to be one.
       final result = reconcile(
         cache: warned,
         read: FirestoreRead.succeeded(checkInDays: {theDay, day('2026-08-04')}),

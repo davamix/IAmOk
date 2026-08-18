@@ -8,14 +8,23 @@ Phase 3 built the edge around a decision that already existed. `WarningPolicy` a
 isolate to wake them, somewhere to persist what they concluded, the words to say it in, and a
 surface to explain it on.
 
-**614 tests**, up from 547. `flutter analyze` clean. `flutter build apk --debug` succeeds.
+**692 tests**, up from 547. `flutter analyze` clean. `flutter build apk --debug` succeeds.
 
-> **This phase is NOT signed off.** The five reviewer agents were launched and all five terminated
-> on a session limit before producing a report — not on findings. Phase 2's gate produced
-> thirty-two defects across five reviewers, and three times in this project a fix has introduced
-> the next defect, so the absence of a review here is a real gap rather than a formality. What
-> follows is a self-review, which is exactly the thing this project's own record says does not
-> work: *"the reviewers caught all three; the author caught none of them."*
+> **This phase is NOT signed off.** The five reviewers have now run and reported, and the prediction
+> below held exactly: the author caught none of what they found. Two criticals — one found
+> independently by three of them — plus roughly thirty further findings. Tiers 1 and 2 are fixed and
+> committed; the outstanding tiers are listed at the end of this document.
+>
+> The record is worth keeping as written, because it is the fourth time in this project that a
+> self-review has come out clean on code the reviewers then found real defects in:
+>
+> *"Phase 2's gate produced thirty-two defects across five reviewers, and three times in this
+> project a fix has introduced the next defect, so the absence of a review here is a real gap rather
+> than a formality. What follows is a self-review, which is exactly the thing this project's own
+> record says does not work: 'the reviewers caught all three; the author caught none of them.'"*
+>
+> The worst of the two criticals was a getter that broke the rule stated in its own docstring, one
+> line above the expression that broke it.
 
 ---
 
@@ -517,11 +526,17 @@ and the message about the same instant cannot render it differently.
 
 ## Deviations, recorded rather than made quietly
 
-**The correction's time is when the check-in was *learned*, not when she tapped.** Phase 3's fake
-backend carries no per-check-in timestamp, so *"at 23:40"* is currently stamped with the reconcile
-instant. Phase 4 carries `deviceTappedAt` through the read and it becomes the real value. Named here
-because *"at 23:40"* is a claim about her, and an approximation in a claim about a person is the kind
-of thing that quietly becomes permanent.
+**The correction carries no time at all** — *"Correction: Mum did check in yesterday."*
+
+This was recorded here as a deviation: Phase 3's read has no per-check-in timestamp, so *"at 23:40"*
+was stamped with the reconcile instant. The Phase 3 review rated that a false factual claim about a
+person rather than an acceptable approximation, and it was right — on a phone that slept until
+morning the reconcile instant is hours out and occasionally the wrong day, on the one message whose
+entire purpose is to withdraw an untrue claim about her.
+
+The clause is now omitted. `screens.md` carries both variants; Phase 4 carries `deviceTappedAt`
+through the read and the time returns with something true behind it. The retraction was always
+complete without it.
 
 **Notification times are rendered 24-hour rather than following the device's setting.**
 `docs/ui-ux/guidelines.md` asks for the device's own 12h/24h preference; reading it needs a
@@ -529,11 +544,15 @@ of thing that quietly becomes permanent.
 are 24-hour and the owner's locale is 24-hour, so nothing is wrong today. It becomes wrong for the
 first user whose phone is set to 12-hour.
 
-**Two device criteria are still unobserved**, and one of them is the shape that found Phase 2's
-worst defect: a warning **arriving unattended** at its natural `warningLocalTime`, and a cold-start
-tap on the *lost access* notification. Both are reachable from the harness; neither has been driven
-end-to-end on hardware. Counting registered alarms is not the same as watching one fire, and that
-distinction has already cost this project one serious defect.
+**Both remaining device criteria have since been observed**, and the records are above: the
+unattended warning at its natural `warningLocalTime`, and the cold-start tap on the *lost access*
+notification. This paragraph listed them as outstanding after they had been driven, which is the
+worse direction for a summary to be stale in — a checklist that under-reports its own evidence
+invites the work being done twice, and one that contradicts its own body cannot be trusted in
+either direction.
+
+What remains genuinely unobserved is the **overnight Doze run**, which is a different criterion and
+is still owed.
 
 **The watcher list layout is deliberately plain.** `screens.md` marks the multi-person layout as
 Phase 7 and undesigned; what is settled is the row *content*, which is what this renders.

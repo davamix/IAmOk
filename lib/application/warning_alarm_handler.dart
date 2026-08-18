@@ -2,7 +2,6 @@ import 'package:flutter/foundation.dart';
 
 import '../data/check_in_reader.dart';
 import '../data/local_store.dart';
-import '../domain/domain.dart';
 import '../platform/clock.dart';
 import '../platform/notification_service.dart';
 import '../platform/warning_alarm_scheduler.dart';
@@ -84,24 +83,13 @@ Future<void> warningAlarmCallback(int id) async {
         warningAlarmCallback,
         notifications.canScheduleExact,
       ),
-      // The app is by definition NOT in the foreground: this isolate only runs
-      // because the OS woke it. So the only question is whether the platform
-      // will post at all — and `canPost` is checked per channel, because a user
-      // who switched off just the warnings channel leaves the app-level flag
-      // true and would have every warning consumed as delivered.
+      // False by definition: this isolate exists only because the OS woke it,
+      // so there is no screen showing anything to anyone.
       //
-      // **Per channel means both channels.** Asking once and reusing the answer
-      // was the same mistake one level down: it makes the two notices share a
-      // fate the user deliberately separated when they muted one of them.
-      delivery: () async => WatcherDelivery.from(
-        canPostWarning: await notifications.canPost(
-          channel: NotificationService.warningsChannel,
-        ),
-        canPostAccessLost: await notifications.canPost(
-          channel: NotificationService.accessChannel,
-        ),
-        appInForeground: false,
-      ),
+      // The rest of the derivation is shared with the UI root rather than
+      // copied — see [NotificationService.watcherDelivery]. This copy is the one
+      // nobody can watch running, and it drifted from its twin once already.
+      delivery: () => notifications.watcherDelivery(appInForeground: false),
       lockOwner: 'alarm',
     );
 

@@ -544,19 +544,38 @@ void main() {
     });
 
     test('the inner run touches no alarms at all', () async {
+      // **The first version measured the wrong quantity, and admitted the wrong
+      // answers.** It compared `scheduler.calls.length` after the outer run
+      // against the length recorded from the *first* run — with the list
+      // cleared in between — so it computed (outer + inner) − first, and only
+      // equalled the inner run's contribution because the outer happened to
+      // make the same number of calls as the first. `lessThanOrEqualTo(0)` then
+      // admitted negatives, so a reconcile that had stopped arming anything at
+      // all read −21 and passed under a name about the inner run.
+      //
+      // Measured around the inner call instead, which is the only place the
+      // quantity actually exists.
       atTheZoneGap();
       await store.setDeviceTimezone('Europe/Madrid');
       await service().reconcile(selfUid: selfUid);
 
-      final before = List<String>.from(scheduler.calls);
-      scheduler.onApply = () async => service().reconcile(selfUid: selfUid);
-      scheduler.calls.clear();
+      int? byInner;
+      var ran = false;
+      scheduler.onApply = () async {
+        ran = true;
+        final before = scheduler.calls.length;
+        await service().reconcile(selfUid: selfUid);
+        byInner = scheduler.calls.length - before;
+      };
 
       await service().reconcile(selfUid: selfUid);
 
-      final scheduledByInner = scheduler.calls.length - before.length;
-      expect(scheduledByInner, lessThanOrEqualTo(0),
-          reason: 'the inner run must add no platform calls of its own');
+      expect(ran, isTrue,
+          reason: 'the callback carries the whole assertion; if apply is never '
+              'called this test proves nothing while passing');
+      expect(byInner, 0,
+          reason: 'the inner run adds no platform calls of its own — exactly '
+              'zero, not "no more than the outer run happened to make"');
     });
 
     test('the inner run still returns state the screen can render', () async {
@@ -607,10 +626,21 @@ void main() {
     test('names the isolate that holds it', () async {
       // Only for legibility in a dump — but a lock whose holder is opaque is a
       // lock nobody can debug from a device at 03:00.
+      //
+      // The `ran` flag is not ceremony. The only `expect` here lives inside a
+      // callback the production code may simply not invoke — an empty diff, an
+      // early return, any future short-circuit — and without the flag this test
+      // asserts nothing and passes green in exactly the case worth knowing
+      // about.
+      var ran = false;
       scheduler.onApply = () async {
+        ran = true;
         final holder = await store.reconcileLockHolder(WatchedReconcileService.lockScope);
         expect(holder!.owner, startsWith('alarm:'));
       };
+
+      addTearDown(() => expect(ran, isTrue,
+          reason: 'apply was never called, so the assertion above never ran'));
 
       await WatchedReconcileService(
         store: store,

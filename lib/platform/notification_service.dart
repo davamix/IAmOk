@@ -298,6 +298,35 @@ class NotificationService implements WatcherNotifications {
   Future<void> cancelWarning(String linkId, DayKey day) =>
       _plugin.cancel(id: AlarmIds.warning(linkId, day));
 
+  /// What the watcher side can actually deliver right now, per channel.
+  ///
+  /// **Lives here, and is shared by both composition roots, because the two
+  /// wiring defects this phase produced were both in a copy of this
+  /// expression.** The UI root and the alarm isolate each built it, and each was
+  /// a place to get it subtly wrong: one measured `canPost` on the warnings
+  /// channel and handed the answer to both branches, consuming the access-lost
+  /// cadence for a notice Android had dropped. Two copies of a decision are two
+  /// chances to make it, and the isolate's copy is the one nobody can see
+  /// running.
+  ///
+  /// The channel choice belongs beside the channel definitions in any case —
+  /// this file already owns which message goes where, which is what makes
+  /// ADR-0004's separation enforceable rather than remembered.
+  ///
+  /// [appInForeground] is the one thing the roots genuinely differ on, so it
+  /// stays a parameter: the alarm isolate passes false by definition — it only
+  /// runs because the OS woke it — while the UI passes *the watcher list is on
+  /// screen right now*, which is not the same as "the app is running" and cost
+  /// a silently lost warning when it was.
+  Future<WatcherDelivery> watcherDelivery({
+    required bool appInForeground,
+  }) async =>
+      WatcherDelivery.from(
+        canPostWarning: await canPost(channel: warningsChannel),
+        canPostAccessLost: await canPost(channel: accessChannel),
+        appInForeground: appInForeground,
+      );
+
   /// ADR-0004's notice, on the **App problems** channel rather than the warning
   /// one.
   ///

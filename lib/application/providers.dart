@@ -2,7 +2,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../data/check_in_reader.dart';
 import '../data/local_store.dart';
-import '../domain/domain.dart';
 import '../platform/alarm_scheduler.dart';
 import '../platform/clock.dart';
 import '../platform/clock_service.dart';
@@ -83,27 +82,12 @@ class AppServices {
         reader: SimulatedCheckInReader(store),
         notifications: notifications,
         alarms: warningAlarms,
-        // `canPost` is checked FIRST inside `NotificationDelivery.from`, so a
-        // watcher with notifications revoked still comes out `unavailable`
-        // rather than `redundant` — which is what stops a muted phone consuming
-        // the access-lost cadence in silence.
-        //
-        // **Both channels are measured**, because the reader switches them off
-        // independently and ADR-0004 made that independence the reason they are
-        // separate channels at all. The first version asked about `warnings`
-        // alone and handed the answer to both branches: muting *App problems*
-        // then consumed the access-lost cadence for a notice Android had
-        // dropped, and muting *Missed check-ins* suppressed the access notice on
-        // a channel that was switched on.
-        delivery: () async => WatcherDelivery.from(
-          canPostWarning: await notifications.canPost(
-            channel: NotificationService.warningsChannel,
-          ),
-          canPostAccessLost: await notifications.canPost(
-            channel: NotificationService.accessChannel,
-          ),
-          appInForeground: watcherListShowing,
-        ),
+        // One shared derivation, in `NotificationService`, rather than a copy
+        // here and another in the alarm isolate. Both wiring defects this phase
+        // produced lived in a copy of this expression — see
+        // [NotificationService.watcherDelivery].
+        delivery: () =>
+            notifications.watcherDelivery(appInForeground: watcherListShowing),
       );
 }
 

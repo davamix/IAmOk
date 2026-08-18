@@ -292,10 +292,15 @@ void main() {
       expect(find.text(TapCopy.nobodyYet), findsOneWidget);
     });
 
-    testWidgets('the empty line claims no history', (tester) async {
+    test('the empty line claims no history', () {
       // "yet" asserts *not started*, which is false after the last watcher
       // revokes — something was set up and is not any more. The line has to be
       // true in both states, because it is deliberately the same line in both.
+      //
+      // A plain `test`, not `testWidgets`: this is a claim about the string, and
+      // the harness was pumping a whole widget tree that no assertion looked at.
+      // A rendering test that renders nothing it checks implies coverage it does
+      // not have.
       expect(TapCopy.nobodyYet.toLowerCase(), isNot(contains('yet')));
     });
 
@@ -344,10 +349,13 @@ void main() {
       expect(find.text(TapCopy.notificationsOff), findsNothing);
     });
 
-    testWidgets('claims nothing about who is watching', (tester) async {
+    test('claims nothing about who is watching', () {
       // It is about her own reminders. If it strayed into the audience's
       // territory it would collide with Decision 2 on the same screen.
-      await pump(tester, state(notificationsEnabled: false));
+      //
+      // A plain `test` for the same reason as the empty-line one above: every
+      // assertion here is about the constant, and the pump it used to do was
+      // decorative.
       for (final forbidden in ['watch', 'family will', 'nobody']) {
         expect(TapCopy.notificationsOff.toLowerCase(), isNot(contains(forbidden)));
       }

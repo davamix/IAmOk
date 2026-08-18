@@ -79,6 +79,25 @@ abstract final class WatcherCopy {
   static const String neverChecked =
       'This phone has not been able to check even once.';
 
+  // ---------------------------------------------------------------- revoked
+
+  /// The link has ended — `status` is no longer `accepted`.
+  ///
+  /// Added at the Phase 3 review, where a revoked link was found rendering
+  /// **"Everything OK"**. Nothing is being checked, no warning can ever fire,
+  /// and the row said the opposite in two words — the flattest false all-clear
+  /// this screen is capable of.
+  ///
+  /// Echoes the screen title, *"People you're looking after"*: the title says
+  /// what the list is, and this says this person has left it.
+  ///
+  /// Deliberately does not name who revoked it or when. The link carries
+  /// neither, and inventing either is the same fault as stamping a correction
+  /// with a tap time nobody recorded. Attribution is owed a decision in Phase 5,
+  /// where pairing gives it something true to say.
+  static String linkEnded(String watchedName) =>
+      'You are no longer looking after $watchedName.';
+
   // ------------------------------------------------------------ lost access
 
   /// §13's backend-access row, brought forward to Phase 3 as the destination

@@ -34,7 +34,7 @@ void main() {
         cache: cache,
         read: read ?? const FirestoreRead.succeeded(),
         currentlyScheduled: currentlyScheduled,
-        delivery: delivery,
+        delivery: WatcherDelivery.uniform(delivery),
       );
 
   group('reconcile first, then decide — ADR-0001 decision 1', () {
@@ -272,7 +272,7 @@ void main() {
             cache: const WatcherCache.empty(),
             read: const FirestoreRead.succeeded(),
             currentlyScheduled: const {},
-            delivery: NotificationDelivery.available,
+            delivery: const WatcherDelivery.uniform(NotificationDelivery.available),
           ).decision.day,
         );
       }
@@ -332,7 +332,7 @@ void main() {
         cache: const WatcherCache.empty(),
         read: const FirestoreRead.succeeded(),
         currentlyScheduled: const {},
-        delivery: NotificationDelivery.available,
+        delivery: const WatcherDelivery.uniform(NotificationDelivery.available),
       );
       for (final warning in result.desiredWarnings) {
         expect(DayKey.fromInstant(warning.at, madrid), warning.day);
@@ -908,7 +908,7 @@ void main() {
         cache: const WatcherCache.empty(),
         read: const FirestoreRead.succeeded(),
         currentlyScheduled: const {},
-        delivery: NotificationDelivery.available,
+        delivery: const WatcherDelivery.uniform(NotificationDelivery.available),
       );
       expect(result.desiredWarnings, hasLength(7));
       expect(result.desiredWarnings.every((w) => w.at.hour == 10), isTrue);

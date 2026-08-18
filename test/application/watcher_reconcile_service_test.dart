@@ -137,7 +137,8 @@ void main() {
   late _RecordingAlarms alarms;
   late _StubReader reader;
   late FixedClock clock;
-  var canDeliver = NotificationDelivery.available;
+  var canDeliver =
+      const WatcherDelivery.uniform(NotificationDelivery.available);
 
   const selfUid = 'ana';
   const mumLink = 'mum_ana';
@@ -179,7 +180,7 @@ void main() {
     alarms = _RecordingAlarms();
     reader = _StubReader(const FirestoreRead.succeeded());
     clock = FixedClock(at(madrid, 2026, 8, 17, 10));
-    canDeliver = NotificationDelivery.available;
+    canDeliver = const WatcherDelivery.uniform(NotificationDelivery.available);
     await store.setDeviceTimezone('Europe/Madrid');
     await seedLink();
   });
@@ -225,7 +226,7 @@ void main() {
       // The flag is a required named parameter on `AppServices.watcherReconcile`
       // so the question cannot be skipped, and only the list itself may answer
       // yes. This pins what the answer costs when it is wrong.
-      canDeliver = NotificationDelivery.redundant;
+      canDeliver = const WatcherDelivery.uniform(NotificationDelivery.redundant);
       await service().reconcile(selfUid: selfUid);
 
       expect(notifications.postedNothing, isTrue);
@@ -238,7 +239,7 @@ void main() {
     test('nothing is recorded when the platform cannot post', () async {
       // The whole point of NotificationDelivery: a muted phone must not consume
       // a warning it never delivered, or the day is settled in silence.
-      canDeliver = NotificationDelivery.unavailable;
+      canDeliver = const WatcherDelivery.uniform(NotificationDelivery.unavailable);
       await service().reconcile(selfUid: selfUid);
 
       expect(notifications.postedNothing, isTrue);
@@ -328,7 +329,61 @@ void main() {
           reason: 'same link, same day — so the same notification id, so the '
               'false warning is replaced rather than left above the truth');
       expect(notifications.bodies['correct:$mumLink:$d'],
-          startsWith('Correction: Mum did check in yesterday, at '));
+          'Correction: Mum did check in yesterday.');
+      // **No time, and that is the assertion.** The approved string ends
+      // *"at 23:40"* and that clause is a claim about the moment SHE tapped.
+      // Phase 3's read carries no per-check-in timestamp, so the only instant
+      // available was `now` — when this device happened to read it, which on a
+      // phone that slept until morning is hours out and sometimes the wrong
+      // day. Stamping that as her tap time invents a fact about a person, on
+      // the one message whose purpose is to withdraw an untrue one. Phase 4
+      // carries `deviceTappedAt` through and the clause returns with a real
+      // value behind it.
+      expect(notifications.bodies['correct:$mumLink:$d'],
+          isNot(matches(RegExp(r'\d{1,2}:\d{2}'))),
+          reason: 'no clock time may appear until it is HER time');
+    });
+
+    test('when the warning could not be posted, it is CANCELLED not corrected',
+        () async {
+      // `redundant` consumed the day without posting anything — the watcher was
+      // reading the list, which is the whole meaning of the state. So there is
+      // nothing in the tray, and a replacement message arrives alone: at 3am,
+      // *"Correction: Mum did check in yesterday"* with no warning above it
+      // reads as a warning the reader somehow slept through.
+      canDeliver = const WatcherDelivery.uniform(NotificationDelivery.redundant);
+      await service().reconcile(selfUid: selfUid);
+      expect((await store.watcherCache(mumLink)).warningsShownFor[d],
+          WarningOutcome.warnOnline,
+          reason: 'consumed without posting — the sharp edge of `redundant`');
+      expect(notifications.calls, isEmpty);
+
+      reader.result = FirestoreRead.succeeded(checkInDays: {d});
+      await service().reconcile(selfUid: selfUid);
+
+      expect(notifications.calls, ['cancelWarn:$mumLink:$d'],
+          reason: 'the retraction still happens — it just says nothing');
+      expect(notifications.calls, isNot(contains('correct:$mumLink:$d')));
+    });
+
+    test('a muted warning channel still takes the stale warning down',
+        () async {
+      // The other order: the warning WAS posted, and the channel was muted
+      // afterwards. Cancelling needs no permission, so the false claim about
+      // Mum comes out of the tray — on the phone least likely ever to be
+      // opened, which is exactly the one that would otherwise keep it forever.
+      await service().reconcile(selfUid: selfUid);
+      expect(notifications.calls, contains('warn:$mumLink:$d'));
+
+      canDeliver =
+          const WatcherDelivery.uniform(NotificationDelivery.unavailable);
+      reader.result = FirestoreRead.succeeded(checkInDays: {d});
+      notifications.calls.clear();
+      await service().reconcile(selfUid: selfUid);
+
+      expect(notifications.calls, ['cancelWarn:$mumLink:$d']);
+      expect((await store.watcherCache(mumLink)).warningsShownFor, isEmpty,
+          reason: 'she checked in — the day is no longer warned either way');
     });
 
     test('the day leaves warningsShownFor and is confirmed', () async {
@@ -554,6 +609,94 @@ void main() {
 
       expect(alarms.calls.where((c) => c.startsWith('cancel')), isEmpty,
           reason: 'idempotent: nothing is cancelled on an unchanged window');
+    });
+
+    test('an INEXACT arming is recorded, not discarded', () async {
+      // §13 calls the exact-alarm fallback acceptable *and surfaced*. Only the
+      // first half was built: `apply` reported it and the return value went
+      // nowhere, so nothing anywhere distinguished a window that fires at 10:00
+      // from one Android may defer by an hour or more — on a dead man's switch,
+      // where an hour is an hour nobody is told.
+      alarms.exact = false;
+      await service().reconcile(selfUid: selfUid);
+
+      expect(await store.warningAlarmsExact(), isFalse);
+    });
+
+    test('an exact arming records that too', () async {
+      await service().reconcile(selfUid: selfUid);
+      expect(await store.warningAlarmsExact(), isTrue);
+    });
+
+    test('nothing armed makes no claim either way', () async {
+      // A revoked link arms nothing, so it has no opinion about exactness and
+      // must not overwrite the answer a real window gave. Otherwise revoking
+      // one person would report the whole app healthy.
+      alarms.exact = false;
+      await service().reconcile(selfUid: selfUid);
+      expect(await store.warningAlarmsExact(), isFalse);
+
+      await seedLink(status: LinkStatus.revoked);
+      alarms.exact = true;
+      await service().reconcile(selfUid: selfUid);
+
+      expect(await store.warningAlarmsExact(), isFalse,
+          reason: 'an empty desired set arms nothing and claims nothing');
+    });
+  });
+
+  group('a link with an unrenderable timezone', () {
+    /// A zone name this build's compiled-in tzdata does not carry. Reachable
+    /// from a store written by a newer build, a restore, or a zone renamed
+    /// upstream between tzdata releases.
+    Future<void> seedBadZone() => store.upsertLink(Link(
+          watchedUid: 'granddad',
+          watcherUid: selfUid,
+          status: LinkStatus.accepted,
+          watchedName: 'Granddad',
+          watcherName: 'Ana',
+          watchedTimezone: 'Mars/Olympus_Mons',
+          activeFrom: day('2026-08-01'),
+          warningLocalTime: const LocalTimeOfDay(10, 0),
+          createdAt: DateTime.utc(2026, 8, 1),
+        ));
+
+    test('does not take down the reconcile of every OTHER link', () async {
+      // **The whole point.** `link.watchedZone` throws `UnknownTimeZone`, and
+      // `reconcile()` walks every link in one pass — inside an isolate with no
+      // screen, no user and nothing that reports a throw. One bad string would
+      // stop every other watched person being checked, and the only symptom is
+      // silence: the one failure this side cannot detect in itself.
+      await seedBadZone();
+
+      final state = await service().reconcile(selfUid: selfUid);
+
+      expect(state.people, hasLength(2));
+      expect(notifications.calls, contains('warn:$mumLink:$d'),
+          reason: 'Mum\'s link is fine and must still be reconciled');
+    });
+
+    test('falls back to the watcher\'s zone, not UTC', () async {
+      // Both are guesses. This one is right in the overwhelmingly common case —
+      // a family in one country — while UTC is wrong by up to a day at the far
+      // end of the world, which moves D and can warn about a day she has not
+      // finished yet.
+      //
+      // 01:00 Madrid on the 17th is 23:00 UTC on the **16th**, so the two
+      // fallbacks disagree about what the last completed day is: Madrid says
+      // the 16th, UTC says the 15th. Asserting the alarm's zone instead would
+      // prove nothing — the window is always armed in the watcher's zone
+      // whatever the link says.
+      await seedBadZone();
+      clock = FixedClock(at(madrid, 2026, 8, 17, 1));
+
+      await service().reconcile(selfUid: selfUid);
+
+      expect(notifications.calls, contains('warn:granddad_ana:$d'),
+          reason: 'D is the 16th — the last completed day in Madrid');
+      expect(notifications.calls,
+          isNot(contains('warn:granddad_ana:${day('2026-08-15')}')),
+          reason: 'the 15th is what a UTC fallback would have warned about');
     });
   });
 

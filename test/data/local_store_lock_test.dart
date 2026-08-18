@@ -4,6 +4,7 @@ library;
 import 'dart:io';
 
 import 'package:i_am_ok/data/local_store.dart';
+import 'package:i_am_ok/domain/domain.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:test/test.dart';
 
@@ -270,39 +271,235 @@ void main() {
     });
   });
 
-  test('a v1 store upgrades without losing anything', () async {
-    // The migration is additive on purpose. An installed app that loses this
-    // store loses `warningsShownFor`, and every standing warning fires again the
-    // next morning — so a drop-and-recreate would be a data-loss bug wearing a
-    // migration's clothes.
-    final old = Directory.systemTemp.createTempSync('i_am_ok_v1');
-    addTearDown(() => old.deleteSync(recursive: true));
-    final oldPath = '${old.path}/store.db';
+  group('migrating a real v1 store', () {
+    /// **v1's schema, written out, and deliberately not imported.**
+    ///
+    /// The first version of this test built a "v1" holding a single `settings`
+    /// table — so the upgrade had six tables' worth of nothing to lose, and it
+    /// could not have detected the data loss it exists to prevent. A
+    /// drop-and-recreate would have passed it.
+    ///
+    /// Copying the DDL is the point rather than the cost. Reading it from
+    /// `LocalStore` would make the fixture whatever today's schema is, and a
+    /// migration test whose "before" tracks its "after" asserts nothing at all.
+    /// These seven statements are what shipped as v1 and are now frozen.
+    const v1Schema = [
+      '''
+      CREATE TABLE settings (
+        key   TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      )''',
+      '''
+      CREATE TABLE links (
+        id                 TEXT PRIMARY KEY,
+        watched_uid        TEXT NOT NULL,
+        watcher_uid        TEXT NOT NULL,
+        status             TEXT NOT NULL,
+        watched_name       TEXT NOT NULL,
+        watcher_name       TEXT NOT NULL,
+        watched_timezone   TEXT NOT NULL,
+        active_from        TEXT NOT NULL,
+        warning_local_time TEXT NOT NULL,
+        created_at         INTEGER NOT NULL,
+        accepted_at        INTEGER
+      )''',
+      '''
+      CREATE TABLE check_ins (
+        day              TEXT PRIMARY KEY,
+        device_tapped_at INTEGER NOT NULL,
+        timezone         TEXT NOT NULL
+      )''',
+      '''
+      CREATE TABLE watcher_cache (
+        link_id                 TEXT PRIMARY KEY REFERENCES links(id) ON DELETE CASCADE,
+        away_from               TEXT,
+        away_through            TEXT,
+        last_confirmed_day      TEXT,
+        last_reconcile_at       INTEGER,
+        access_lost_since       TEXT,
+        access_lost_cause       TEXT,
+        access_lost_notified_on TEXT
+      )''',
+      '''
+      CREATE TABLE warnings_shown (
+        link_id TEXT NOT NULL REFERENCES links(id) ON DELETE CASCADE,
+        day     TEXT NOT NULL,
+        outcome TEXT NOT NULL,
+        PRIMARY KEY (link_id, day)
+      )''',
+      '''
+      CREATE TABLE pending_alarms (
+        kind     TEXT NOT NULL,
+        day      TEXT NOT NULL,
+        slot     TEXT NOT NULL DEFAULT '',
+        link_id  TEXT NOT NULL DEFAULT '',
+        fires_at INTEGER NOT NULL,
+        zone     TEXT NOT NULL,
+        PRIMARY KEY (kind, day, slot, link_id)
+      )''',
+      '''
+      CREATE TABLE self_away (
+        id          INTEGER PRIMARY KEY CHECK (id = 0),
+        from_day    TEXT NOT NULL,
+        through_day TEXT NOT NULL,
+        set_by      TEXT,
+        set_by_name TEXT
+      )''',
+    ];
 
-    final v1 = await databaseFactory.openDatabase(
-      oldPath,
+    /// A v1 file with **a row in every table**, because a table nobody wrote to
+    /// cannot demonstrate that its contents survived.
+    Future<String> seedV1() async {
+      final old = Directory.systemTemp.createTempSync('i_am_ok_v1');
+      addTearDown(() => old.deleteSync(recursive: true));
+      final path = '${old.path}/store.db';
+
+      final v1 = await databaseFactory.openDatabase(
+        path,
+        options: OpenDatabaseOptions(
+          version: 1,
+          onCreate: (db, _) async {
+            for (final statement in v1Schema) {
+              await db.execute(statement);
+            }
+          },
+        ),
+      );
+      await v1.insert('settings',
+          {'key': 'device_timezone', 'value': 'Europe/Madrid'});
+      await v1.insert('links', {
+        'id': 'mum_ana',
+        'watched_uid': 'mum',
+        'watcher_uid': 'ana',
+        'status': 'accepted',
+        'watched_name': 'Mum',
+        'watcher_name': 'Ana',
+        'watched_timezone': 'Europe/Madrid',
+        'active_from': '2026-08-01',
+        'warning_local_time': '10:00',
+        'created_at': DateTime.utc(2026, 8, 1).millisecondsSinceEpoch,
+      });
+      await v1.insert('check_ins', {
+        'day': '2026-08-16',
+        'device_tapped_at': DateTime.utc(2026, 8, 16, 9, 14).millisecondsSinceEpoch,
+        'timezone': 'Europe/Madrid',
+      });
+      await v1.insert('watcher_cache', {
+        'link_id': 'mum_ana',
+        'last_confirmed_day': '2026-08-15',
+        'last_reconcile_at': DateTime.utc(2026, 8, 17, 8).millisecondsSinceEpoch,
+      });
+      await v1.insert('warnings_shown', {
+        'link_id': 'mum_ana',
+        'day': '2026-08-14',
+        'outcome': 'warnOnline',
+      });
+      await v1.insert('pending_alarms', {
+        'kind': 'warning',
+        'day': '2026-08-18',
+        'link_id': 'mum_ana',
+        'fires_at': DateTime.utc(2026, 8, 18, 8).millisecondsSinceEpoch,
+        'zone': 'Europe/Madrid',
+      });
+      await v1.insert('self_away', {
+        'id': 0,
+        'from_day': '2026-08-20',
+        'through_day': '2026-08-22',
+        'set_by': 'ana',
+        'set_by_name': 'Ana',
+      });
+      await v1.close();
+      return path;
+    }
+
+    test('every table keeps its rows', () async {
+      // The migration is additive on purpose. An installed app that loses this
+      // store loses `warningsShownFor`, and every standing warning fires again
+      // the next morning — so a drop-and-recreate would be a data-loss bug
+      // wearing a migration's clothes.
+      final upgraded = await LocalStore.open(path: await seedV1());
+      addTearDown(upgraded.close);
+
+      final dump = await upgraded.dump();
+      for (final table in [
+        'settings',
+        'links',
+        'check_ins',
+        'watcher_cache',
+        'warnings_shown',
+        'pending_alarms',
+        'self_away',
+      ]) {
+        expect(dump[table], hasLength(1), reason: '$table lost its row');
+      }
+    });
+
+    test('the standing warning in particular', () async {
+      // Named on its own because it is the row whose loss is not merely data
+      // loss: `warningsShownFor` is what stops a warning being posted twice, so
+      // an empty one means every standing warning fires again — a second false
+      // claim to a family, produced by an upgrade.
+      final upgraded = await LocalStore.open(path: await seedV1());
+      addTearDown(upgraded.close);
+
+      final cache = await upgraded.watcherCache('mum_ana');
+      expect(cache.warningsShownFor,
+          {DayKey(2026, 8, 14): WarningOutcome.warnOnline});
+      expect(cache.lastConfirmedDay, DayKey(2026, 8, 15));
+    });
+
+    test('and the v3 lock table exists afterwards', () async {
+      final upgraded = await LocalStore.open(path: await seedV1());
+      addTearDown(upgraded.close);
+
+      expect(
+        await upgraded.acquireReconcileLock(
+            scope: 'watched',
+            owner: 'ui',
+            now: t0,
+            lease: const Duration(seconds: 30)),
+        isTrue,
+      );
+    });
+  });
+
+  test('a store written by a NEWER build opens, and keeps its rows', () async {
+    // A rollback — a Play staged-rollout halt, or a debug build over a release
+    // one. `LocalStore.open()` is the first line of both background entry
+    // points, so whatever happens here happens before anything else can.
+    //
+    // **This pins a behaviour, not a bug fix.** sqflite runs nothing when
+    // `onDowngrade` is null and silently accepts the file, which is what this
+    // app wants; the handler is written out so the intent is visible. What the
+    // test defends against is the plausible "tidy-up": switching it to
+    // `onDatabaseDowngradeDelete`, which deletes the store, loses
+    // `warnings_shown`, and fires every standing warning again — a round of
+    // false claims to a family, produced by a rollback. Verified to fail
+    // against exactly that.
+    final dir = Directory.systemTemp.createTempSync('i_am_ok_v4');
+    addTearDown(() => dir.deleteSync(recursive: true));
+    final path = '${dir.path}/store.db';
+
+    final future = await databaseFactory.openDatabase(
+      path,
       options: OpenDatabaseOptions(
-        version: 1,
+        version: LocalStore.schemaVersion + 1,
         onCreate: (db, _) async {
           await db.execute(
               'CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
+          await db.execute(
+              'CREATE TABLE something_new (id INTEGER PRIMARY KEY)');
         },
       ),
     );
-    await v1.insert('settings', {'key': 'device_timezone', 'value': 'Europe/Madrid'});
-    await v1.close();
+    await future
+        .insert('settings', {'key': 'device_timezone', 'value': 'Europe/Madrid'});
+    await future.close();
 
-    final upgraded = await LocalStore.open(path: oldPath);
-    addTearDown(upgraded.close);
+    final store = await LocalStore.open(path: path);
+    addTearDown(store.close);
 
-    expect(await upgraded.deviceTimezone(), 'Europe/Madrid',
-        reason: 'the v1 row survived the upgrade');
-    expect(
-      await upgraded.acquireReconcileLock(
-          scope: 'watched',
-          owner: 'ui', now: t0, lease: const Duration(seconds: 30)),
-      isTrue,
-      reason: 'and the v2 table exists',
-    );
+    expect(await store.deviceTimezone(), 'Europe/Madrid',
+        reason: 'opened, and the newer build\'s data is still there');
   });
 }

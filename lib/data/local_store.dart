@@ -84,6 +84,30 @@ class LocalStore {
         }
         if (to > 3) throw StateError('no migration from v$from to v$to');
       },
+      // A store written by a NEWER build than the one now running — a Play
+      // staged-rollout halt, or a debug build installed over a release one.
+      //
+      // **Stated rather than left to the default, because the two stock answers
+      // differ by everything and neither name says which you get.** sqflite runs
+      // nothing when this is null (`database_mixin.dart`: `if (options
+      // .onDowngrade != null)`) and silently rewrites the version downward,
+      // which is in fact what we want — but it is the kind of default that gets
+      // "tidied" into `onDatabaseDowngradeDelete` by whoever next reads this
+      // block and assumes a downgrade needs handling.
+      //
+      // `onDatabaseDowngradeDelete` **deletes the file**. That loses
+      // `warnings_shown`, and this class's own schema note says the visible
+      // symptom is every standing warning firing again — a fresh round of false
+      // claims to a family, produced by a rollback. It is the one option that
+      // must never appear here, and a test pins that.
+      //
+      // Accepting the file is safe today because every migration so far is
+      // additive plus one re-key of `reconcile_lock`, and an older build's
+      // queries name their columns, so extra tables and columns are invisible to
+      // it. **A future migration that drops or renames a column breaks that and
+      // must revisit this** — at which point the honest move is a version floor
+      // here rather than a blanket accept.
+      onDowngrade: (db, from, to) async {},
     );
     return LocalStore._(db);
   }
@@ -215,6 +239,7 @@ class LocalStore {
   static const String _keyDeviceTimezone = 'device_timezone';
   static const String _keyClockOffsetMs = 'debug_clock_offset_ms';
   static const String _keySimulatedBackend = 'debug_simulated_backend';
+  static const String _keyWarningAlarmsExact = 'warning_alarms_exact';
 
   Future<String?> _setting(String key) async {
     final rows = await _db.query(
@@ -275,6 +300,29 @@ class LocalStore {
 
   Future<void> setSimulatedBackendRaw(String? encoded) =>
       _putSetting(_keySimulatedBackend, encoded);
+
+  /// Whether the last `apply` armed the warning alarms **exactly**.
+  ///
+  /// False means §13's documented degradation happened: the platform refused
+  /// `SCHEDULE_EXACT_ALARM`, so the window is armed inexactly and every warning
+  /// may arrive late by however long Android decides. That is a real reduction
+  /// in what this app promises — §10 says the warning fires at
+  /// `warningLocalTime`, and a dead man's switch an hour late is an hour nobody
+  /// is told — and it happens with no prompt, no error and nothing on screen.
+  ///
+  /// Recorded rather than discarded because the scheduler is the only code that
+  /// can observe it and it runs in an isolate with no UI. §13's health panel
+  /// reads this in Phase 7; until then it is at least in `dump`, which is the
+  /// difference between a known degradation and an invisible one.
+  ///
+  /// Null before the first apply — never armed, so nothing to claim either way.
+  Future<bool?> warningAlarmsExact() async {
+    final raw = await _setting(_keyWarningAlarmsExact);
+    return raw == null ? null : raw == 'true';
+  }
+
+  Future<void> setWarningAlarmsExact(bool exact) =>
+      _putSetting(_keyWarningAlarmsExact, '$exact');
 
   // ------------------------------------------------------------------- links
 

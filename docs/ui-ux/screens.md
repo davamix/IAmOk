@@ -271,6 +271,36 @@ It **outranks a standing warning in the row**, for the same reason ADR-0004 puts
 away branch: it is a fault in this app rather than a claim about her, and it is the thing the reader
 tapped through to understand.
 
+### The revoked row — added at the Phase 3 review
+
+A link whose status is not `accepted` fell through every branch above and rendered **"Everything
+OK"**. That is the worst sentence this screen can produce for the state: nothing is being checked,
+no warning will ever fire, and the row said the opposite in two words.
+
+| | |
+|---|---|
+| Label | *"You are no longer looking after Mum."* |
+| Consequence | *"You will not be warned if Mum misses a day."* — the same sentence as the lost-access row |
+| Every row, always | *"This phone last checked Tuesday 10:14."* |
+
+**It outranks everything, including the lost-access row.** §10 step 1 makes a non-accepted link the
+first branch of the whole decision, and the ordering is the same argument: once the link has ended
+there is nothing left to say about access to check-ins the app is no longer entitled to read. A
+revoked link produces refused reads forever, so a row led by *"Access to Mum's check-ins"* would
+send the reader off to sign in again and fix a permission problem that does not exist.
+
+**The consequence sentence is reused verbatim, on purpose.** It is the same fact — this phone will
+not warn you about this person — and two wordings for one fact is two things to keep true.
+
+**Not styled as an error.** It is a settled state rather than bad news about her, and *"quiet
+confirm, loud miss"* reserves alarm styling for a miss. The words carry it, as they must anyway:
+colour is never the only signal.
+
+**It does not say who revoked it, or when.** The link carries neither, and this screen does not
+invent facts about people — the same rule that took the time clause out of the correction. Naming
+the actor is right and is owed a decision when pairing lands in Phase 5, where the information will
+actually exist.
+
 ## Health panel
 
 Always reachable, green/red per item, re-checked on every app resume — not an onboarding gate,
@@ -316,6 +346,7 @@ The full set. Everything the app says out loud is here.
 | …and no check-in has ever been seen | Watcher | *"Can't check on Mum — I Am Ok has lost access to the check-ins. Open the app to see what to do. Your phone has not seen a check-in yet."* |
 | …and an away period is cached for the day | Watcher | *"Can't check on Mum — I Am Ok has lost access to the check-ins. Open the app to see what to do. Mum was marked away until Saturday 22 August."* |
 | Late check-in after a warning was shown | Watcher | *"Correction: Mum did check in yesterday, at 23:40."* Replaces the warning by id. |
+| …and the read carries no tap time | Watcher | *"Correction: Mum did check in yesterday."* Same id, same replacement. |
 | Away set by a watcher | All other watchers, and the watched person | *"Ana marked Mum away until Sat 22 Aug."* |
 | Away set by the watched person | All watchers | *"Mum is away until Sat 22 Aug."* |
 | Away cancelled | Everyone except whoever cancelled | *"Mum's away period was cancelled — daily check-ins resume today."* |
@@ -323,6 +354,20 @@ The full set. Everything the app says out loud is here.
 
 Away transitions happen a handful of times a year, so these can be ordinary notifications rather
 than silent ones — alarm fatigue is not a risk at that frequency.
+
+> **The correction's time clause is hers, or it is absent.** *"at 23:40"* is `deviceTappedAt` — the
+> moment she tapped, on her phone — and nothing else may be rendered there. Phase 3's read carries
+> no per-check-in timestamp, so the only instant available to the watcher's device is when it
+> managed the read: on a phone that was asleep until morning that is hours out and occasionally the
+> wrong day. A message that exists to withdraw a false claim about a person may not make a new one
+> to do it, so until Phase 4 carries `deviceTappedAt` through, the second variant is what ships.
+> The retraction is complete without the time; the time was never what made it true.
+
+> **A correction is only ever spoken when the warning it retracts was actually posted.** If the
+> warning was consumed as `redundant` — the watcher was reading the list, so nothing went to the
+> tray — or the *Missed check-ins* channel has since been muted, the standing warning is
+> **cancelled silently** instead. A bare *"Correction: Mum did check in yesterday"* with nothing
+> above it reads, at 3am, as a warning the reader somehow slept through.
 
 ### The three reminders — approved Phase 2
 

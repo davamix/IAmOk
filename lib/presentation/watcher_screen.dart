@@ -268,7 +268,33 @@ class _PersonRow extends StatelessWidget {
   _RowStatus _status(BuildContext context) {
     final cache = person.cache;
 
-    // Lost access first. It is a fault in THIS app rather than a claim about
+    // A revoked link outranks everything, including lost access — §10 step 1
+    // makes a non-accepted link the first branch of the whole decision, and this
+    // is that ordering on the screen.
+    //
+    // **It fell through every branch below and rendered "Everything OK".** For a
+    // link that is armed with no alarms, will never warn, and cannot read
+    // anything, that is the flattest false all-clear this screen can produce.
+    //
+    // Above the access row rather than below it, because a revoked link makes
+    // every later read refused by definition — so the access branch would fire
+    // too, and send the reader off to sign in again and repair a permission
+    // fault that does not exist. The link ended; there is nothing to fix.
+    if (!person.link.isAccepted) {
+      return _RowStatus(
+        lines: [
+          WatcherCopy.linkEnded(person.name),
+          WatcherCopy.accessLostConsequence(person.name),
+          _lastChecked(cache),
+        ],
+        // Not an error. A settled state, not bad news about her — "quiet
+        // confirm, loud miss" keeps alarm styling for a miss. The words carry
+        // it, which they have to in any case: colour is never the only signal.
+        isBad: false,
+      );
+    }
+
+    // Lost access next. It is a fault in THIS app rather than a claim about
     // her, and it is the state the notification routes here to explain — so it
     // outranks the rest of the row for the same reason ADR-0004 puts refusal
     // above the away branch.

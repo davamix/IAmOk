@@ -134,7 +134,11 @@ class WatcherReconcileService {
   /// `NotificationDelivery` was added to close: the access-lost cadence burns
   /// days 0, 1, 3, 7 and 14 in silence on a muted phone, and access returning on
   /// day 20 owes nothing until day 21.
-  final Future<NotificationDelivery> Function() delivery;
+  ///
+  /// **One state per channel** — see [WatcherDelivery]. The two notices this
+  /// side posts live on channels the reader switches off independently, which is
+  /// the whole reason ADR-0004 separated them.
+  final Future<WatcherDelivery> Function() delivery;
 
   final String lockOwner;
 
@@ -195,7 +199,7 @@ class WatcherReconcileService {
     required Link link,
     required DateTime now,
     required tz.Location watcherZone,
-    required NotificationDelivery delivery,
+    required WatcherDelivery delivery,
     required bool mayChangeAlarms,
   }) async {
     // 1. Tier 1 first. A failed read is a value, never a throw — the difference
@@ -223,18 +227,41 @@ class WatcherReconcileService {
     //    warning that was just, correctly, raised. The domain never produces
     //    both for one day — a corrected day leaves `warningsShownFor` — but the
     //    ordering is free and the failure it prevents is a false all-clear.
+    //
+    //    **Spoken only when the warning channel can carry it**, and taken down
+    //    silently otherwise. A correction is meaningful only against the warning
+    //    it retracts, and `redundant` means that warning was never posted at all
+    //    — the watcher was reading the list — so the replacement would arrive
+    //    alone, telling someone at 3am that a warning they never saw has been
+    //    withdrawn. `unavailable` cannot post it in any case. Cancelling needs
+    //    no permission and is a no-op when nothing is showing, so both paths end
+    //    with an empty tray, which is the honest state. See
+    //    [WatcherReconcileResult.shouldPostCorrections].
     for (final correction in result.corrections) {
+      if (!result.shouldPostCorrections) {
+        await notifications.cancelWarning(correction.linkId, correction.day);
+        continue;
+      }
       await notifications.showCorrection(
         linkId: correction.linkId,
         day: correction.day,
         body: NotificationCopy.correctionBody(
           watchedName: link.watchedName,
-          // Phase 3 has no per-check-in timestamp from the fake backend, so the
-          // correction is stamped with the moment it was learned rather than the
-          // moment she tapped. Phase 4 carries `deviceTappedAt` through the read
-          // and this becomes the real value — recorded rather than left as a
-          // silent approximation, because "at 23:40" is a claim about her.
-          tappedAt: now,
+          // **Null, deliberately.** The approved string ends *"at 23:40"*, and
+          // that is a claim about the moment SHE tapped. Phase 3's fake backend
+          // carries no per-check-in timestamp, so the only instant available
+          // here is `now` — the moment this device happened to read it, which on
+          // a phone that was asleep, offline, or simply not opened until morning
+          // is hours out and occasionally the wrong day. Telling a family "Mum
+          // checked in at 09:02" when she tapped at 23:40 the night before is a
+          // fabricated fact about a person, on the message whose entire purpose
+          // is to correct one.
+          //
+          // So the time is omitted until Phase 4 carries `deviceTappedAt`
+          // through the read, and `correctionBody` renders the no-time variant
+          // recorded in `screens.md`. The retraction is complete without it;
+          // the time was never what made it true.
+          tappedAt: null,
           watcherZone: watcherZone,
         ),
       );
@@ -285,12 +312,24 @@ class WatcherReconcileService {
     //    failure that cannot be detected. Two concurrent runs changing the alarm
     //    set is what strands an alarm nothing can cancel.
     if (mayChangeAlarms) {
-      await alarms.apply(
+      final exact = await alarms.apply(
         linkId: link.id,
         toCancel: result.warningsToCancel,
         desired: result.desiredWarnings,
       );
       await store.replacePendingWarnings(link.id, result.desiredWarnings);
+      // The return value was previously dropped on the floor, which made the
+      // scheduler's fallback unobservable: the alarms are armed either way, so
+      // nothing anywhere distinguished a window that fires at 10:00 from one
+      // Android may defer for an hour or more. §13 calls that degradation
+      // acceptable *and surfaced*; only the first half had been built.
+      //
+      // Recorded whenever any alarm was actually armed. An empty desired set —
+      // a revoked link — arms nothing, so it has no opinion about exactness and
+      // must not overwrite the answer a real window gave.
+      if (result.desiredWarnings.isNotEmpty) {
+        await store.setWarningAlarmsExact(exact);
+      }
     }
 
     // 6. One write, after the platform calls returned.

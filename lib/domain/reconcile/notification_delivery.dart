@@ -92,3 +92,85 @@ enum NotificationDelivery {
   /// told. False only for [unavailable], where nothing reached anyone.
   bool get consumesReminder => this != NotificationDelivery.unavailable;
 }
+
+/// The delivery state of **each** notice the watcher side can post.
+///
+/// ## Why one value was not enough
+///
+/// The watcher side posts on two Android channels, and [ADR-0004][] made that
+/// split load-bearing: the missed-day warning is a claim about *her*, the
+/// access-lost notice is a claim about *us*, and a watcher who mutes app faults
+/// must still hear about a missed day. Channels are the unit Android gives the
+/// user for switching us off, so they are switched off independently.
+///
+/// The first version measured `canPost` once — on the warnings channel — and
+/// handed the single answer to both branches. Both directions were wrong:
+///
+/// * Mute **App problems** only. The warnings channel is on, so the value is
+///   `available`, so the access-lost cadence is consumed for a notice Android
+///   dropped. Days 0, 1, 3, 7 and 14 burn in silence, and the state ADR-0004
+///   rates as the one a watcher cannot detect in themselves persists with
+///   nothing left to say about it.
+/// * Mute **Missed check-ins** only. The value is `unavailable`, so the
+///   access-lost notice is suppressed and its cadence held — on a channel that
+///   is switched on and would have shown it.
+///
+/// So the measurement is per channel, and the two travel together only because
+/// they are decided in one pass.
+///
+/// [appInForeground] is genuinely shared: it is one app, one screen, and the
+/// watcher list renders both states — the access-lost row outranks the warning
+/// row on the same row (`watcher_screen.dart`). Seeing it is being told,
+/// whichever notice it would have been.
+///
+/// [ADR-0004]: ../../../docs/architecture/decisions/0004-refused-is-not-unreachable.md
+class WatcherDelivery {
+  const WatcherDelivery({required this.warning, required this.accessLost});
+
+  /// Both channels in the same state.
+  ///
+  /// Named rather than defaulted, because "one value for both" is precisely the
+  /// bug above and it must be a thing someone chose to say. Legitimate when the
+  /// app-level `POST_NOTIFICATIONS` is revoked — that really does stop both —
+  /// and in tests that are not about the channel split.
+  const WatcherDelivery.uniform(NotificationDelivery delivery)
+      : warning = delivery,
+        accessLost = delivery;
+
+  /// From what the platform edge can observe about each channel.
+  factory WatcherDelivery.from({
+    required bool canPostWarning,
+    required bool canPostAccessLost,
+    required bool appInForeground,
+  }) =>
+      WatcherDelivery(
+        warning: NotificationDelivery.from(
+          canPost: canPostWarning,
+          appInForeground: appInForeground,
+        ),
+        accessLost: NotificationDelivery.from(
+          canPost: canPostAccessLost,
+          appInForeground: appInForeground,
+        ),
+      );
+
+  /// The missed-day warning, and the correction that retracts one — both are
+  /// the same claim about the same person on the same channel, at the same id.
+  final NotificationDelivery warning;
+
+  /// ADR-0004's *lost access* notice, on the **App problems** channel.
+  final NotificationDelivery accessLost;
+
+  @override
+  bool operator ==(Object other) =>
+      other is WatcherDelivery &&
+      other.warning == warning &&
+      other.accessLost == accessLost;
+
+  @override
+  int get hashCode => Object.hash(warning, accessLost);
+
+  @override
+  String toString() =>
+      'WatcherDelivery(warning: ${warning.name}, access: ${accessLost.name})';
+}

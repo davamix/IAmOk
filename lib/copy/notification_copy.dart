@@ -169,13 +169,33 @@ abstract final class NotificationCopy {
   ///
   /// Posted at the **same notification id** as the warning it corrects, so the
   /// false one is replaced rather than left sitting above the truth.
+  /// The retraction that **replaces** a warning at the same notification id, so
+  /// the false one is gone rather than sitting above the truth in the shade.
+  ///
+  /// [tappedAt] is the moment **she** tapped — `deviceTappedAt`, the client
+  /// clock, which §11 keeps precisely because it is what happened rather than
+  /// when we heard about it. Null when the read carries no per-check-in
+  /// timestamp, and then the time clause is omitted entirely.
+  ///
+  /// **Null is not a degraded case to paper over.** The alternative on offer was
+  /// the instant this device did the reading, which is a different fact wearing
+  /// the same words: a watcher's phone that was asleep until morning would
+  /// render *"Mum did check in yesterday, at 09:02"* about a tap at 23:40 — a
+  /// fabricated claim about a person, on the one message whose purpose is to
+  /// correct a false claim about her. Every interpolated value in this file can
+  /// be null and every one has a variant; this is that rule applied to the value
+  /// that is easiest to fake and worst to fake.
+  ///
+  /// Both variants are in `docs/ui-ux/screens.md`.
   static String correctionBody({
     required String watchedName,
-    required DateTime tappedAt,
+    required DateTime? tappedAt,
     required tz.Location watcherZone,
   }) =>
-      'Correction: $watchedName did check in yesterday, '
-      'at ${_time(tappedAt, watcherZone)}.';
+      tappedAt == null
+          ? 'Correction: $watchedName did check in yesterday.'
+          : 'Correction: $watchedName did check in yesterday, '
+              'at ${_time(tappedAt, watcherZone)}.';
 
   /// *"Tuesday 10:14"*, for a surface outside this file.
   ///

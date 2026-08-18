@@ -26,10 +26,12 @@ void main() {
   final today = DayKey(2026, 8, 17);
   final d = DayKey(2026, 8, 16);
 
-  Link linkTo(String watchedUid, String name) => Link(
+  Link linkTo(String watchedUid, String name,
+          {LinkStatus status = LinkStatus.accepted}) =>
+      Link(
         watchedUid: watchedUid,
         watcherUid: 'ana',
-        status: LinkStatus.accepted,
+        status: status,
         watchedName: name,
         watcherName: 'Ana',
         watchedTimezone: 'Europe/Madrid',
@@ -43,9 +45,10 @@ void main() {
     String name = 'Mum',
     WatcherCache cache = const WatcherCache.empty(),
     WarningOutcome outcome = WarningOutcome.silent,
+    LinkStatus status = LinkStatus.accepted,
   }) =>
       WatchedPersonState(
-        link: linkTo(uid, name),
+        link: linkTo(uid, name, status: status),
         cache: cache,
         decision: WarningDecision(
           outcome: outcome,
@@ -236,6 +239,80 @@ void main() {
       // through to understand.
       await pump(tester, [refused(RefusedCause.unauthenticated)]);
       expect(find.text('No check-in from Mum yesterday.'), findsNothing);
+    });
+  });
+
+  group('the revoked row', () {
+    WatchedPersonState revoked({WatcherCache? cache}) => person(
+          status: LinkStatus.revoked,
+          cache: cache ?? WatcherCache(lastConfirmedDay: d),
+        );
+
+    testWidgets('does NOT say Everything OK', (tester) async {
+      // What it said before. A revoked link arms no alarms, will never warn,
+      // and every read it makes is refused — and the row answered "Everything
+      // OK" in two words. The flattest false all-clear this screen can produce,
+      // reached by falling through every branch rather than by any decision.
+      await pump(tester, [revoked()]);
+      expect(find.text(WatcherCopy.everythingOk), findsNothing);
+    });
+
+    testWidgets('says the link ended, and what that costs', (tester) async {
+      await pump(tester, [revoked()]);
+      expect(find.text(WatcherCopy.linkEnded('Mum')), findsOneWidget);
+      expect(
+          find.text(WatcherCopy.accessLostConsequence('Mum')), findsOneWidget);
+    });
+
+    testWidgets('outranks the lost-access row', (tester) async {
+      // A revoked link makes every later read refused BY DEFINITION, so the
+      // access branch fires too. Leading with it would send the reader off to
+      // sign in again and repair a permission fault that does not exist. §10
+      // step 1 puts a non-accepted link first for the same reason.
+      await pump(tester, [
+        revoked(
+          cache: WatcherCache(
+            accessLostSince: d,
+            accessLostCause: RefusedCause.permissionDenied,
+          ),
+        ),
+      ]);
+      expect(find.text(WatcherCopy.linkEnded('Mum')), findsOneWidget);
+      expect(find.text(WatcherCopy.accessLostLabel('Mum')), findsNothing);
+      expect(find.textContaining('ask whoever set up the app'), findsNothing);
+    });
+
+    testWidgets('outranks a warning left standing at revocation',
+        (tester) async {
+      await pump(tester, [
+        revoked(cache: WatcherCache(
+          warningsShownFor: {d: WarningOutcome.warnOnline},
+        )),
+      ]);
+      expect(find.text('No check-in from Mum yesterday.'), findsNothing);
+    });
+
+    testWidgets('is not styled as an error', (tester) async {
+      // A settled state, not bad news about her. "Quiet confirm, loud miss"
+      // keeps alarm styling for a miss, and the words carry it regardless —
+      // colour is never the only signal.
+      await pump(tester, [revoked()]);
+      final finder = find.text(WatcherCopy.linkEnded('Mum'));
+      final context = tester.element(finder);
+      expect(tester.widget<Text>(finder).style?.color,
+          isNot(Theme.of(context).colorScheme.error));
+    });
+
+    testWidgets('still says when this phone last checked', (tester) async {
+      await pump(tester, [
+        revoked(
+          cache: WatcherCache(
+            lastConfirmedDay: d,
+            lastReconcileAt: DateTime.utc(2026, 8, 17, 8, 14),
+          ),
+        ),
+      ]);
+      expect(find.textContaining('This phone last checked'), findsOneWidget);
     });
   });
 

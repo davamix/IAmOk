@@ -73,6 +73,7 @@ class WatcherReconcileResult {
     required this.decision,
     required this.shouldNotify,
     required this.corrections,
+    required this.shouldPostCorrections,
     required this.withdrawnWarnings,
     required this.cancelAccessLostNotice,
     required this.previousAway,
@@ -98,8 +99,34 @@ class WatcherReconcileResult {
   final bool shouldNotify;
 
   /// Standing warnings a late check-in has disproved. The notification is
-  /// **replaced** by the correction message.
+  /// **replaced** by the correction message — or, when
+  /// [shouldPostCorrections] is false, simply taken down.
   final List<Correction> corrections;
+
+  /// Whether [corrections] may be **spoken**, or must be carried out as a bare
+  /// cancellation of the warning they retract.
+  ///
+  /// The warning channel's [NotificationDelivery.postsNotification], and it is
+  /// not the same question as whether the retraction is owed. Two states reach
+  /// this, and a correction posted in either is a message with nothing behind
+  /// it:
+  ///
+  /// * **`redundant`.** The warning was consumed without ever being posted —
+  ///   the watcher was looking at the list, which is the whole meaning of the
+  ///   state. Nothing is in the tray, so *"Correction: Mum did check in
+  ///   yesterday"* arrives alone, correcting something the reader was never
+  ///   told. At 3am that is worse than silence: it implies a warning they
+  ///   somehow missed.
+  /// * **`unavailable`.** Whatever is in the tray was posted before the channel
+  ///   was muted, and Android will not accept the replacement.
+  ///
+  /// **Cancelling still happens in both.** `cancel` needs no permission and is
+  /// a no-op when nothing is showing, so the muted case genuinely takes the
+  /// stale warning down and the redundant case costs one binder call. The
+  /// cache is cleared either way — she checked in, the day is no longer warned,
+  /// and leaving it would have the list render a warning about a day she is on
+  /// record as having tapped.
+  final bool shouldPostCorrections;
 
   /// Standing warnings to **cancel outright, with no replacement message**,
   /// because the link was revoked (§10 step 2).
@@ -272,6 +299,12 @@ abstract final class WatcherReconciler {
   /// `POST_NOTIFICATIONS` revoked — see [NotificationDelivery]. The platform
   /// edge supplies it: `PermissionService` for the revoked case, app lifecycle
   /// for the foreground case.
+  ///
+  /// It carries **one state per channel**, because the two notices this side
+  /// posts are switched off independently by the reader and ADR-0004 made that
+  /// independence load-bearing. Measuring one channel and applying the answer to
+  /// both consumed the access-lost cadence for a notice Android had dropped —
+  /// see [WatcherDelivery].
   static WatcherReconcileResult reconcile({
     required DateTime now,
     required Link link,
@@ -279,10 +312,27 @@ abstract final class WatcherReconciler {
     required WatcherCache cache,
     required FirestoreRead read,
     required Set<ScheduledWarning> currentlyScheduled,
-    required NotificationDelivery delivery,
+    required WatcherDelivery delivery,
     int staleAwayAfterDays = WarningPolicy.defaultStaleAwayAfterDays,
   }) {
-    final watchedZone = link.watchedZone;
+    // `tryWatchedZone`, never `watchedZone` — which **throws** `UnknownTimeZone`
+    // on a name this build's compiled-in tzdata does not carry. One such link
+    // would take down the whole loop: `reconcile()` walks every link in one
+    // pass, and the pass that matters most runs in the alarm isolate, where
+    // there is no screen, no user and nothing that reports a throw. Every OTHER
+    // watched person would stop being checked because of one bad string, and
+    // the only symptom is silence — the one failure this side cannot detect in
+    // itself.
+    //
+    // The fallback is the **watcher's** zone rather than UTC. Both are guesses,
+    // but this one is right in the overwhelmingly common case — a family in one
+    // country — while UTC is wrong by up to a day at the far end of the world,
+    // which moves `D` and can warn about a day she has not finished yet.
+    //
+    // It is still a fault, and a silent one: §13's health panel is owed a row
+    // for it in Phase 7. Guessing quietly is the lesser of the two, not a good
+    // outcome.
+    final watchedZone = link.tryWatchedZone ?? watcherZone;
 
     // 1. Reconcile. A failed read leaves the cache exactly as it was.
     var next = cache.applyRead(read, at: now);
@@ -415,7 +465,7 @@ abstract final class WatcherReconciler {
         );
       }
 
-      shouldNotify = owed && delivery.postsNotification;
+      shouldNotify = owed && delivery.accessLost.postsNotification;
 
       // Ungated, and deliberately so: this records a fact about the READ — the
       // backend refused us, on this day, for this reason — not a fact about
@@ -429,7 +479,7 @@ abstract final class WatcherReconciler {
       // [NotificationDelivery] exists to prevent: days 0, 1, 3, 7 and 14 would
       // each be consumed in silence, and access returning on day 20 would owe
       // nothing until day 21.
-      if (owed && delivery.consumesReminder) {
+      if (owed && delivery.accessLost.consumesReminder) {
         next = next.withAccessLostNotifiedOn(decision.day);
       }
     } else {
@@ -437,13 +487,13 @@ abstract final class WatcherReconciler {
       final owed = decision.isWarning &&
           (standing == null || _supersedes(decision.outcome, standing));
 
-      shouldNotify = owed && delivery.postsNotification;
+      shouldNotify = owed && delivery.warning.postsNotification;
 
       // Only record what is actually on screen. When the new message does not
       // supersede, the old one is still the one showing — and when nothing
       // could be posted at all, nothing is standing, so the next reconcile of
       // the same day must find the warning still owed rather than served.
-      if (owed && delivery.consumesReminder) {
+      if (owed && delivery.warning.consumesReminder) {
         next = next.withWarningShownFor(decision.day, decision.outcome);
       }
       if (read is ReadSucceeded) {
@@ -468,6 +518,7 @@ abstract final class WatcherReconciler {
       decision: decision,
       shouldNotify: shouldNotify,
       corrections: corrections,
+      shouldPostCorrections: delivery.warning.postsNotification,
       withdrawnWarnings: withdrawn,
       cancelAccessLostNotice: cancelAccessLostNotice,
       previousAway: cache.away,

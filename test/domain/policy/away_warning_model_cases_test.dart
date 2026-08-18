@@ -96,7 +96,7 @@ void main() {
       ),
       read: read,
       currentlyScheduled: const {},
-      delivery: NotificationDelivery.available,
+      delivery: const WatcherDelivery.uniform(NotificationDelivery.available),
     ).decision;
   }
 
@@ -290,7 +290,7 @@ void main() {
         ),
         read: const FirestoreRead.refused(RefusedCause.appCheckRejected),
         currentlyScheduled: const {},
-        delivery: NotificationDelivery.available,
+        delivery: const WatcherDelivery.uniform(NotificationDelivery.available),
       );
       expect(result.cache.away, holiday);
       expect(result.cache.lastReconcileAt, reconciled('2026-08-05'));
@@ -307,7 +307,7 @@ void main() {
         cache: const WatcherCache.empty(),
         read: const FirestoreRead.refused(RefusedCause.permissionDenied),
         currentlyScheduled: const {},
-        delivery: NotificationDelivery.available,
+        delivery: const WatcherDelivery.uniform(NotificationDelivery.available),
       );
       expect(result.decision.outcome, WarningOutcome.silent);
       expect(result.decision.silenceReason, SilenceReason.linkRevoked);
@@ -386,7 +386,7 @@ void main() {
           read: FirestoreRead.succeeded(
               checkInDays: julyCheckins, away: storedAway),
           currentlyScheduled: const {},
-          delivery: NotificationDelivery.available,
+          delivery: const WatcherDelivery.uniform(NotificationDelivery.available),
         );
         cache = result.cache;
 

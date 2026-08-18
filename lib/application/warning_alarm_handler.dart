@@ -42,10 +42,19 @@ import 'watcher_reconcile_service.dart';
 /// the service releases it in a `finally` — and a failure to reconcile must
 /// leave the *next* fire able to try again. Nothing is cached in memory that a
 /// crash could corrupt, because nothing is cached in memory at all.
+///
+/// **`open()` is inside the `try`, and that is not cosmetic.** It was outside,
+/// which meant a throw from it — a corrupt file, a schema downgrade, a disk with
+/// nothing left on it — escaped before the `finally` existed, leaving the
+/// connection that had been half-established unclosed. The next fire then met a
+/// locked database it could not explain, and the failure compounded rather than
+/// retried. Nothing is rethrown away: the `finally` runs and the error still
+/// propagates, so Phase 8's crash reporting will see it.
 @pragma('vm:entry-point')
 Future<void> warningAlarmCallback(int id) async {
-  final store = await LocalStore.open();
+  LocalStore? store;
   try {
+    store = await LocalStore.open();
     // Each isolate creates its own plugin instance and its own channels.
     // `onTap` is deliberately not wired: a background isolate that posts a
     // notification does not route taps — the UI isolate does, on next launch.
@@ -80,9 +89,16 @@ Future<void> warningAlarmCallback(int id) async {
       // will post at all — and `canPost` is checked per channel, because a user
       // who switched off just the warnings channel leaves the app-level flag
       // true and would have every warning consumed as delivered.
-      delivery: () async => NotificationDelivery.from(
-        canPost: await notifications.canPost(
+      //
+      // **Per channel means both channels.** Asking once and reusing the answer
+      // was the same mistake one level down: it makes the two notices share a
+      // fate the user deliberately separated when they muted one of them.
+      delivery: () async => WatcherDelivery.from(
+        canPostWarning: await notifications.canPost(
           channel: NotificationService.warningsChannel,
+        ),
+        canPostAccessLost: await notifications.canPost(
+          channel: NotificationService.accessChannel,
         ),
         appInForeground: false,
       ),
@@ -93,7 +109,7 @@ Future<void> warningAlarmCallback(int id) async {
   } finally {
     // Closed explicitly. The isolate is about to be torn down, but leaving a
     // connection open across that is how a later isolate meets a locked
-    // database it cannot explain.
-    await store.close();
+    // database it cannot explain. Null-safe because `open()` itself can throw.
+    await store?.close();
   }
 }

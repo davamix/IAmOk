@@ -31,7 +31,8 @@ void main() {
   final theDay = day('2026-08-05');
 
   WatcherReconcileResult reconcile({
-    required NotificationDelivery delivery,
+    NotificationDelivery? delivery,
+    WatcherDelivery? channels,
     WatcherCache cache = const WatcherCache.empty(),
     FirestoreRead? read,
     DateTime? when,
@@ -43,7 +44,7 @@ void main() {
         cache: cache,
         read: read ?? const FirestoreRead.succeeded(),
         currentlyScheduled: const {},
-        delivery: delivery,
+        delivery: channels ?? WatcherDelivery.uniform(delivery!),
       );
 
   group('the warning channel — a claim about the watched person', () {
@@ -179,7 +180,7 @@ void main() {
           cache: cache,
           read: refused,
           currentlyScheduled: const {},
-          delivery: delivery,
+          delivery: WatcherDelivery.uniform(delivery),
         ).cache;
       }
       return cache;
@@ -201,7 +202,7 @@ void main() {
         cache: muted,
         read: refused,
         currentlyScheduled: const {},
-        delivery: NotificationDelivery.available,
+        delivery: const WatcherDelivery.uniform(NotificationDelivery.available),
       );
       expect(restored.shouldNotify, isTrue,
           reason: 'the reminder was never given, so it is still due');
@@ -223,7 +224,7 @@ void main() {
         cache: served,
         read: refused,
         currentlyScheduled: const {},
-        delivery: NotificationDelivery.available,
+        delivery: const WatcherDelivery.uniform(NotificationDelivery.available),
       );
       expect(day6.shouldNotify, isFalse);
     });
@@ -242,7 +243,7 @@ void main() {
         cache: muted,
         read: refused,
         currentlyScheduled: const {},
-        delivery: NotificationDelivery.available,
+        delivery: const WatcherDelivery.uniform(NotificationDelivery.available),
       );
       expect(day20.shouldNotify, isTrue);
     });
@@ -274,6 +275,159 @@ void main() {
             reason: delivery.name);
         expect(result.cache.warningsShownFor, isEmpty, reason: delivery.name);
         expect(result.cache.lastConfirmedDay, theDay, reason: delivery.name);
+      }
+    });
+  });
+
+  group('one channel muted, the other not — measured per channel', () {
+    const refused = FirestoreRead.refused(RefusedCause.permissionDenied);
+
+    /// *App problems* off, *Missed check-ins* on. The reader is saying: do not
+    /// tell me about the app's own faults, do tell me if she misses a day.
+    const accessMuted = WatcherDelivery(
+      warning: NotificationDelivery.available,
+      accessLost: NotificationDelivery.unavailable,
+    );
+
+    /// The other way round.
+    const warningMuted = WatcherDelivery(
+      warning: NotificationDelivery.unavailable,
+      accessLost: NotificationDelivery.available,
+    );
+
+    test('muting App problems does not consume the access-lost cadence', () {
+      // **The defect, in one assertion.** `canPost` was measured on the
+      // warnings channel and the single answer handed to both branches. With
+      // *Missed check-ins* still on, that answer is `available`, so the day-0
+      // reminder was stamped as served for a notice Android had dropped —
+      // and the cadence then walks days 1, 3, 7 and 14 the same way. ADR-0004
+      // rates lost access as the state a watcher cannot detect in themselves;
+      // this consumed the only thing that would have told them.
+      final result = reconcile(channels: accessMuted, read: refused);
+
+      expect(result.decision.outcome, WarningOutcome.warnAccessLost);
+      expect(result.shouldNotify, isFalse,
+          reason: 'the App problems channel is off — nothing can be posted');
+      expect(result.cache.accessLostNotifiedOn, isNull,
+          reason: 'nothing was delivered, so nothing may be marked served');
+      expect(result.cache.accessLostSince, theDay,
+          reason: 'the READ still failed — that fact is recorded either way');
+    });
+
+    test('the cadence resumes when App problems is switched back on', () {
+      final muted = reconcile(channels: accessMuted, read: refused).cache;
+      final later = reconcile(
+        channels: const WatcherDelivery.uniform(NotificationDelivery.available),
+        cache: muted,
+        read: refused,
+        when: at(utc, 2026, 8, 7, 10),
+      );
+      expect(later.shouldNotify, isTrue,
+          reason: 'the day-0 reminder was never given, so it is still due');
+    });
+
+    test('muting Missed check-ins does not silence the access notice', () {
+      // The other direction, and it fails the reader in the opposite way: the
+      // notice is suppressed on a channel that is switched ON and would have
+      // shown it. ADR-0004 separated the two channels precisely so that muting
+      // one leaves the other working.
+      final result = reconcile(channels: warningMuted, read: refused);
+
+      expect(result.decision.outcome, WarningOutcome.warnAccessLost);
+      expect(result.shouldNotify, isTrue);
+      expect(result.cache.accessLostNotifiedOn, theDay);
+    });
+
+    test('muting App problems does not silence a missed day', () {
+      // The case the channel split exists for, stated plainly: a watcher who
+      // switched off the app's complaints about itself must still be told when
+      // someone they watch misses a day.
+      final result = reconcile(channels: accessMuted);
+
+      expect(result.decision.outcome, WarningOutcome.warnOnline);
+      expect(result.shouldNotify, isTrue);
+      expect(result.cache.warningsShownFor, {theDay: WarningOutcome.warnOnline});
+    });
+
+    test('muting Missed check-ins does not consume a missed day', () {
+      final result = reconcile(channels: warningMuted);
+
+      expect(result.shouldNotify, isFalse);
+      expect(result.cache.warningsShownFor, isEmpty);
+    });
+  });
+
+  group('a correction is spoken only when its warning could be', () {
+    final warned = WatcherCache(
+      warningsShownFor: {theDay: WarningOutcome.warnOnline},
+      lastReconcileAt: at(utc, 2026, 8, 6, 9),
+    );
+
+    FirestoreRead lateCheckIn() =>
+        FirestoreRead.succeeded(checkInDays: {theDay});
+
+    test('available: it is posted', () {
+      final result = reconcile(
+        delivery: NotificationDelivery.available,
+        cache: warned,
+        read: lateCheckIn(),
+      );
+      expect(result.corrections, isNotEmpty);
+      expect(result.shouldPostCorrections, isTrue);
+    });
+
+    test('redundant: emitted, but NOT spoken', () {
+      // `redundant` means the warning was consumed without ever being posted —
+      // the watcher was looking at the list, which is the whole meaning of the
+      // state. Nothing is in the tray. A replacement therefore arrives alone,
+      // and *"Correction: Mum did check in yesterday"* with nothing above it
+      // reads, at 3am, as a warning the reader somehow slept through.
+      final result = reconcile(
+        delivery: NotificationDelivery.redundant,
+        cache: warned,
+        read: lateCheckIn(),
+      );
+      expect(result.corrections, isNotEmpty,
+          reason: 'still emitted — the service cancels rather than posts');
+      expect(result.shouldPostCorrections, isFalse);
+    });
+
+    test('unavailable: emitted, but NOT spoken', () {
+      final result = reconcile(
+        delivery: NotificationDelivery.unavailable,
+        cache: warned,
+        read: lateCheckIn(),
+      );
+      expect(result.corrections, isNotEmpty);
+      expect(result.shouldPostCorrections, isFalse);
+    });
+
+    test('the ACCESS channel has no say in it', () {
+      // The correction replaces a warning, at the warning's id, on the warning
+      // channel. Whether the reader muted *App problems* is a different
+      // question about a different message.
+      final result = reconcile(
+        channels: const WatcherDelivery(
+          warning: NotificationDelivery.available,
+          accessLost: NotificationDelivery.unavailable,
+        ),
+        cache: warned,
+        read: lateCheckIn(),
+      );
+      expect(result.shouldPostCorrections, isTrue);
+    });
+
+    test('the day is cleared whether or not it could be spoken', () {
+      // She checked in. The day is no longer warned, and leaving it standing
+      // would have the list render a warning about a day she is on record as
+      // having tapped — the exact defect the review found in `standingWarning`.
+      for (final delivery in NotificationDelivery.values) {
+        final result = reconcile(
+          delivery: delivery,
+          cache: warned,
+          read: lateCheckIn(),
+        );
+        expect(result.cache.warningsShownFor, isEmpty, reason: delivery.name);
       }
     });
   });
@@ -322,7 +476,7 @@ void main() {
           ),
           read: const FirestoreRead.refused(RefusedCause.permissionDenied),
           currentlyScheduled: const {},
-          delivery: delivery,
+          delivery: WatcherDelivery.uniform(delivery),
         );
         expect(result.shouldNotify, isFalse, reason: delivery.name);
         expect(result.withdrawnWarnings, [theDay],

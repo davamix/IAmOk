@@ -423,6 +423,43 @@ void main() {
               'report a missed check-in nothing supports');
     });
 
+    test('a CHANGED cause re-notifies the same day', () async {
+      // ADR-0004 decision 5: a changed cause re-notifies "whatever the cadence
+      // says", because "Sign in again." and "Update I Am Ok in the Play Store."
+      // are different instructions and the standing notice becomes the WRONG
+      // ONE the moment the fault moves. This message exists at all because it
+      // is supposed to be actionable.
+      //
+      // The within-day dedupe used to be checked first and swallowed exactly
+      // this case — a watcher told at 09:00 to sign in kept that instruction
+      // until the next day even after the fault became an App Check rejection.
+      // Found on the POCO F3 while testing the cold-start tap: the cause moved
+      // in the store and nothing was posted.
+      reader.result = const FirestoreRead.refused(RefusedCause.unauthenticated);
+      await service().reconcile(selfUid: selfUid);
+      expect(notifications.bodies['access:$mumLink'], isNotNull);
+      notifications.calls.clear();
+
+      reader.result = const FirestoreRead.refused(RefusedCause.appCheckRejected);
+      await service().reconcile(selfUid: selfUid);
+
+      expect(notifications.calls, contains('access:$mumLink'),
+          reason: 'the remediation changed, so the standing notice is now the '
+              'wrong instruction and must be replaced today, not tomorrow');
+    });
+
+    test('an UNCHANGED cause does not re-notify the same day', () async {
+      // The dedupe still does its job: reconcile runs on app open, FCM, alarm
+      // and boot, so a day-granular cadence without this fires several times.
+      reader.result = const FirestoreRead.refused(RefusedCause.unauthenticated);
+      await service().reconcile(selfUid: selfUid);
+      notifications.calls.clear();
+
+      await service().reconcile(selfUid: selfUid);
+
+      expect(notifications.postedNothing, isTrue);
+    });
+
     test('access returning cancels the standing notice', () async {
       reader.result = const FirestoreRead.refused();
       await service().reconcile(selfUid: selfUid);

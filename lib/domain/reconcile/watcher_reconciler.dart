@@ -383,13 +383,29 @@ abstract final class WatcherReconciler {
       final alreadyToday = notifiedOn == decision.day;
 
       final bool owed;
-      if (!outcomeIsAccessLost || alreadyToday) {
+      if (!outcomeIsAccessLost) {
         owed = false;
       } else if (since == null || next.accessLostCause != cause) {
         // The transition, or a change of remediation: "sign in again" and
         // "update the app" are different instructions, so the standing
         // notification is the wrong one the moment the cause moves.
+        //
+        // **Checked BEFORE the within-day dedupe, and the order is the whole
+        // point.** ADR-0004 decision 5 says a changed cause re-notifies
+        // *"whatever the cadence says"*. The first version tested `alreadyToday`
+        // first, which silently swallowed exactly that case: a watcher told at
+        // 09:00 to sign in again, whose fault becomes an App Check rejection at
+        // 09:05, kept the sign-in instruction until the following day. The
+        // notification was not merely stale, it was **the wrong thing to do** —
+        // and this message exists at all because it is supposed to be
+        // actionable.
+        //
+        // Found on the POCO F3 while testing the cold-start tap: the cause
+        // moved to `appCheckRejected` in the store and no notification was
+        // posted.
         owed = true;
+      } else if (alreadyToday) {
+        owed = false;
       } else {
         owed = isAccessLostReminderDue(
           daysSinceLost: decision.day.differenceInDays(since),

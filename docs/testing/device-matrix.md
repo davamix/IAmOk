@@ -218,11 +218,16 @@ in [phase-3-summary.md](../phases/phase-3-summary.md).
       these measurements needs that distinction.
 - [x] Opening the app repairs **both** sides after a force-stop — 0/0 → 18 reminders and 12
       warnings. It did **not** before this run; see the summary.
-- [ ] A warning **arriving unattended** at its natural `warningLocalTime` — the equivalent of the
-      check that found Phase 2's worst defect, and still unobserved here
+- [x] **A warning arriving unattended** at its natural `warningLocalTime`, 2026-08-18 — app closed,
+      OS started a fresh process, **two** notifications with the correct wording on the `warnings`
+      channel. The equivalent of the check that found Phase 2's worst defect, and it found this
+      phase's worst one too: the app-open reconcile was consuming the day as `redundant` and posting
+      nothing. Notification ids were byte-identical across processes and a reinstall, which is
+      `AlarmIds`' stability shown on hardware.
 - [ ] Suppressed when a check-in is cached · suppressed when away covers the day · replaced by a
-      correction · a different and honest message when unreachable — all four are covered by tests
-      and reachable from the harness, but **not yet driven end-to-end on the device**
+      correction · a different and honest message when unreachable — covered by tests and reachable
+      from the harness, but **not yet driven end-to-end on the device**. The `warnOnline` path now
+      has been; the other three have not.
 - [ ] Tapping the *lost access* notification opens the watcher list **from a cold start**
 - [ ] Two isolates contending for the reconcile lease on Android's SQLite (the desktop-FFI gap)
 - [ ] **Two isolates contend for the reconcile lease and only one changes the alarm set** —
@@ -231,8 +236,11 @@ in [phase-3-summary.md](../phases/phase-3-summary.md).
       `sqflite_common_ffi`'s **desktop** SQLite; whether Android's honours `BEGIN EXCLUSIVE` the same
       way between two isolates is the same API-level gap that hid the UPSERT defect. Fire the alarm
       while the app is open in the foreground and confirm the store and `dumpsys` still agree.
-- [ ] Tapping the *lost access* notification opens the watcher surface **from a cold start** — the
-      normal case, since this notification is for a watcher whose app has been closed
+- [x] **Tapping the *lost access* notification opens the watcher surface from a cold start**,
+      2026-08-18 — process dead, tapped from the shade, app cold-started and opened the list with the
+      right person's row highlighted and the cause-specific remediation showing.
+- [x] **A force-stop erases standing notifications as well as alarms** — 4 → 0. The unread warning
+      goes with them, and `accessLostNotifiedOn` still records it as delivered.
 
 **Phase 4 — end to end.** PLAN.md's exit criterion is *"a tap on one physical phone quietly updates
 a second physical phone"*, and only one physical phone exists today. Either a second handset is

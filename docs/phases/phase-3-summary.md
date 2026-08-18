@@ -297,12 +297,143 @@ after force-stop     reminders  0   warnings  0
 after opening        reminders 18   warnings 12     ← both sides repaired
 ```
 
+### A warning arriving unattended — the check that found Phase 2's worst defect
+
+Run 2026-08-18 with the harness's near-future warning control, app closed via `am kill` (not a
+force-stop, so the alarms survive):
+
+```
+app closed          pid ''
+alarm due           09:11:00
+after               pid 31768                     ← the OS started a fresh process
+last_reconcile_at   09:11:02, both links
+warnings_shown      warnOnline, both links
+notifications       2 records, channel=warnings, importance 5
+                    "No check-in from Mum yesterday."
+                    "No check-in from Granddad yesterday."
+```
+
+**Two, not one and not three**, with the correct one of four messages, on the channel that must not be
+trained away, posted by a bare isolate into a process that did not exist a second earlier. This is the
+watcher-side equivalent of the check that caught the `Object.hash` defect, and it is the first time
+this phase's whole path has been observed end-to-end rather than inferred from what was registered.
+
+**A second result fell out of it.** The two notification ids — `678899615` and `1519566369` — are
+byte-identical to those from an earlier run in a **different process**, across a `pm clear` and a
+reinstall. That is `AlarmIds`' FNV-1a stability demonstrated on hardware rather than in a
+single-process test, and it is what makes the correction path able to replace a warning at all.
+
+### The cold-start tap, and two more findings from running it
+
+Process killed, notification tapped from the shade:
+
+```
+pid before tap    ''            ← nothing of this app running
+pid after tap     2817          ← cold start
+screen            "People you're looking after", Mum's row highlighted
+row               Access to Mum's check-ins
+                  You will not be warned if Mum misses a day.
+                  Nothing can be fixed on this phone. If it is still red
+                  tomorrow, ask whoever set up the app.
+                  This phone last checked Tuesday 09:19.
+```
+
+*"Open the app to see what to do."* now lands somewhere that says what to do, from the state this
+notification is actually read in. The refusal also went to `channel=access` at importance 4 while the
+two `channel=warnings` notices stayed standing at importance 5 — ADR-0004's structural split,
+observed rather than asserted from constants.
+
+**A force-stop erases the notifications too.** Not just the alarms:
+
+```
+before force-stop   4 notifications standing (2 warnings, 2 access)
+after force-stop    0
+```
+
+So a family member who swipes the app away also deletes the unread warning telling them their
+relative missed a day. That belongs in ADR-0007 — it makes the force-stop exposure meaningfully worse
+than "future warnings stop", and it is not something the design had accounted for.
+
+**And it does not un-record the delivery.** `accessLostNotifiedOn` still said "shown today", so the
+notice could not be re-posted — the app believes a message was delivered that the OS has since
+removed. Same family as the exposure above; recorded, not fixed.
+
+### ADR-0004's changed-cause rule was not implemented
+
+Found while producing a fresh notification for the tap test. ADR-0004 decision 5:
+
+> a **changed cause** re-notifies *whatever the cadence says*: "sign in again" and "update the app"
+> are different instructions, so the standing notification is the wrong one the moment the cause
+> moves.
+
+`WatcherReconciler` tested the within-day dedupe **first**, which swallowed exactly that case. A
+watcher told at 09:00 to sign in again, whose fault becomes an App Check rejection at 09:05, kept the
+sign-in instruction until the following day. Observed on the device: the cause moved to
+`appCheckRejected` in the store and nothing was posted.
+
+Not merely stale — **the wrong thing to do**, on the one message whose entire justification is that it
+is actionable. Fixed by checking transition-or-changed-cause before the dedupe, with tests for both
+directions.
+
 ### Deliberately not proven by this
 
 **A notification did not appear on that fire, and that is correct.** A warning for `D` was already
 standing, so `shouldNotify` was false — which is the idempotence this design requires, since every
 entry point calls reconcile and boot recovery would otherwise be a duplicate-notification bug. The
 fire is evidenced by the store, not by the shade.
+
+## The fourth defect: a warning decided, recorded as delivered, and never shown
+
+**Found by the unattended-arrival test on its first run**, which is the entire
+argument for running it. Nothing else would have caught it: the suite was green, the alarm woke, the
+store looked right, and no notification ever reached anyone.
+
+`NotificationDelivery.redundant` means *no notification posted, but the day **is** consumed, because
+the reader is looking at the screen that already shows this*. `AppServices` hard-coded
+`appInForeground: true`, reasoning that the UI isolate only exists while the app is running. True,
+and irrelevant — the question is not whether the app is running, it is whether the watcher **list**
+is on screen rendering this person's state.
+
+The app-open reconcile added earlier in this phase — so a force-stopped watcher repairs itself — ran
+with that hard-coded `true` while the user sits on the **Tap screen**, which is home. Measured:
+
+```
+last_reconcile_at   09:01:02          ← the isolate woke and reconciled
+warnings_shown      warnOnline, both links
+notifications       0
+```
+
+The day was settled, the family untold, and every later reconcile correctly stayed silent because a
+warning was already "standing". **This is exactly the failure `NotificationDelivery` was added to
+prevent** — recording a warning as delivered when nothing delivered it — reintroduced through a
+different door by the fix for the previous defect.
+
+That is the **fourth** time in this project that a fix has introduced the next defect, and the first
+one no reviewer caught, because no reviewer ran.
+
+`appInForeground` is now a required named parameter, so the question cannot be skipped, and only the
+list itself may answer yes. The app-open path calls the service directly rather than through
+`watcherStateProvider`, because that provider *is* the list's state and answers yes by definition.
+
+Re-measured after the fix — the same action that had silently consumed the day:
+
+```
+channel=warnings  importance=5   "No check-in from Mum yesterday."
+channel=warnings  importance=5   "No check-in from Granddad yesterday."
+```
+
+Two, correct wording, correct channel, `bigText` set. **This is also the first end-to-end proof of
+the notification path**: the right one of four messages, on the right channel, at the right ids.
+
+### The harness had the same shape of flaw, one level up
+
+Arming the near-future warning runs a real `reconcile()`, which also **decides and posts**. So the
+alarm fired into a day already settled and correctly said nothing — indistinguishable, from the
+outside, from the alarm not working. The control now resets the decision state after arming, leaving
+the armed alarms alone, so the alarm is the first thing to decide that day.
+
+Worth naming because it is the same trap in a different costume: a test whose setup performs the
+behaviour it is supposed to observe proves only that the setup ran.
 
 ## The surface half, brought forward from Phase 7
 

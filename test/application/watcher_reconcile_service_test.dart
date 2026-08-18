@@ -82,8 +82,13 @@ class _RecordingAlarms implements WarningAlarmScheduler {
   final Map<String, Set<ScheduledWarning>> armed = {};
   final List<String> calls = [];
 
+  /// What the platform says about exact alarms. False models API 31-32 with
+  /// *Alarms & reminders* revoked, where the plugin arms NOTHING and still
+  /// reports success.
+  bool exact = true;
+
   @override
-  Future<void> apply({
+  Future<bool> apply({
     required String linkId,
     required Set<ScheduledWarning> toCancel,
     required Set<ScheduledWarning> desired,
@@ -96,6 +101,7 @@ class _RecordingAlarms implements WarningAlarmScheduler {
       calls.add('arm ${w.day}');
       (armed[linkId] ??= {}).add(w);
     }
+    return exact;
   }
 
   @override

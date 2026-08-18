@@ -52,8 +52,10 @@ class AppServices {
   /// The watcher's logic-bearing alarms. Exposed so the debug harness can arm
   /// one directly — the only control that asks the OS whether it will actually
   /// wake a bare isolate on this handset.
-  WarningAlarmScheduler get warningAlarms =>
-      const AndroidWarningAlarmScheduler(warningAlarmCallback);
+  WarningAlarmScheduler get warningAlarms => AndroidWarningAlarmScheduler(
+        warningAlarmCallback,
+        notifications.canScheduleExact,
+      );
 
   /// The watcher's reconcile.
   ///

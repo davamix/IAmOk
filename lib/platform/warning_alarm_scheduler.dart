@@ -34,7 +34,9 @@ abstract interface class WarningAlarmScheduler {
   /// the store re-arms nothing and the watcher goes permanently deaf. Arming is
   /// idempotent by id, so re-asserting costs a handful of binder calls and makes
   /// the operation self-healing whatever the platform's true state.
-  Future<void> apply({
+  /// Returns false when the warnings had to be armed **inexactly** — §13's
+  /// documented degradation, which the health panel reports in Phase 7.
+  Future<bool> apply({
     required String linkId,
     required Set<ScheduledWarning> toCancel,
     required Set<ScheduledWarning> desired,
@@ -50,7 +52,26 @@ abstract interface class WarningAlarmScheduler {
 
 /// The real one, over `android_alarm_manager_plus`.
 class AndroidWarningAlarmScheduler implements WarningAlarmScheduler {
-  const AndroidWarningAlarmScheduler(this._callback);
+  const AndroidWarningAlarmScheduler(this._callback, this._canScheduleExact);
+
+  /// Whether the platform will still accept an exact alarm (API 31+).
+  ///
+  /// **Asked, because the plugin will not tell us.** `AlarmService.scheduleAlarm`
+  /// checks `canScheduleExactAlarms()` and, when it is false, logs and
+  /// **arms nothing** — no throw, no fallback. `oneShotAt` returns `true`
+  /// regardless, and the alarm is persisted for reboot-rescheduling first, so
+  /// every signal the app can see says it worked.
+  ///
+  /// Without this, a refusal silently armed nothing while
+  /// `replacePendingWarnings` recorded the whole set as armed — the direction
+  /// `LocalStore` names as the one that must never occur, on the side where
+  /// silence is the failure this app cannot detect in itself. Reachable today on
+  /// API 31–32, where `SCHEDULE_EXACT_ALARM` is user-revocable, and everywhere
+  /// if Play refuses `USE_EXACT_ALARM` at Phase 8.
+  ///
+  /// The watched side already degrades this way (`NotificationService
+  /// .scheduleReminder`); this is the same promise kept on the other half.
+  final Future<bool> Function() _canScheduleExact;
 
   /// The top-level, `@pragma('vm:entry-point')` function the alarm wakes.
   ///
@@ -59,7 +80,7 @@ class AndroidWarningAlarmScheduler implements WarningAlarmScheduler {
   final Function _callback;
 
   @override
-  Future<void> apply({
+  Future<bool> apply({
     required String linkId,
     required Set<ScheduledWarning> toCancel,
     required Set<ScheduledWarning> desired,
@@ -67,6 +88,9 @@ class AndroidWarningAlarmScheduler implements WarningAlarmScheduler {
     for (final warning in toCancel) {
       await AndroidAlarmManager.cancel(AlarmIds.warning(linkId, warning.day));
     }
+    // Asked once per apply rather than per alarm: it is a device-wide setting,
+    // and a value that changed mid-loop would arm half the window each way.
+    final exact = await _canScheduleExact();
     for (final warning in desired) {
       await AndroidAlarmManager.oneShotAt(
         // A `tz.TZDateTime` IS a DateTime, and the plugin takes the instant.
@@ -81,10 +105,11 @@ class AndroidWarningAlarmScheduler implements WarningAlarmScheduler {
         wakeup: true,
         // Doze defers even wakeup alarms without this.
         allowWhileIdle: true,
-        // §10 promises the warning fires at `warningLocalTime`. Inexact here is
-        // not a graceful degradation the way it is for a reminder — an hour's
-        // drift on a dead man's switch is an hour nobody is told.
-        exact: true,
+        // §10 promises the warning fires at `warningLocalTime`, so exact is
+        // asked for first. An hour's drift on a dead man's switch is an hour
+        // nobody is told — but an alarm armed inexactly still fires, and one
+        // refused outright never does. Degrade, never drop.
+        exact: exact,
         // Enables the plugin's RebootBroadcastReceiver for this alarm. NOT a
         // repair path for a force-stopped app — a stopped app receives no
         // broadcasts at all, including BOOT_COMPLETED, and that state survives a
@@ -92,6 +117,7 @@ class AndroidWarningAlarmScheduler implements WarningAlarmScheduler {
         rescheduleOnReboot: true,
       );
     }
+    return exact;
   }
 
   @override

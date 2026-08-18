@@ -71,7 +71,10 @@ Future<void> warningAlarmCallback(int id) async {
       clock: clock,
       reader: SimulatedCheckInReader(store),
       notifications: notifications,
-      alarms: AndroidWarningAlarmScheduler(warningAlarmCallback),
+      alarms: AndroidWarningAlarmScheduler(
+        warningAlarmCallback,
+        notifications.canScheduleExact,
+      ),
       // The app is by definition NOT in the foreground: this isolate only runs
       // because the OS woke it. So the only question is whether the platform
       // will post at all — and `canPost` is checked per channel, because a user

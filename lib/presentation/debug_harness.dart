@@ -347,7 +347,7 @@ class _DebugHarnessScreenState extends ConsumerState<DebugHarnessScreen> {
 
           _section('Watcher — reconcile', [
             _Action('Run the watcher reconcile', () async {
-              final state = await services.watcherReconcile
+              final state = await services.watcherReconcile(watcherListShowing: false)
                   .reconcile(selfUid: services.selfUid);
               if (state.isEmpty) {
                 return 'no links where you are the WATCHER\n'
@@ -373,10 +373,10 @@ class _DebugHarnessScreenState extends ConsumerState<DebugHarnessScreen> {
             // already standing must NOT fire again on app open, on boot, or on
             // the next alarm. Every entry point calls reconcile.
             _Action('Run it twice — no second notification', () async {
-              await services.watcherReconcile
+              await services.watcherReconcile(watcherListShowing: false)
                   .reconcile(selfUid: services.selfUid);
               final before = await _standing(services.store, services.selfUid);
-              await services.watcherReconcile
+              await services.watcherReconcile(watcherListShowing: false)
                   .reconcile(selfUid: services.selfUid);
               final after = await _standing(services.store, services.selfUid);
               return 'standing after 1st  $before\n'
@@ -392,7 +392,7 @@ class _DebugHarnessScreenState extends ConsumerState<DebugHarnessScreen> {
             // than a day — and it proves nothing at all about whether Android
             // wakes a background isolate on this handset.
             _Action('Run the alarm logic now (this isolate)', () async {
-              await services.watcherReconcile
+              await services.watcherReconcile(watcherListShowing: false)
                   .reconcile(selfUid: services.selfUid);
               return 'reconciled in the UI isolate\n\n'
                   'This does NOT test the isolate. Use the control below for '
@@ -497,14 +497,35 @@ class _DebugHarnessScreenState extends ConsumerState<DebugHarnessScreen> {
                 ),
               );
 
-              await services.watcherReconcile
+              // Arms the window — and, being a real reconcile, also DECIDES and
+              // posts. That is correct behaviour and it ruins this particular
+              // test: the alarm would fire into a day whose warning is already
+              // standing and say nothing, which looks exactly like the alarm
+              // not working.
+              //
+              // So the decision state is reset immediately afterwards, leaving
+              // the armed alarms alone. The alarm then becomes the FIRST thing
+              // to decide this day, which is the whole point of the exercise.
+              await services
+                  .watcherReconcile(watcherListShowing: false)
                   .reconcile(selfUid: services.selfUid);
+
+              for (final link
+                  in await services.store.linksWatchedBy(services.selfUid)) {
+                final cache = await services.store.watcherCache(link.id);
+                for (final warnedDay in cache.warnedDays.toList()) {
+                  await services.notifications
+                      .cancelWarning(link.id, warnedDay);
+                }
+                await services.store
+                    .saveWatcherCache(link.id, const WatcherCache.empty());
+              }
 
               final hh = fireAt.hour.toString().padLeft(2, '0');
               final mm = fireAt.minute.toString().padLeft(2, '0');
               return '''
 warning time set to $hh:$mm
-cache cleared, backend holds nothing
+armed, then the decision state reset so the ALARM decides first
 
 Now CLOSE the app and wait. Two notifications should arrive:
   "No check-in from Mum yesterday."

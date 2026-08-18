@@ -1,9 +1,12 @@
+import 'dart:async';
+
 import 'package:android_alarm_manager_plus/android_alarm_manager_plus.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'application/providers.dart';
+import 'application/watcher_reconcile_service.dart';
 import 'data/local_store.dart';
 import 'domain/domain.dart';
 import 'platform/alarm_scheduler.dart';
@@ -137,11 +140,31 @@ class _IAmOkAppState extends ConsumerState<IAmOkApp> {
   /// screen by design (`screens.md`), so their watcher alarms would never be
   /// re-armed by opening the app at all.
   ///
-  /// Reading the provider is enough: that triggers its build, which is the
-  /// reconcile. The result is not needed here — whoever shows the list will read
-  /// it — and ADR-0006's lease makes the overlap with a screen doing the same
-  /// thing safe.
-  void _reconcileBothSides() => ref.read(watcherStateProvider);
+  /// **Deliberately NOT through `watcherStateProvider`.** That provider is the
+  /// watcher list's state and reconciles as though the list were on screen,
+  /// which decides `NotificationDelivery.redundant` — *the reader is looking at
+  /// the screen that already shows this* — and `redundant` consumes the day
+  /// without posting anything.
+  ///
+  /// Nothing is showing it here. Home is the Tap screen, so a warning decided on
+  /// this path must actually be **posted**, or it is recorded as standing and
+  /// never reaches anyone. That is what happened on the POCO F3 before this
+  /// call was split out: `warningsShownFor` held `warnOnline` for the day with
+  /// zero notifications sent.
+  ///
+  /// Errors are swallowed for the same reason `_cacheDeviceZone` swallows its
+  /// own: this is a repair running behind whatever screen the user actually
+  /// opened, and it must never be able to replace it with an error.
+  void _reconcileBothSides() {
+    final services = ref.read(appServicesProvider);
+    unawaited(
+      services
+          .watcherReconcile(watcherListShowing: false)
+          .reconcile(selfUid: services.selfUid)
+          .catchError((Object _, StackTrace _) =>
+              WatcherState(people: const [], today: DayKey(1970, 1, 1))),
+    );
+  }
 
   @override
   void dispose() {

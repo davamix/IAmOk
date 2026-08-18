@@ -203,6 +203,32 @@ void main() {
           WarningOutcome.warnOnline);
     });
 
+    test('redundant consumes the day WITHOUT posting — the sharp edge',
+        () async {
+      // This is correct behaviour and it is also the most dangerous value in
+      // the enum, because it is the only one that marks a day served while
+      // saying nothing. Its whole justification is *the reader is looking at
+      // the screen that already shows this* — so a caller that passes it while
+      // the reader is looking at something else silently loses the warning.
+      //
+      // That happened. The app-open reconcile, added so a force-stopped watcher
+      // repairs itself, ran as `redundant` while the user sat on the Tap
+      // screen: `warningsShownFor` recorded `warnOnline` for the day and zero
+      // notifications were posted. Measured on the POCO F3.
+      //
+      // The flag is a required named parameter on `AppServices.watcherReconcile`
+      // so the question cannot be skipped, and only the list itself may answer
+      // yes. This pins what the answer costs when it is wrong.
+      canDeliver = NotificationDelivery.redundant;
+      await service().reconcile(selfUid: selfUid);
+
+      expect(notifications.postedNothing, isTrue);
+      expect((await store.watcherCache(mumLink)).warningsShownFor[d],
+          WarningOutcome.warnOnline,
+          reason: 'consumed. A second reconcile will now say nothing, which is '
+              'right only if something really did show it to the reader');
+    });
+
     test('nothing is recorded when the platform cannot post', () async {
       // The whole point of NotificationDelivery: a muted phone must not consume
       // a warning it never delivered, or the day is settled in silence.

@@ -55,23 +55,41 @@ class AppServices {
   WarningAlarmScheduler get warningAlarms =>
       const AndroidWarningAlarmScheduler(warningAlarmCallback);
 
-  WatcherReconcileService get watcherReconcile => WatcherReconcileService(
+  /// The watcher's reconcile.
+  ///
+  /// [watcherListShowing] is **not** "the UI isolate is running" — it is "the
+  /// watcher list is on screen, rendering this person's state right now". It
+  /// decides `NotificationDelivery.redundant`, whose whole meaning is *the
+  /// reader is looking at the screen that already shows this*, and `redundant`
+  /// **consumes the day without posting anything**.
+  ///
+  /// Getting that wrong is a silent lost warning, and it happened. Reconciling
+  /// on app open — added so a force-stopped watcher repairs itself — ran with a
+  /// hard-coded `true` while the user sat on the **Tap screen**. The warning was
+  /// decided, recorded as standing, and never shown to anyone. Measured on the
+  /// POCO F3: `warningsShownFor` held `warnOnline` for the day with zero
+  /// notifications posted.
+  ///
+  /// So the flag is a parameter, and the only caller that may pass true is the
+  /// list itself.
+  WatcherReconcileService watcherReconcile({
+    required bool watcherListShowing,
+  }) =>
+      WatcherReconcileService(
         store: store,
         clock: clock,
         reader: SimulatedCheckInReader(store),
         notifications: notifications,
         alarms: warningAlarms,
-        // The real value, never a constant. `appInForeground: true` here because
-        // this composition root only exists while the UI isolate is running —
-        // and `canPost` is checked FIRST inside `NotificationDelivery.from`, so
-        // a watcher with notifications revoked still comes out `unavailable`
-        // rather than `redundant`. That order is what stops an open app
-        // consuming the access-lost cadence in silence.
+        // `canPost` is checked FIRST inside `NotificationDelivery.from`, so a
+        // watcher with notifications revoked still comes out `unavailable`
+        // rather than `redundant` — which is what stops a muted phone consuming
+        // the access-lost cadence in silence.
         delivery: () async => NotificationDelivery.from(
           canPost: await notifications.canPost(
             channel: NotificationService.warningsChannel,
           ),
-          appInForeground: true,
+          appInForeground: watcherListShowing,
         ),
       );
 }
@@ -110,7 +128,11 @@ class WatcherStateNotifier extends AsyncNotifier<WatcherState> {
   @override
   Future<WatcherState> build() {
     final services = ref.watch(appServicesProvider);
-    return services.watcherReconcile.reconcile(selfUid: services.selfUid);
+    // True: this provider exists because the list is being rendered, and the
+    // row will show whatever is decided here.
+    return services
+        .watcherReconcile(watcherListShowing: true)
+        .reconcile(selfUid: services.selfUid);
   }
 
   /// Re-reads everything. Called on resume, and after the harness changes the
@@ -118,7 +140,9 @@ class WatcherStateNotifier extends AsyncNotifier<WatcherState> {
   Future<void> refresh() async {
     final services = ref.read(appServicesProvider);
     state = await AsyncValue.guard(
-      () => services.watcherReconcile.reconcile(selfUid: services.selfUid),
+      () => services
+          .watcherReconcile(watcherListShowing: true)
+          .reconcile(selfUid: services.selfUid),
     );
   }
 }

@@ -74,8 +74,21 @@ class _RecordingNotifications implements WatcherNotifications {
   Future<void> cancelAccessLost(String linkId) async =>
       calls.add(_key('cancelAccess', linkId));
 
-  bool get postedNothing =>
-      !calls.any((c) => c.startsWith('warn') || c.startsWith('access'));
+  /// **This reconcile touched the shade not at all.**
+  ///
+  /// The predecessor was `postedNothing`, which tested only for calls beginning
+  /// `warn` or `access`. Two whole kinds slipped past it: a spurious
+  /// **correction** — *"Correction: Mum did check in yesterday"*, a claim about
+  /// a person — satisfied all seven of the silent-case assertions below, and so
+  /// did a spurious **cancel**, which takes a true warning down and tells the
+  /// family nothing about why it vanished.
+  ///
+  /// Every case that asserts silence here starts from an empty tray, so the
+  /// honest assertion is that nothing happened at all rather than that one
+  /// category of thing did not. Silence is this side's most dangerous state —
+  /// it is the failure the app cannot detect in itself — so the test for it is
+  /// the strict one.
+  bool get silent => calls.isEmpty;
 }
 
 class _RecordingAlarms implements WarningAlarmScheduler {
@@ -124,8 +137,19 @@ class _StubReader implements CheckInReader {
   /// stub that answered identically for both could not express it.
   final Map<String, FirestoreRead> perLink = {};
 
+  /// Throws instead of answering.
+  ///
+  /// Not a `FirestoreRead` value — those are the *expected* failures, and the
+  /// whole of ADR-0004 is that they are answers rather than exceptions. This is
+  /// the unexpected kind: a plugin fault, a corrupt row, a bug. It exists to
+  /// prove the reconcile lease is released on the way out.
+  bool throwOnRead = false;
+
   @override
-  Future<FirestoreRead> read(Link link) async => perLink[link.id] ?? result;
+  Future<FirestoreRead> read(Link link) async {
+    if (throwOnRead) throw StateError('the backend blew up');
+    return perLink[link.id] ?? result;
+  }
 }
 
 void main() {
@@ -205,7 +229,10 @@ void main() {
       // duplicate-notification bug".
       await service().reconcile(selfUid: selfUid);
 
-      expect(notifications.postedNothing, isTrue);
+      expect(notifications.silent, isTrue,
+          reason: 'idempotent means nothing at all — not merely no second '
+              'warning. A cancel here would take the FIRST one down, and the '
+              'family would be told and then quietly untold.');
       expect((await store.watcherCache(mumLink)).warningsShownFor[d],
           WarningOutcome.warnOnline);
     });
@@ -229,7 +256,7 @@ void main() {
       canDeliver = const WatcherDelivery.uniform(NotificationDelivery.redundant);
       await service().reconcile(selfUid: selfUid);
 
-      expect(notifications.postedNothing, isTrue);
+      expect(notifications.silent, isTrue);
       expect((await store.watcherCache(mumLink)).warningsShownFor[d],
           WarningOutcome.warnOnline,
           reason: 'consumed. A second reconcile will now say nothing, which is '
@@ -242,7 +269,7 @@ void main() {
       canDeliver = const WatcherDelivery.uniform(NotificationDelivery.unavailable);
       await service().reconcile(selfUid: selfUid);
 
-      expect(notifications.postedNothing, isTrue);
+      expect(notifications.silent, isTrue);
       expect((await store.watcherCache(mumLink)).warningsShownFor, isEmpty,
           reason: 'nothing reached anyone, so the warning is still owed');
     });
@@ -254,7 +281,7 @@ void main() {
 
       await service().reconcile(selfUid: selfUid);
 
-      expect(notifications.postedNothing, isTrue);
+      expect(notifications.silent, isTrue);
       expect((await store.watcherCache(mumLink)).lastConfirmedDay, d);
     });
 
@@ -276,7 +303,7 @@ void main() {
 
       await service().reconcile(selfUid: selfUid);
 
-      expect(notifications.postedNothing, isTrue);
+      expect(notifications.silent, isTrue);
       expect((await store.watcherCache(mumLink)).lastConfirmedDay, today);
     });
   });
@@ -289,7 +316,7 @@ void main() {
 
       await service().reconcile(selfUid: selfUid);
 
-      expect(notifications.postedNothing, isTrue);
+      expect(notifications.silent, isTrue);
     });
 
     test('a cached away that cannot be re-verified speaks, honestly', () async {
@@ -518,7 +545,7 @@ void main() {
 
       await service().reconcile(selfUid: selfUid);
 
-      expect(notifications.postedNothing, isTrue);
+      expect(notifications.silent, isTrue);
     });
 
     test('access returning cancels the standing notice', () async {
@@ -698,6 +725,122 @@ void main() {
           isNot(contains('warn:granddad_ana:${day('2026-08-15')}')),
           reason: 'the 15th is what a UTC fallback would have warned about');
     });
+  });
+
+  group('repairing itself after a force-stop', () {
+    test('re-arms the whole window, not the diff', () async {
+      // **Measured on the POCO F3, and the reason `apply` takes the desired set
+      // rather than the diff.** A force-stop cancels every `AlarmManager` alarm
+      // and tells the app nothing. `LocalStore` still says all seven are armed,
+      // so a diff computed against it is empty — the app re-arms nothing, and
+      // the watcher is permanently deaf with every record insisting it is fine.
+      // 21 armed, force-stop, 0 armed, reopen and reconcile, still 0.
+      //
+      // The watched side has had this test since Phase 2. This side — where
+      // silence is the failure that cannot be detected — did not.
+      await service().reconcile(selfUid: selfUid);
+      final wanted = Set.of(alarms.armed[mumLink]!);
+      expect(wanted, isNotEmpty);
+
+      // The force-stop: the platform forgets, the store does not.
+      alarms.armed.clear();
+      expect(await store.pendingWarnings(mumLink), wanted,
+          reason: 'the premise — the app still believes they are armed');
+
+      await service().reconcile(selfUid: selfUid);
+
+      expect(alarms.armed[mumLink], wanted,
+          reason: 'every one re-asserted. Arming is idempotent by id, so this '
+              'costs a handful of binder calls and is self-healing whatever '
+              'the platform actually holds.');
+    });
+
+    test('and the repair does not post a second warning', () async {
+      // The other half, and they pull against each other: re-arming everything
+      // must not also re-say everything. Boot recovery that duplicates the
+      // notification is this project's own named failure.
+      await service().reconcile(selfUid: selfUid);
+      alarms.armed.clear();
+      notifications.calls.clear();
+
+      await service().reconcile(selfUid: selfUid);
+
+      expect(notifications.silent, isTrue);
+    });
+  });
+
+  group('the reconcile lease is released', () {
+    test('so the next run can take it', () async {
+      await service().reconcile(selfUid: selfUid);
+
+      expect(await store.reconcileLockHolder(WatcherReconcileService.lockScope),
+          isNull,
+          reason: 'a lease still held after the run would block every '
+              'reconcile until it expired — and in the alarm isolate, which is '
+              'killed as its normal ending, nothing would ever release it');
+    });
+
+    test('even when the run throws', () async {
+      // The isolate must not die holding the lease. It is released in a
+      // `finally` precisely because there is no screen to report the throw and
+      // no second chance until the next alarm fires.
+      reader.throwOnRead = true;
+
+      await expectLater(
+          service().reconcile(selfUid: selfUid), throwsA(anything));
+
+      expect(await store.reconcileLockHolder(WatcherReconcileService.lockScope),
+          isNull);
+    });
+
+    test('and a run that could not take it releases nothing', () async {
+      // The loser of a race must not free the winner's lease on its way out —
+      // that would hand the lock to whoever asked next while the winner was
+      // still mid-diff, which is the two-concurrent-reconciles case ADR-0006
+      // exists to prevent.
+      await store.acquireReconcileLock(
+        scope: WatcherReconcileService.lockScope,
+        owner: 'someone-else',
+        now: clock.now(),
+        lease: const Duration(seconds: 30),
+      );
+
+      await service().reconcile(selfUid: selfUid);
+
+      expect(
+          (await store.reconcileLockHolder(WatcherReconcileService.lockScope))
+              ?.owner,
+          'someone-else');
+    });
+  });
+
+  test('the window survives a DST transition at the watcher\'s local time',
+      () async {
+    // §11: never raw UTC offsets, because the next transition invalidates them.
+    // Madrid moves from CEST to CET on 2026-10-25, so a seven-day window opened
+    // on the 22nd straddles it — and a window built by adding 24h repeatedly,
+    // or by storing an offset, drifts to 09:00 for the days after the change.
+    //
+    // An hour early on a dead man's switch is an hour of asking about a day
+    // that is not finished; an hour late is an hour nobody is told.
+    clock = FixedClock(at(madrid, 2026, 10, 22, 9));
+    await service().reconcile(selfUid: selfUid);
+
+    final armed = alarms.armed[mumLink]!;
+    expect(armed, hasLength(WatcherReconciler.windowDays));
+    for (final warning in armed) {
+      expect(warning.at.hour, 10, reason: '${warning.day} fires at the wrong '
+          'wall-clock hour');
+      expect(warning.at.location.name, 'Europe/Madrid');
+    }
+
+    // And the premise: the transition really is inside this window, so the run
+    // above is not passing on a week that never changed offset.
+    final offsets =
+        armed.map((w) => w.at.timeZoneOffset.inHours).toSet();
+    expect(offsets, {2, 1},
+        reason: 'CEST then CET — same wall time, different instants, which is '
+            'exactly what a raw offset cannot express');
   });
 
   test('reading state is never gated by the reconcile lease', () async {

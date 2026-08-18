@@ -299,6 +299,25 @@ void main() {
     'lib/platform/warning_alarm_scheduler.dart',
   ];
 
+  /// Held to the bare-isolate rule **before** a bare isolate reaches it.
+  ///
+  /// The watched side is display-only today (§10): its reminders are
+  /// `zonedSchedule` notifications, no Dart runs when one fires, and
+  /// `WatchedReconcileService` is therefore reached only from the UI. The
+  /// computed closure below is right to say so.
+  ///
+  /// It stays on the list because **Phase 4's FCM background handler reaches
+  /// it** — an incoming "something changed" nudge reconciles both sides — and
+  /// the cost of holding it to the rule now is zero, while the cost of finding
+  /// out later is a `MissingPluginException` in a background engine. Keeping the
+  /// guard is cheaper than remembering to add it.
+  ///
+  /// Anything else appearing here is a question, not a formality: it means the
+  /// list claims coverage of a path that does not exist.
+  const guardedEarly = <String>{
+    'lib/application/watched_reconcile_service.dart',
+  };
+
   group('runs in a bare isolate', () {
     for (final path in bareIsolateSafe) {
       test('$path imports nothing an isolate cannot provide', () {
@@ -312,7 +331,109 @@ void main() {
         }
       });
     }
+
+    /// **The list above is hand-written, and a hand-written list of what code
+    /// reaches is a list of what someone believed it reached.**
+    ///
+    /// Every test in this group is exactly as good as that belief. Add one
+    /// import to `watcher_reconcile_service.dart` — a new helper under
+    /// `lib/application/`, a formatter under `lib/copy/` — and the new file is
+    /// checked by nothing, while the isolate reaches it on the first alarm. The
+    /// symptom is `MissingPluginException` inside a background engine on
+    /// someone's phone: no screen, no log, and the app going quiet in the one
+    /// path whose job is to notice that nothing has been heard.
+    ///
+    /// So the closure is computed from the imports rather than remembered. The
+    /// list stays, because a readable inventory of what the alarm path touches
+    /// is worth having in one place — but it is now checked *against* the code
+    /// rather than trusted.
+    ///
+    /// `lib/domain/` is excluded from the comparison, not from the checking: the
+    /// first half of this file already holds every file there to a **stricter**
+    /// rule than this one, and listing forty domain files here would bury the
+    /// ten that are the actual point.
+    test('and the list is the real transitive closure, not a memory', () {
+      final reached = _reachableFrom(
+        'lib/application/warning_alarm_handler.dart',
+      ).where((p) => !p.startsWith('lib/domain/')).toSet();
+
+      expect(reached.difference(bareIsolateSafe.toSet()), isEmpty,
+          reason: 'the alarm isolate reaches these and nothing checks them. '
+              'Add them to bareIsolateSafe — or, if one of them has no business '
+              'on this path, that is the finding.');
+      expect(bareIsolateSafe.toSet().difference(reached).difference(guardedEarly),
+          isEmpty,
+          reason: 'listed but unreachable — the guard is checking files the '
+              'isolate no longer touches, which reads as coverage it does not '
+              'have. Either it moved, or it should come off the list.');
+    });
+
+    test('every reached file is checked, domain included', () {
+      // The closure is only useful if it is not empty and not one file. This
+      // guards the walker itself: a resolver that silently returned nothing
+      // would make the assertion above pass perfectly.
+      final reached =
+          _reachableFrom('lib/application/warning_alarm_handler.dart');
+      expect(reached, contains('lib/data/local_store.dart'));
+      expect(reached, contains('lib/platform/notification_service.dart'));
+      expect(reached.any((p) => p.startsWith('lib/domain/')), isTrue,
+          reason: 'the walker must follow the domain barrel too');
+    });
   });
+}
+
+/// Every project file reachable from [entry] by following `import`s.
+///
+/// Deliberately crude — a regex over import lines rather than a real parser.
+/// The alternative is a dependency on `analyzer` for one test, and this repo's
+/// imports are all plain single-quoted literals. A conditional or deferred
+/// import would need this revisited, and there are none.
+///
+/// Resolves the two forms this codebase uses — `package:i_am_ok/…` and a
+/// relative path — and ignores everything else, because `package:flutter/…` and
+/// `dart:…` are what the ban list is for rather than something to walk into.
+Set<String> _reachableFrom(String entry) {
+  final seen = <String>{};
+  final queue = <String>[entry];
+
+  while (queue.isNotEmpty) {
+    final path = queue.removeLast();
+    if (!seen.add(path)) continue;
+
+    final file = File(path);
+    if (!file.existsSync()) continue;
+    final source = _withoutComments(file.readAsStringSync());
+
+    for (final match
+        in RegExp("""^\\s*(?:import|export)\\s+'([^']+)'""", multiLine: true)
+            .allMatches(source)) {
+      final target = match.group(1)!;
+      String? resolved;
+      if (target.startsWith('package:i_am_ok/')) {
+        resolved = 'lib/${target.substring('package:i_am_ok/'.length)}';
+      } else if (!target.startsWith('package:') && !target.startsWith('dart:')) {
+        resolved = _normalise('${_dirname(path)}/$target');
+      }
+      if (resolved != null) queue.add(resolved);
+    }
+  }
+  return seen;
+}
+
+String _dirname(String path) => path.substring(0, path.lastIndexOf('/'));
+
+/// Collapses `a/b/../c` to `a/c`, which is all the relative imports here need.
+String _normalise(String path) {
+  final parts = <String>[];
+  for (final part in path.split('/')) {
+    if (part == '.' || part.isEmpty) continue;
+    if (part == '..') {
+      if (parts.isNotEmpty) parts.removeLast();
+    } else {
+      parts.add(part);
+    }
+  }
+  return parts.join('/');
 }
 
 /// What a bare background isolate genuinely cannot provide — **the widget

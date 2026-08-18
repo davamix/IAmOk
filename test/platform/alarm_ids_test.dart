@@ -91,10 +91,31 @@ void main() {
       expect(AlarmIds.accessLost(mum), isNot(AlarmIds.accessLost(granddad)));
     });
 
-    test('are NOT per day — the cadence replaces one standing notice', () {
-      // ADR-0004's "a changed cause re-notifies" is a replacement at this id,
-      // so the watcher is never left with two contradictory remediations.
-      expect(AlarmIds.accessLost(mum), AlarmIds.accessLost(mum));
+    test('never collide with a warning about the same link, on ANY day', () {
+      // ADR-0004's "a changed cause re-notifies" is a replacement at this one
+      // id, so the watcher is never left with two contradictory remediations —
+      // and the id carries no day, which is what makes the replacement work
+      // across a cadence that spans weeks.
+      //
+      // **The previous version of this test asserted
+      // `accessLost(mum) == accessLost(mum)`** — a pure function compared to
+      // itself, which cannot fail and said nothing about days at all. The
+      // property that is actually at risk is the other one: a day-free id
+      // sitting in the same integer space as a per-day one. A collision would
+      // have an access-lost notice silently replace a standing warning about
+      // her, or the reverse — the two messages ADR-0004 exists to keep apart,
+      // rejoined by an integer.
+      //
+      // Swept across a year rather than one day, because a single sample is a
+      // one-in-two-billion check dressed up as a test.
+      for (var i = 0; i < 366; i++) {
+        final anyDay = day('2026-01-01').plusDays(i);
+        expect(AlarmIds.warning(mum, anyDay), isNot(AlarmIds.accessLost(mum)),
+            reason: 'collides on $anyDay');
+        expect(AlarmIds.warning(granddad, anyDay),
+            isNot(AlarmIds.accessLost(mum)),
+            reason: 'collides on $anyDay');
+      }
     });
   });
 

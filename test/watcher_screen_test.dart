@@ -331,24 +331,52 @@ void main() {
       handle.dispose();
     });
 
-    testWidgets('survives the largest system font scale without overflow',
+    testWidgets('the largest system font scale really does enlarge the row',
         (tester) async {
-      // Set by exactly the people this app is for. An overflow here is an
-      // unreadable row about someone who may have missed a day.
-      await pump(
-        tester,
-        [
-          person(
-            cache: WatcherCache(
-              accessLostSince: d,
-              accessLostCause: RefusedCause.permissionDenied,
-            ),
-            outcome: WarningOutcome.warnAccessLost,
+      // Set by exactly the people this app is for, and the longest row in the
+      // app — four lines, one of them a full remediation sentence.
+      //
+      // **`takeException()` was the whole of this assertion, and it cannot
+      // fail here.** These rows live in a `ListView`, which hands its children
+      // unbounded height, and `Text` wraps rather than overflowing. So there is
+      // no `RenderFlex` to overflow in either axis: the check passed at every
+      // scale, including scales the row does not actually honour. Phase 2 hit
+      // the same trap on the Tap screen.
+      //
+      // What can actually go wrong is the opposite failure — a hard-coded
+      // `fontSize`, a `TextScaler.noScaling`, or a fixed-height box — where the
+      // row silently ignores the setting and stays unreadable. That is invisible
+      // to an overflow check and is what these assertions measure instead.
+      final row = [
+        person(
+          cache: WatcherCache(
+            accessLostSince: d,
+            accessLostCause: RefusedCause.permissionDenied,
           ),
-        ],
-        textScale: 2,
-        surface: const Size(320, 640),
-      );
+          outcome: WarningOutcome.warnAccessLost,
+        ),
+      ];
+      final line = find.text(WatcherCopy.accessLostRemedy(
+          RefusedCause.permissionDenied));
+      const surface = Size(320, 640);
+
+      await pump(tester, row, surface: surface);
+      final atOne = tester.getSize(line);
+
+      await pump(tester, row, textScale: 2, surface: surface);
+      final atTwo = tester.getSize(line);
+
+      expect(atTwo.height, greaterThan(atOne.height),
+          reason: 'the text must grow with the system setting, not ignore it');
+      expect(atTwo.width, lessThanOrEqualTo(surface.width),
+          reason: 'and wrap inside the screen rather than run off it');
+
+      // Every line still rendered — growing the text must not push one out.
+      expect(find.text(WatcherCopy.accessLostLabel('Mum')), findsOneWidget);
+      expect(
+          find.text(WatcherCopy.accessLostConsequence('Mum')), findsOneWidget);
+      expect(line, findsOneWidget);
+      expect(find.text(WatcherCopy.neverChecked), findsOneWidget);
       expect(tester.takeException(), isNull);
     });
 

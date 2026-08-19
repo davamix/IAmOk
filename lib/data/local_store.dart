@@ -308,7 +308,10 @@ class LocalStore {
     );
   }
 
-  /// The device's own IANA zone, written by `ClockService` on every resume.
+  /// The device's own IANA zone. `ClockService` discovers it and the **UI**
+  /// writes it here, on launch and on every resume — that class deliberately
+  /// holds no `LocalStore` (§5 makes Data and Platform peers), so it supplies the
+  /// value and does not store it.
   ///
   /// Background isolates read it from here and **never** call
   /// `flutter_timezone` (ADR-0002 decision 2). This is the canonical instance

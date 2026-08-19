@@ -19,6 +19,7 @@ class WatchedState {
     required this.armed,
     this.tapFailed = false,
     this.remindersAreExact = true,
+    this.uses24Hour = true,
   });
 
   /// Today in the **device's** zone. The watched person's own zone is the
@@ -31,6 +32,24 @@ class WatchedState {
   /// same zone the reconcile used, rather than reaching for the device's
   /// current one and disagreeing with itself.
   final tz.Location zone;
+
+  /// Whether this device shows 24-hour times, as the reconcile read it.
+  ///
+  /// **Off the state, not off `MediaQuery`** — the twin of
+  /// `WatcherState.uses24Hour`, and now for the same reason. The Tap screen has
+  /// a `BuildContext` and read the live value, which was defensible while it was
+  /// the only surface here rendering a time: nothing on the watched side is
+  /// paired with a notification about the same instant, so there was nothing to
+  /// drift against.
+  ///
+  /// It is off the state anyway, because the residual was not zero and the fix
+  /// is. If the `LocalStore` write fails at launch, the live read and the cached
+  /// one disagree, and this app has now paid twice for this one fact having two
+  /// sources. One reader, one writer, on both sides.
+  ///
+  /// Defaults to true, matching `LocalStore.uses24HourClock` — the approved
+  /// strings are 24-hour, so an uncached device renders what `screens.md` shows.
+  final bool uses24Hour;
 
   /// Who will be notified when she taps — and the only thing this screen says
   /// about watchers. See [WatchedAudience].
@@ -83,6 +102,7 @@ class WatchedState {
         armed: armed,
         tapFailed: tapFailed ?? this.tapFailed,
         remindersAreExact: remindersAreExact,
+        uses24Hour: uses24Hour,
       );
 
   bool get isAway => away != null && away!.covers(today);
@@ -253,6 +273,9 @@ class WatchedReconcileService {
       notificationsEnabled: await notificationsEnabled(),
       armed: await alarms.armedAccordingToPlugin(),
       remindersAreExact: exact,
+      // The same cached device fact the watcher side reads, and the same reason:
+      // one source, so no two surfaces can disagree about the same instant.
+      uses24Hour: await store.uses24HourClock(),
     );
   }
 

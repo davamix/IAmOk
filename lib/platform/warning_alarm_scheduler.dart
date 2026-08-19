@@ -42,8 +42,17 @@ abstract interface class WarningAlarmScheduler {
     required Set<ScheduledWarning> desired,
   });
 
-  /// Tears down every warning alarm for one link — used on revocation, where
-  /// §10 step 2 says the alarm is torn down rather than left armed and mute.
+  /// Tears down every warning alarm for one link.
+  ///
+  /// **Currently unused, and named as such rather than left to look load-bearing.**
+  /// The docstring said "used on revocation", which is where §10 step 2 does tear
+  /// the alarm down — but revocation reaches that through [apply] with an empty
+  /// `desired` set, which is the right mechanism because it goes through the same
+  /// desired-state path as everything else (*reconcile, don't mutate*).
+  ///
+  /// Kept because Phase 5's unpairing removes a link outright, at which point
+  /// there is no reconcile to compute an empty set *for* — that is the caller
+  /// this is waiting for.
   Future<void> cancelAll({
     required String linkId,
     required Set<ScheduledWarning> armed,

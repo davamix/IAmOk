@@ -106,6 +106,45 @@ class AppServices {
     return null;
   }
 
+  /// Caches the two device facts a bare isolate cannot ask for.
+  ///
+  /// **One implementation, on `AppServices`, because there are three callers and
+  /// the last round left two copies of it.** `main()` had it written out and so
+  /// did `WatchedStateNotifier` — same two facts, same two guards, same order,
+  /// created by the very round that was fixing *this fact* having two sources.
+  /// They agreed, but the next person to change one had no signal to change the
+  /// other. `NotificationService.watcherDelivery` carries the rule this follows:
+  /// *"two copies of a decision are two chances to make it"*, written after both
+  /// wiring defects of this phase turned out to be in a copy of one expression.
+  ///
+  /// ## Two facts, two guards
+  ///
+  /// Only the zone calls a plugin. Sharing one `try` meant a `flutter_timezone`
+  /// hiccup — the exact thing the guard exists to swallow — silently skipped the
+  /// clock format too, leaving a 12-hour device on the 24-hour default for the
+  /// whole session.
+  ///
+  /// ## Never allowed to fail its caller
+  ///
+  /// A lookup that throws leaves whatever is already cached and lets
+  /// `reconcile()` fall back as designed (ADR-0002's documented UTC fallback).
+  /// An exception escaping into `WatchedStateNotifier.build()` would put the
+  /// provider into `AsyncError` and show *"this phone could not get ready"* for a
+  /// plugin hiccup, on the screen whose whole job is to be there every morning.
+  Future<void> cacheDeviceFacts() async {
+    try {
+      final zone = await clockService.deviceTimezone();
+      if (zone != null) await store.setDeviceTimezone(zone);
+    } on Object {
+      // Swallowed deliberately; see above.
+    }
+    try {
+      await store.setUses24HourClock(clockService.uses24HourClock());
+    } on Object {
+      // Swallowed deliberately; see above.
+    }
+  }
+
   /// The watcher's reconcile.
   ///
   /// [watcherListShowing] is **not** "the UI isolate is running" — it is "the
@@ -230,8 +269,8 @@ class WatchedStateNotifier extends AsyncNotifier<WatchedState> {
   Future<WatchedState> build() async {
     final services = ref.watch(appServicesProvider);
     // BEFORE the first reconcile, and the order is load-bearing — see
-    // [_cacheDeviceFacts].
-    await _cacheDeviceFacts(services);
+    // [AppServices.cacheDeviceFacts] and the paragraph below.
+    await services.cacheDeviceFacts();
     return services.watchedReconcile.reconcile(selfUid: services.selfUid);
   }
 
@@ -262,31 +301,6 @@ class WatchedStateNotifier extends AsyncNotifier<WatchedState> {
   /// whole job is to be there every morning.
   ///
   /// [ADR-0006]: ../../docs/architecture/decisions/0006-reconcile-is-serialised-on-disk.md
-  Future<void> _cacheDeviceFacts(AppServices services) async {
-    try {
-      final zone = await services.clockService.deviceTimezone();
-      if (zone != null) await services.store.setDeviceTimezone(zone);
-    } on Object {
-      // Swallowed deliberately; see above.
-    }
-    // **Its own guard, not the zone's.** These are two independent facts and
-    // only the first calls a plugin — so sharing one `try` meant a
-    // `flutter_timezone` hiccup, the exact thing that `try` exists to swallow,
-    // silently skipped the clock format as well. It then stayed at its 24-hour
-    // default for the whole session, and on a 12-hour phone every time the app
-    // renders is in a format the device does not use.
-    //
-    // **Written on resume as well as at launch**, which is what makes
-    // `LocalStore.uses24HourClock`'s docstring true: a reader can change the
-    // setting in Android settings while the app is backgrounded, and the zone
-    // beside it has always been re-read here for the same reason.
-    try {
-      await services.store
-          .setUses24HourClock(services.clockService.uses24HourClock());
-    } on Object {
-      // Swallowed deliberately; see above.
-    }
-  }
 
   /// Re-reads everything. Called on resume, and after the debug harness changes
   /// something underneath.
@@ -354,20 +368,5 @@ class WatchedStateNotifier extends AsyncNotifier<WatchedState> {
     await refresh();
   }
 
-  /// Refreshes the cached device zone **and clock format** from the platform,
-  /// then reconciles.
-  ///
-  /// `flutter_timezone` is a plugin, so this can only happen here in the UI
-  /// isolate (ADR-0002 decision 2). Writing the results to `LocalStore` is what
-  /// lets a bare alarm isolate compute the day, and render the times it posts,
-  /// with no plugin access at all.
-  ///
-  /// Named for both facts because it caches both. It cached one and was called
-  /// on resume; the clock format was written only in `main()`, so a reader who
-  /// changed the setting kept the old format for the life of the process.
-  Future<void> refreshDeviceFacts() async {
-    final services = ref.read(appServicesProvider);
-    await _cacheDeviceFacts(services);
-    await refresh();
-  }
+
 }

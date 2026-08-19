@@ -32,6 +32,7 @@ void main() {
     CheckIn? checkIn,
     bool notificationsEnabled = true,
     bool tapFailed = false,
+    bool uses24Hour = true,
   }) =>
       WatchedState(
         today: today,
@@ -42,6 +43,7 @@ void main() {
         notificationsEnabled: notificationsEnabled,
         armed: 21,
         tapFailed: tapFailed,
+        uses24Hour: uses24Hour,
       );
 
   Future<void> pump(
@@ -114,6 +116,25 @@ void main() {
         (tester) async {
       await pump(tester, state(checkIn: checkInAt()));
       expect(find.text(TapCopy.alreadyTapped('07:14')), findsOneWidget);
+    });
+
+    testWidgets('a 12-hour device gets the 12-hour form here too',
+        (tester) async {
+      // **Off `WatchedState`, not off `MediaQuery`.** This screen read the live
+      // setting, which was defensible while nothing here was paired with a
+      // notification rendering the same instant. It is one source now anyway,
+      // because the residual was not zero — a failed `LocalStore` write at
+      // launch left this screen following the device and a warning notification
+      // following the cache — and this app has paid twice for this one fact
+      // having two sources.
+      //
+      // This case discriminates because `pump` pins the ambient
+      // `alwaysUse24HourFormat` to **true** while the state says false: a
+      // re-introduced `MediaQuery` read renders `07:14` and both assertions
+      // below fail. The two sources are deliberately set against each other.
+      await pump(tester, state(checkIn: checkInAt(), uses24Hour: false));
+      expect(find.text(TapCopy.alreadyTapped('7:14 am')), findsOneWidget);
+      expect(find.text(TapCopy.alreadyTapped('07:14')), findsNothing);
     });
 
     testWidgets('renders the time in the zone the tap was MADE in',

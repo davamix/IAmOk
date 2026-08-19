@@ -1,14 +1,15 @@
 # Phase 3 review — handover
 
-**Written:** 2026-08-19 · **Head:** the infrastructure re-review commit · **776 tests**, `flutter
+**Written:** 2026-08-19 · **Head:** the architecture re-review commit · **781 tests**, `flutter
 analyze` clean, `flutter build apk --debug` and `--release` both succeed.
 
 This document exists because the Phase 3 gate review ran long enough to span sessions. It records
 what the reviewers found, what was fixed, what is still owed, and how to pick it up.
 
-**Phase 3 is NOT signed off.** **All five reviewers have now run at the gate and every finding is
-fixed** — but a short **architecture re-pass** is owed over the four gate commits it has not seen,
-and the overnight Doze device criterion is unstarted.
+**Phase 3 is NOT signed off.** **All five reviewers have run at the gate and every finding is
+fixed**, including the architecture re-pass over the other four rounds. What remains is the
+**overnight Doze device criterion**, which is unstarted, and the resume-repair device row added at
+this gate.
 
 ---
 
@@ -47,7 +48,8 @@ and the reason each round now re-reads the previous round's diff first.
 | `7311a33` | The **testing** re-review at the gate |
 | `769448c` | The **UI/UX** re-review at the gate |
 | `e2e084d` | The **security** review — its first run this round |
-| *this one* | The **infrastructure** review — its first run this round |
+| `ecd4e38` | The **infrastructure** review — its first run this round |
+| *this one* | The **architecture** re-pass — the last review owed |
 
 ---
 
@@ -55,11 +57,14 @@ and the reason each round now re-reads the previous round's diff first.
 
 | Reviewer | Last run | Outcome |
 |---|---|---|
-| **infrastructure** | **at the gate, over `e2e084d`** | Nothing irreversible wrong. Nine findings, all acted on — see the round below. |
+| **architecture** | **at the gate, over `ecd4e38`** | Nothing to fix before the gate. Six items, all acted on — see the round below. |
+| **infrastructure** | at the gate, over `e2e084d` | Nothing irreversible wrong; nine findings acted on. |
 | **security** | at the gate, over `769448c` | No exploitable finding; three items acted on. |
-| **uiux** | at the gate, over `7311a33` | All findings fixed. Has not seen the two commits since. |
-| **testing** | at the gate, over `bbe68d5` | All findings fixed. Has not seen the three commits since. |
-| **architecture** | at `bbe68d5` | All findings fixed. **Has not seen `bbe68d5` itself**, nor the four gate commits since. **The one pass still owed.** |
+| **uiux** | at the gate, over `7311a33` | All findings fixed. |
+| **testing** | at the gate, over `bbe68d5` | All findings fixed. |
+
+**Every reviewer has now run at the gate and every finding is fixed.** The remaining Phase 3 work is
+the **overnight Doze run** and then sign-off.
 
 ### Standing rule
 
@@ -379,6 +384,66 @@ AAR. The merge check is a command in `deploy-notes.md`, owed whenever a plugin i
 
 ---
 
+## The gate round — architecture over `ecd4e38`, the last review owed
+
+**Nothing had to be fixed before the gate.** No layering violation, no decision in the wrong isolate,
+no defect that could produce a false claim or a silently lost warning. The reviewer explicitly cleared
+the two changes with the most room to go wrong — `repairOnResume` and the migration ladder — and said
+so with the reasoning: `repairOnResume` cannot go to Domain because it takes a Flutter enum, and
+mapping it would add an untested branch to remove one; the ladder's `default: throw` cannot ship,
+because the v1 and v2 fixtures open at `LocalStore.schemaVersion` and fail the suite if a step is
+missing. That is what the old literal tripwire could not do.
+
+What it did find was **a duplication rather than a defect — the same class of thing, one step
+earlier**, and created by this round.
+
+**`cacheDeviceFacts` existed twice**, in `main()` and in `WatchedStateNotifier`: same two facts, same
+two guards, same order. Written by the round that was fixing *this very fact* having two sources.
+They agreed, but the next person to change one had no signal to change the other, and
+`NotificationService.watcherDelivery` already carries the rule — *"two copies of a decision are two
+chances to make it"* — written after both of this phase's wiring defects turned out to be in a copy
+of one expression. Now one method on `AppServices`, called by all three callers.
+
+**Resume-time caching was owned by the watched provider, and Phase 5 breaks that.** It worked only
+because `TapScreen` is home and stays mounted; a watcher-only user under Phase 5's routing would
+never mount it, and both device facts would revert to launch-only — the exact defect the testing
+round had just removed for `uses24HourClock`. ADR-0002 says *the UI* caches on resume, which is a
+statement about the isolate, not about one side's provider. It moved to the app shell, ahead of the
+`repairOnResume` guard and unconditional, because the guard answers *which reconcile runs* and not
+*whether the device facts are stale*. That also fixes an ordering slip the reviewer spotted: the
+shell's observer registers before `TapScreen`'s, so the watcher reconcile had been reading facts
+cached at the *previous* resume.
+
+**The watcher's own unresolvable zone was swallowed; the watched person's was not.** If the platform
+names a zone this build's tzdata does not carry, `ClockService` returns null, nothing is stored, and
+every warning alarm on the device is armed at `warningLocalTime` **UTC** — up to twelve hours out,
+permanently, on a dead man's switch. ADR-0002 accepts a *stale* watcher zone because it cannot affect
+`D`; it never considered an *unresolvable* one, where the cost is a fixed offset that never heals.
+The symmetric flag has existed on the watched side since the last round
+(`WatchedPersonState.zoneUnknown`), with the argument that a fault the app cannot see is a fault
+nobody will fix. `WatcherState.watcherZoneUnknown` is that flag for the reader's own zone.
+
+**The Tap screen's live `MediaQuery` read is gone.** The UI/UX round recorded it as a decision and
+the reasoning was sound — nothing on the watched side is paired with a notification rendering the
+same instant. The architecture round pointed out the residual it names is removable at zero cost, and
+that this app has now paid twice for this one fact having two sources. `uses24Hour` is on
+`WatchedState`, from the same `LocalStore` read the watched reconcile already makes. The test pins it
+by setting the ambient `MediaQuery` and the state *against each other*.
+
+**§4 and §6 had drifted.** §6's `ClockService` row still described one discovery responsibility, and
+§4's bullet was still singular about timezones. Both now say device **facts**, with the note that the
+second is ADR-0002's pattern applied again rather than a new decision — which is why it gets no ADR
+of its own, per the decisions README.
+
+Three docstrings were describing code that no longer exists or behaviour that does not happen: a
+reference to `_cacheDeviceZone`; `WarningAlarmScheduler.cancelAll` documented as "used on revocation"
+when revocation goes through `apply` with an empty desired set and this method has no caller at all;
+and a claim that an unconsumed notification payload is picked up by the next successful reconcile,
+which it is not — that path runs from `initState` and from the listener, and a pull-to-refresh
+produces a new widget against the same `State`, so neither fires.
+
+---
+
 ## Known-open, carried deliberately
 
 Nothing here is a false claim; all are honest gaps.
@@ -402,7 +467,8 @@ Nothing here is a false claim; all are honest gaps.
 
 ## Next steps, in order
 
-1. **Run the remaining reviewers, one at a time, asking between each.** Suggested order:
+1. ~~**Run the remaining reviewers.**~~ **Done — all five have run at the gate and every finding is
+   fixed.** For the record, in the order they ran:
    1. ~~**testing**~~ — **done at the gate.** Verdict: coverage adequate for Phase 3. Its two
       sign-off blockers (the unasserted 12-hour row, the resume guard only a device could reach) are
       fixed, along with seven lesser findings.
@@ -414,15 +480,13 @@ Nothing here is a false claim; all are honest gaps.
    4. ~~**infrastructure**~~ — **done at the gate.** Nothing irreversible wrong; nine findings
       acted on, including three unpinned Android SDK levels and a constraint line that was wrong in
       both halves.
-   5. **architecture** — **the one pass still owed.** A short re-read over the four gate commits
-      (`7311a33`, `769448c`, `e2e084d`, and this one) plus `bbe68d5`, which it has never seen. The
-      material with the most architectural weight: `IAmOkApp.repairOnResume` hoisted out of the
-      widget, `AppServices.resolveWatchedLink` returning a `Link` instead of a bool,
-      `_cacheDeviceFacts` writing two device facts on resume, and the `LocalStore` migration
-      ladder.
-2. **Fix what they find**, committing per reviewer as before.
-3. **Then the overnight Doze run** on the build you intend to keep. It is the last unobserved Phase 3
-   device criterion.
+   5. ~~**architecture**~~ — **done at the gate.** Nothing to fix before it; six items acted on,
+      the main one a duplication this round itself created.
+2. ~~**Fix what they find.**~~ Done, one commit per reviewer.
+3. **The overnight Doze run** on the build you intend to keep — **the next thing to do**, and the
+   last unobserved Phase 3 device criterion. Take the resume-repair row with it: force-stop, open,
+   background, return, and confirm the watcher alarms are re-armed and `last_reconcile_at` moved.
+   That path postdates the 2026-08-17 device pass and is unchecked on the matrix.
 4. **Then rewrite `docs/phases/phase-3-summary.md`** to record the settled state, and sign off the
    gate.
 
@@ -434,15 +498,14 @@ Nothing here is a false claim; all are honest gaps.
 > `docs/phases/phase-3-review-handover.md` first — it records what the five reviewers have found so
 > far, what was fixed, and what is still owed. Then follow the reading order in `docs/README.md`.
 >
-> Head is the infrastructure re-review commit. 776 tests pass, `flutter analyze` is clean, and both
-> `flutter build apk --debug` and `--release` succeed. **All five reviewers have now run at the gate
-> and every finding is fixed.** What is still owed: a **short architecture re-pass** over the four
-> gate commits plus `bbe68d5`, which that reviewer has never seen — and then the **overnight Doze
-> run**, the last unobserved Phase 3 device criterion.
+> Head is the architecture re-review commit. 781 tests pass, `flutter analyze` is clean, and both
+> `flutter build apk --debug` and `--release` succeed. **All five reviewers have run at the gate and
+> every finding is fixed** — the review phase is complete.
 >
-> Start with the **architecture** reviewer. Run reviewers **one at a time** — never in parallel, that has
-> twice exhausted the session limit — and after each one finishes, stop, report what it found, and
-> ask me before running the next.
+> What remains before Phase 3 can be signed off is **device work, not review work**: the overnight
+> Doze run, and the resume-repair row beside it (force-stop, open, background, return, confirm the
+> watcher alarms re-arm). Both are unchecked on `docs/testing/device-matrix.md`. After that, rewrite
+> `docs/phases/phase-3-summary.md` to record the settled state.
 >
 > Two things to carry with you. First, six of the last nine review rounds found a defect introduced
 > by the previous round's fix, so read your own recent changes as harshly as anything else. Second,

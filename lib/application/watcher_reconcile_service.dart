@@ -142,6 +142,7 @@ class WatcherState {
     required this.warningDelivery,
     required this.uses24Hour,
     this.unreconciled = const [],
+    this.watcherZoneUnknown = false,
   });
 
   final List<WatchedPersonState> people;
@@ -209,6 +210,19 @@ class WatcherState {
   /// the row and the notification give different times for the same instant,
   /// and different weekdays across midnight.
   final tz.Location watcherZone;
+
+  /// [watcherZone] is the **UTC fallback**, not the device's real zone.
+  ///
+  /// Either nothing has been cached yet, or the platform named a zone this
+  /// build's tzdata does not carry. Every warning alarm on this device is then
+  /// armed at `warningLocalTime` UTC — up to twelve hours out, and permanently,
+  /// since nothing about it self-heals.
+  ///
+  /// The twin of [WatchedPersonState.zoneUnknown] on this side, and carried for
+  /// the same stated reason: a fault the app cannot see is a fault nobody will
+  /// ever fix. §13's panel reads both in Phase 7; until then it is in the state
+  /// the screen already receives.
+  final bool watcherZoneUnknown;
 
   /// Nobody is being watched — **not** "nothing could be rendered".
   ///
@@ -296,7 +310,8 @@ class WatcherReconcileService {
   /// watched person unreconciled with nothing to notice it.
   Future<WatcherState> reconcile({required String selfUid}) async {
     final now = clock.now();
-    final watcherZone = await _watcherZone();
+    final watcher = await _watcherZone();
+    final watcherZone = watcher.zone;
     // The device's 12h/24h preference, off disk for the same reason the zone is
     // (ADR-0002): this runs in an isolate with no `MediaQuery` to ask.
     final uses24Hour = await store.uses24HourClock();
@@ -384,6 +399,7 @@ class WatcherReconcileService {
       people: people,
       today: DayKey.fromInstant(now, watcherZone),
       watcherZone: watcherZone,
+      watcherZoneUnknown: watcher.unknown,
       warningDelivery: canDeliver.warning,
       uses24Hour: uses24Hour,
       unreconciled: unreconciled,
@@ -549,15 +565,35 @@ class WatcherReconcileService {
     );
   }
 
-  /// The watcher's own cached zone, falling back to UTC.
+  /// The watcher's own cached zone, falling back to UTC — and **whether that
+  /// fallback was taken**.
   ///
   /// Read from `LocalStore`, never from `flutter_timezone` — this runs in the
   /// alarm isolate and ADR-0002 decision 2 forbids a plugin call there. The
   /// **watched** person's zone is a different question and comes off the link,
   /// which is why no plugin is touched on this path at all.
-  Future<tz.Location> _watcherZone() async {
+  ///
+  /// ## Why the fallback is now reported rather than only taken
+  ///
+  /// ADR-0002 accepts a **stale** watcher zone, correctly: it cannot affect `D`,
+  /// which uses the watched person's zone from the link. It does not consider an
+  /// **unresolvable** one, and the cost is different in kind. `ClockService`
+  /// returns null when the platform names a zone this build's pinned tzdata does
+  /// not carry, `main()` then stores nothing, and every warning alarm on the
+  /// device is armed at `warningLocalTime` **UTC** — up to twelve hours off, on a
+  /// dead man's switch, permanently, because nothing about it heals.
+  ///
+  /// The symmetric case on the *watched* side is already carried:
+  /// `WatchedPersonState.zoneUnknown` exists for exactly this, with the argument
+  /// that a fault the app cannot see is a fault nobody will ever fix. The
+  /// watcher's own zone got the fallback and not the flag. §13's panel is the
+  /// Phase 7 consumer of both.
+  Future<({tz.Location zone, bool unknown})> _watcherZone() async {
     final name = await store.deviceTimezone();
-    if (name == null) return TimeZones.utc;
-    return TimeZones.tryLocation(name) ?? TimeZones.utc;
+    if (name == null) return (zone: TimeZones.utc, unknown: true);
+    final resolved = TimeZones.tryLocation(name);
+    return resolved == null
+        ? (zone: TimeZones.utc, unknown: true)
+        : (zone: resolved, unknown: false);
   }
 }

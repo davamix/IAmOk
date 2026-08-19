@@ -42,10 +42,10 @@ class _TapScreenState extends ConsumerState<TapScreen>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      // The device's zone and 12h/24h setting are refreshed from the platform
-      // here and cached to LocalStore, which is the only way a bare alarm
-      // isolate ever learns either (ADR-0002 decision 2).
-      await ref.read(watchedStateProvider.notifier).refreshDeviceFacts();
+      // The device facts are cached by `main()` before `runApp`, and re-cached
+      // by the app shell on every resume — not here. This screen only needs the
+      // reconcile that reads them.
+      await ref.read(watchedStateProvider.notifier).refresh();
       // First run on API 33+ has POST_NOTIFICATIONS denied by default. Ask
       // once, rather than showing her a red banner about a permission the app
       // never requested — and never firing a reminder, which is this phase's
@@ -65,10 +65,14 @@ class _TapScreenState extends ConsumerState<TapScreen>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     // A resume is a full reconcile, not a redraw. Android takes permissions
-    // back from apps nobody opens (§13), and the device zone and clock format
-    // can both change while backgrounded.
+    // back from apps nobody opens (§13).
+    //
+    // The device zone and clock format also change while backgrounded, and are
+    // re-cached by the **app shell** before this runs — it owns that because it
+    // survives Phase 5's routing on role, where this screen may not be mounted
+    // at all. See `_IAmOkAppState.didChangeAppLifecycleState`.
     if (state == AppLifecycleState.resumed) {
-      ref.read(watchedStateProvider.notifier).refreshDeviceFacts();
+      ref.read(watchedStateProvider.notifier).refresh();
       _scheduleMidnightRefresh();
     }
   }
@@ -173,7 +177,7 @@ class TapBody extends ConsumerWidget {
                     child: Center(
                       child: TapTarget(
                         enabled: !state.hasTappedToday,
-                        tappedAtLabel: _tappedAt(context),
+                        tappedAtLabel: _tappedAt(),
                         // Sized against the region it actually occupies, not
                         // the whole screen, so it cannot grow into the band.
                         maxDiameter: targetArea,
@@ -188,7 +192,7 @@ class TapBody extends ConsumerWidget {
             ),
             SizedBox(
               height: bandHeight,
-              child: _BottomBand(state: state, tappedAt: _tappedAt(context)),
+              child: _BottomBand(state: state, tappedAt: _tappedAt()),
             ),
           ],
         );
@@ -203,7 +207,7 @@ class TapBody extends ConsumerWidget {
   /// domain's purity guard bans one layer down, and after a flight it renders a
   /// wall-clock time she never saw, on the one line whose whole job is to be
   /// believed.
-  String? _tappedAt(BuildContext context) {
+  String? _tappedAt() {
     final checkIn = state.todayCheckIn;
     if (checkIn == null) return null;
     final zone = TimeZones.tryLocation(checkIn.timezone);
@@ -221,21 +225,15 @@ class TapBody extends ConsumerWidget {
     // localised at all and one consistent set of words matters more than one
     // correctly-localised outlier. Revisit together with the rest when
     // translation lands.
-    // **`MediaQuery` here, `LocalStore` on the watcher side — and that is a
-    // decision, not an oversight.** The watcher row and the notification posted
-    // by the same reconcile render the *same instant*, so a reader compares them
-    // directly and they must come from one source. Nothing on this screen is
-    // paired with a notification that way: the reminders carry no time. So this
-    // side reads the live setting, which is strictly fresher than the cache.
-    //
-    // The residual is small and worth naming: if the `LocalStore` write fails at
-    // launch, this screen follows the device while a warning notification
-    // follows the stale cache. Both are internally honest; they simply differ,
-    // on two surfaces a reader has no reason to compare.
+    // **Off the state, like the watcher row.** This screen read `MediaQuery`
+    // live, which was defensible — nothing here is paired with a notification
+    // rendering the same instant, since the reminders carry no time — but it
+    // left one fact with two sources on a device where the other side reads the
+    // cache. This app has paid twice for exactly that. One reader, one writer.
     return NotificationCopy.timeLabel(
       at,
       zone ?? TimeZones.utc,
-      MediaQuery.of(context).alwaysUse24HourFormat,
+      state.uses24Hour,
     );
   }
 }

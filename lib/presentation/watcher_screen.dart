@@ -264,12 +264,20 @@ class _WatcherBodyState extends State<WatcherBody> {
     final linkId = NotificationRouter.instance.tappedLink.value;
     if (linkId == null || !mounted) return;
     // `people` only, so a payload naming a link that landed in `unreconciled`
-    // matches nothing: it is neither highlighted nor **consumed**. Both halves
-    // are deliberate. The reader still lands on the list and still sees that
-    // person's failed row, which is the honest answer; and leaving the payload
-    // unconsumed means the next pass that reconciles them successfully picks it
-    // up and highlights the row then. Consuming it here would spend the tap on a
-    // row that cannot say anything yet.
+    // matches nothing: it is neither highlighted nor **consumed**.
+    //
+    // The reader still lands on the list and still sees that person's failed
+    // row, which is the honest answer — the row is what the tap was for.
+    //
+    // Leaving it unconsumed is the conservative half rather than a recovery
+    // mechanism, and this comment used to claim otherwise: *"the next pass that
+    // reconciles them successfully picks it up and highlights the row then"*.
+    // It does not. This runs from `initState`'s post-frame callback and from the
+    // `tappedLink` listener, and a successful pull-to-refresh produces a new
+    // `WatcherBody` widget against the same `State`, so neither fires. The
+    // highlight returns only if the screen is re-created. Not consuming still
+    // costs nothing and keeps the option open; it just is not the thing the
+    // sentence promised.
     final index = widget.state.people.indexWhere((p) => p.link.id == linkId);
     if (index < 0) return;
     NotificationRouter.instance.consume();

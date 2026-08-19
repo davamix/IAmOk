@@ -43,46 +43,6 @@ Future<void> main() async {
 
   final store = await LocalStore.open();
 
-  // **The device's IANA zone, cached before anything reconciles.**
-  //
-  // `WatchedStateNotifier.build()` already awaited this before its own first
-  // reconcile — the fix for a defect measured on the POCO F3, where a fresh
-  // install armed 19 alarms at UTC wall times, an hour or two late each. But
-  // `_reconcileWatcherSide` runs from a post-frame callback and awaits nothing, so
-  // on the watcher side the same race was still open: `deviceTimezone()` is null
-  // on a fresh install, `_watcherZone()` takes ADR-0002's documented UTC
-  // fallback, and seven warning alarms are armed at 10:00 **UTC**.
-  //
-  // It self-heals on the first fire, which is precisely the fire that is two
-  // hours late — on a dead man's switch, on day one. Doing it here removes the
-  // ordering dependency from both call sites instead of repeating the fix.
-  //
-  // Swallowed, never fatal: a plugin hiccup must not stop the app starting, and
-  // every reader below has a documented fallback.
-  const clockService = ClockService();
-  try {
-    final zone = await clockService.deviceTimezone();
-    if (zone != null) await store.setDeviceTimezone(zone);
-  } on Object {
-    // Deliberate; see above.
-  }
-
-  // The device's 12h/24h preference, cached beside the zone and for the same
-  // reason: the alarm isolate has no way to ask. Awaited here rather than
-  // written fire-and-forget from a widget, so the first reconcile cannot read a
-  // default the device disagrees with.
-  //
-  // **In its own `try`, not the zone's.** It shared one, and the zone's is the
-  // half that calls a plugin — so a `flutter_timezone` hiccup, the very thing
-  // that `try` exists to swallow, took this line with it and left the format at
-  // its 24-hour default for the whole session. This read touches no plugin and
-  // cannot fail for the same reasons; only the store write can.
-  try {
-    await store.setUses24HourClock(clockService.uses24HourClock());
-  } on Object {
-    // Deliberate; see above.
-  }
-
   final notifications = await NotificationService.initialize(
     // Only the UI isolate routes taps. The alarm isolate posts notifications and
     // wires nothing, because there is no screen to open from there.
@@ -123,6 +83,24 @@ Future<void> main() async {
     // reconciles nothing, and reports success.
     selfUid: LocalStore.defaultSelfUid,
   );
+
+  // **The device's zone and clock format, cached before anything reconciles.**
+  //
+  // `WatchedStateNotifier.build()` awaits this before its own first reconcile —
+  // the fix for a defect measured on the POCO F3, where a fresh install armed 19
+  // alarms at UTC wall times, an hour or two late each. But `_reconcileWatcherSide`
+  // runs from a post-frame callback and awaits nothing, so on the watcher side
+  // the same race was still open: `deviceTimezone()` is null on a fresh install,
+  // `_watcherZone()` takes ADR-0002's documented UTC fallback, and seven warning
+  // alarms are armed at 10:00 **UTC**.
+  //
+  // It self-heals on the first fire, which is precisely the fire that is two
+  // hours late — on a dead man's switch, on day one. Doing it here removes the
+  // ordering dependency from both call sites instead of repeating the fix.
+  //
+  // The procedure itself lives on `AppServices`, because this is one of three
+  // callers and it was written out twice — see [AppServices.cacheDeviceFacts].
+  await services.cacheDeviceFacts();
 
   runApp(
     ProviderScope(
@@ -209,10 +187,38 @@ class _IAmOkAppState extends ConsumerState<IAmOkApp>
   /// direction of defaulting to `true` — is on the predicate, where it can be
   /// tested. `WatcherScreen.isShowing` is read here rather than tracked, because
   /// the screen owns that fact; see its docstring for what duplicating it cost.
+  ///
+  /// ## The device facts are re-cached first, and unconditionally
+  ///
+  /// **Ahead of the guard**, because the guard answers *which reconcile runs*,
+  /// not *whether the device's zone and clock format are stale*. Both change
+  /// while the app is backgrounded, and both are read from `LocalStore` by an
+  /// isolate that cannot ask the platform itself (ADR-0002).
+  ///
+  /// **On the shell rather than on `WatchedStateNotifier`, which is where the
+  /// resume caching used to live.** That only worked because `TapScreen` is
+  /// home and stays mounted; `main.dart` below says Phase 5 routes on role, and
+  /// a watcher-only user would then never mount it — so both facts would
+  /// silently revert to launch-only, which is precisely the defect the testing
+  /// round removed for `uses24HourClock` at this gate. ADR-0002 decision 2 says
+  /// *the UI* caches on every resume, which is a statement about the isolate and
+  /// not about one side's provider.
+  ///
+  /// It also fixes an ordering slip: this observer is registered before
+  /// `TapScreen`'s, so the shell's watcher reconcile used to read whatever the
+  /// *previous* resume had cached.
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) return;
+    unawaited(_onResumed());
+  }
+
+  Future<void> _onResumed() async {
+    final services = ref.read(appServicesProvider);
+    await services.cacheDeviceFacts();
+    if (!mounted) return;
     if (!IAmOkApp.repairOnResume(
-      state: state,
+      state: AppLifecycleState.resumed,
       watcherListShowing: WatcherScreen.isShowing,
     )) {
       return;
@@ -261,7 +267,8 @@ class _IAmOkAppState extends ConsumerState<IAmOkApp>
   /// call was split out: `warningsShownFor` held `warnOnline` for the day with
   /// zero notifications sent.
   ///
-  /// Errors are swallowed for the same reason `_cacheDeviceZone` swallows its
+  /// Errors are swallowed for the same reason `AppServices.cacheDeviceFacts`
+  /// swallows its
   /// own: this is a repair running behind whatever screen the user actually
   /// opened, and it must never be able to replace it with an error.
   void _reconcileWatcherSide() {

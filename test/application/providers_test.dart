@@ -292,6 +292,20 @@ void main() {
               'format the device does not use');
     });
 
+    test('one shared implementation, reachable by all three callers', () async {
+      // `main()`, the shell's resume handler and `WatchedStateNotifier.build()`
+      // all cache the same two facts. It was written out twice — in `main()` and
+      // in the notifier — by the very round that was fixing this fact having two
+      // sources, and the copies agreed only by luck. Asserted directly now that
+      // it is one method on `AppServices`.
+      expect(await store.deviceTimezone(), isNull, reason: 'fresh install');
+
+      await container.read(appServicesProvider).cacheDeviceFacts();
+
+      expect(await store.deviceTimezone(), 'Europe/Madrid');
+      expect(await store.uses24HourClock(), isFalse);
+    });
+
     test('a zone lookup that throws does not take the clock format with it',
         () async {
       // The two writes shared one `try`, and only the zone's half calls a

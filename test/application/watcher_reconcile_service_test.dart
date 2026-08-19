@@ -626,6 +626,48 @@ void main() {
     });
   });
 
+  group("the watcher's own zone is unresolvable", () {
+    test('the UTC fallback is reported, not only taken', () async {
+      // ADR-0002 accepts a STALE watcher zone — it cannot affect `D`, which uses
+      // the watched person's zone from the link. It does not consider an
+      // UNRESOLVABLE one, and the cost differs in kind: every warning alarm on
+      // the device is armed at `warningLocalTime` **UTC**, up to twelve hours
+      // out, permanently, because nothing about it heals.
+      //
+      // The symmetric fact on the watched side has been carried since the
+      // architecture round as `WatchedPersonState.zoneUnknown`, with the
+      // argument that a fault the app cannot see is a fault nobody will fix.
+      // This is that flag for the reader's own zone.
+      await store.setDeviceTimezone('Europe/Madrid');
+      final ok = await service().reconcile(selfUid: selfUid);
+      expect(ok.watcherZoneUnknown, isFalse);
+      expect(ok.watcherZone.name, 'Europe/Madrid');
+    });
+
+    test('nothing cached yet reads as unknown, not as UTC-is-fine', () async {
+      // A fresh install before the UI has ever cached the zone. The alarms armed
+      // in this state are the ones ADR-0002's UTC fallback is about. The shared
+      // setUp caches Madrid, so this clears it rather than pretending.
+      await store.database
+          .delete('settings', where: 'key = ?', whereArgs: ['device_timezone']);
+      expect(await store.deviceTimezone(), isNull);
+
+      final state = await service().reconcile(selfUid: selfUid);
+      expect(state.watcherZoneUnknown, isTrue);
+      expect(state.watcherZone, TimeZones.utc);
+    });
+
+    test('a zone this build cannot resolve reads as unknown', () async {
+      // `ClockService` validates at the boundary so an unusable name should
+      // never reach the store — this asserts the reconcile degrades honestly if
+      // one ever does, rather than silently arming everything at UTC.
+      await store.setDeviceTimezone('Mars/Olympus_Mons');
+      final state = await service().reconcile(selfUid: selfUid);
+      expect(state.watcherZoneUnknown, isTrue);
+      expect(state.watcherZone, TimeZones.utc);
+    });
+  });
+
   group('the alarm window', () {
     test('is armed at the watcher\'s chosen local time', () async {
       // 09:00, so today's own 10:00 alarm is still ahead and the full window

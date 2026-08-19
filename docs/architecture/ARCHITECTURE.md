@@ -114,11 +114,17 @@ Consequences that shape the design:
 - Both background entry points are `@pragma('vm:entry-point')` **top-level functions** that
   bootstrap the minimum they need, call `reconcile()`, and exit.
 - The domain layer must have **zero Flutter dependencies** so it runs identically in all three.
-- **Timezones are read from disk, never from a plugin, in a background isolate**
-  ([ADR-0002](decisions/0002-clock-split.md)). The UI writes the device's IANA zone to `LocalStore`
-  on resume; the watched person's zone is already there, denormalized onto the link by §7. This is
+- **Device facts are read from disk, never from a plugin, in a background isolate**
+  ([ADR-0002](decisions/0002-clock-split.md)). The UI writes them to `LocalStore` on launch and on
+  every resume; the watched person's zone is already there, denormalized onto the link by §7. This is
   the canonical instance of the rule above — the alternative is a plugin registrant on the alarm
   path, to answer a question the UI already knows the answer to.
+
+  **Two facts, not one.** The device's IANA zone, and whether it shows 12- or 24-hour times. The
+  second was added in Phase 3, when the notifications the alarm isolate posts had to render a time
+  the reader recognises; it is ADR-0002's pattern applied a second time rather than a new decision,
+  which is why it has no ADR of its own. `AppServices.cacheDeviceFacts` is the single implementation,
+  and the plural is the point: a third will follow the same route.
 
 ---
 
@@ -183,7 +189,7 @@ thing some readers get.
 | `FcmService` | Platform | Token lifecycle → Firestore; route foreground + background messages | UI, FCM |
 | `PermissionService` | Platform | POST_NOTIFICATIONS, exact alarms, battery exemption, auto-revoke exemption | UI |
 | `Clock` | Platform edge | The current instant. Trivial and **plugin-free**. | **All three** |
-| `ClockService` | Platform | Discover device IANA tz → `LocalStore` on resume; device-vs-server skew detection | UI |
+| `ClockService` | Platform | Discover the **device facts** a bare isolate cannot ask for — IANA tz and the 12h/24h setting — → `LocalStore` on launch and on resume; device-vs-server skew detection | UI |
 | `ConnectivityService` | Platform | Online state for the staleness banner | UI |
 | `Reconciler` | Domain | Pure desired-state calculation for both sides | All three |
 

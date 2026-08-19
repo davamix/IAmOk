@@ -1,6 +1,6 @@
 # Phase 3 review — handover
 
-**Written:** 2026-08-19 · **Head:** the UI/UX re-review commit · **770 tests**, `flutter analyze`
+**Written:** 2026-08-19 · **Head:** the security re-review commit · **771 tests**, `flutter analyze`
 clean, `flutter build apk --debug` succeeds.
 
 This document exists because the Phase 3 gate review ran long enough to span sessions. It records
@@ -44,7 +44,8 @@ and the reason each round now re-reads the previous round's diff first.
 | `ee0beed` | Tier 5 — ADR-0007, and an ADR naming the wrong mechanism as its own guard |
 | `bbe68d5` | The **architecture** re-review of Tiers 3-5 |
 | `7311a33` | The **testing** re-review at the gate |
-| *this one* | The **UI/UX** re-review at the gate |
+| `769448c` | The **UI/UX** re-review at the gate |
+| *this one* | The **security** review — its first run this round |
 
 ---
 
@@ -52,10 +53,10 @@ and the reason each round now re-reads the previous round's diff first.
 
 | Reviewer | Last run | Outcome |
 |---|---|---|
-| **uiux** | **at the gate, over `7311a33`** | All findings fixed — see the round below. |
-| **testing** | at the gate, over `bbe68d5` | All findings fixed. Has not seen the UI/UX commit. |
-| **architecture** | at `bbe68d5` | All findings fixed. **Has not seen `bbe68d5` itself**, nor the two gate commits since. |
-| **security** | never, this round | Has seen none of it |
+| **security** | **at the gate, over `769448c`** | No exploitable finding. Three items, all acted on — see the round below. |
+| **uiux** | at the gate, over `7311a33` | All findings fixed. Has not seen the security commit. |
+| **testing** | at the gate, over `bbe68d5` | All findings fixed. Has not seen the two commits since. |
+| **architecture** | at `bbe68d5` | All findings fixed. **Has not seen `bbe68d5` itself**, nor the three gate commits since. |
 | **infrastructure** | never, this round | Has seen none of it |
 
 ### Standing rule
@@ -228,6 +229,69 @@ in Phase 6 with the attribution that makes it honest.
 
 ---
 
+## The gate round — security over `769448c`
+
+**Verdict: no exploitable finding, and the secrets guard is intact in both directions.** The script
+exits 0, `git ls-files` carries exactly one `.json` — `android/app/google-services.json`, tracked on
+purpose — no credential shape appears anywhere, and `git log -p --follow -- .gitignore` shows **zero
+removed lines across the file's entire history**, so the 2026-08-15 lesson is holding. Sections 2-4
+of the security checklist have no artefact at Phase 3 and were scoped out rather than reported as
+gaps: there is no `firestore.rules` and no `functions/` yet.
+
+**Three `.gitignore` rules had no assertion behind them.** `tools/check-secrets-ignored.ps1` printed
+`OK` for sample paths matched by *earlier, broader* rules — `.credentials/serviceAccount.json` is
+caught by `.credentials/`, not by `**/serviceAccount*.json` — so three lines could have been deleted
+with the guard still green, including `.firebase/`, which starts holding content the moment Phase 4
+runs the CLI. Three sample paths added, each verified with `git check-ignore -v --no-index` to hit
+the intended rule and nothing earlier, and the guard itself mutation-checked by deleting a rule and
+confirming it reports `EXPOSED` and exits 1.
+
+**`AppServices.watches` returned a bool, and that shape is a Phase 4 trap.** The check closes a real
+attack — `MainActivity` is exported, as every LAUNCHER activity must be, so a co-installed app can
+hand the app a crafted payload through an intent, and before this round any non-null value pushed a
+screen. But a bool answers *"is this one of mine"* and leaves the caller holding the untrusted
+string, which invites membership proven against a local cache and then the raw payload dereferenced
+into a document path anyway. It is now `resolveWatchedLink(String) -> Future<Link?>`, and `main.dart`
+uses the returned object, so the string stops at the boundary. Both docstrings now also say what the
+check is **not**: `LocalStore` is the threat model's trust boundary 4, a decision cache and never an
+authorisation record, so from Phase 4 the security rules are what deny — resolution keeps the
+untrusted string out of the path and buys nothing else.
+
+**`warnings_shown` keeps every missed day for ever**, which is a per-day machine-readable record of
+when an identifiable elderly person was *not* verified fine. Not exploitable — `allowBackup="false"`,
+no `INTERNET` in the release manifest, nothing in `lib/` can transmit — but unowned. No prune was
+written: the ledger is unbounded *because* corrections are unbounded, and a prune with the wrong
+bound either re-posts an old warning or strands an uncorrectable one, which is this project's worst
+failure class. Recorded as owed beside T9 in the threat model, with the two acceptable answers named,
+before Phase 8's privacy policy has to describe it.
+
+Also recorded there: **nothing leaves the device in Phase 3**, verified rather than assumed — no
+logging, no analytics, no `dart:io` or `http` in `lib/`, and **no `INTERNET` permission in the
+release manifest** — together with the fact that this expires in Phase 4, when Firebase adds it.
+
+### Two proposed fixes that were deliberately not applied
+
+**Filtering `resolveWatchedLink` on `Link.isAccepted`** would have broken an honest path. It is right
+for any future *read*, and wrong for this caller, which decides whether to open a screen: a
+notification posted before revocation can still be in the tray, and the watcher list has a revoked
+row — *"Your link with Mum has ended."* — that exists precisely to explain it. Filtering would make
+that tap do nothing at all. Revoked links resolve; the status rides on the returned object where a
+caller that needs an accepted link can see it, which is itself an argument for returning the `Link`.
+
+**Gating `SimulatedCheckInReader` on `kDebugMode`**, by analogy with the clock offset, cannot be
+done. The two are not symmetric: the clock offset has a real fallback (`Duration.zero`) and the
+reader has none — in Phase 3 the simulated reader *is* the implementation, so gating it leaves a
+release build with no reader at all rather than with a safe default. The asymmetry is documented at
+the call site instead, with the note that Phase 4 deletes the question.
+
+One claim was corrected rather than defended: the harness docstring said the release tree "is
+tree-shaken". `DebugHarnessButton` is in fact constructed in a release build and returns an empty
+box; what makes the harness unreachable is that `DebugHarnessScreen` has exactly one reference in the
+repo, inside a closure on a widget that is never returned. Nothing measures the tree-shaking, and
+`flutter test` cannot — the test VM is a debug VM.
+
+---
+
 ## Known-open, carried deliberately
 
 Nothing here is a false claim; all are honest gaps.
@@ -258,12 +322,11 @@ Nothing here is a false claim; all are honest gaps.
    2. ~~**uiux**~~ — **done at the gate.** Ten findings, all fixed. The two that mattered were a
       banned error phrase shipping on the watcher list, and an illegible button in both warnings-off
       banners that the previous round had made worse.
-   3. **security** — **next.** Has seen none of this round. New material: the payload membership check, the
-      untrusted-hint documentation on `NotificationRouter.tappedLink`, three new `LocalStore`
-      settings, and `AppServices.watches`.
-   4. **infrastructure** — has seen none of this round. New material: `onDowngrade`, the v1
-      migration fixture, `AppTheme`, and `contrastLevel` (now public, so the contrast test can assert
-      both schemes come from the seed at the declared level).
+   3. ~~**security**~~ — **done at the gate.** No exploitable finding; the secrets guard is intact
+      in both directions. Three items acted on, and two proposed fixes deliberately not applied.
+   4. **infrastructure** — **next.** Has seen none of this round. New material: `onDowngrade`, the
+      v1 migration fixture, `AppTheme`, `contrastLevel` (now public), and three new sample paths in
+      `tools/check-secrets-ignored.ps1`.
    5. **architecture** — a short pass over `bbe68d5`, which it has not seen.
 2. **Fix what they find**, committing per reviewer as before.
 3. **Then the overnight Doze run** on the build you intend to keep. It is the last unobserved Phase 3
@@ -279,13 +342,12 @@ Nothing here is a false claim; all are honest gaps.
 > `docs/phases/phase-3-review-handover.md` first — it records what the five reviewers have found so
 > far, what was fixed, and what is still owed. Then follow the reading order in `docs/README.md`.
 >
-> Head is the UI/UX re-review commit. 770 tests pass, `flutter analyze` is clean, and
-> `flutter build apk --debug` succeeds. Three of the five reviewers have run and been acted on —
-> testing and UI/UX most recently, both at the gate itself; **security, infrastructure and a short
-> architecture re-pass over the three gate commits are still owed**, and the overnight Doze device
-> test is unstarted.
+> Head is the security re-review commit. 771 tests pass, `flutter analyze` is clean, and
+> `flutter build apk --debug` succeeds. Four of the five reviewers have run and been acted on —
+> testing, UI/UX and security at the gate itself; **infrastructure and a short architecture re-pass
+> over the four gate commits are still owed**, and the overnight Doze device test is unstarted.
 >
-> Start with the **security** reviewer. Run reviewers **one at a time** — never in parallel, that has
+> Start with the **infrastructure** reviewer. Run reviewers **one at a time** — never in parallel, that has
 > twice exhausted the session limit — and after each one finishes, stop, report what it found, and
 > ask me before running the next.
 >

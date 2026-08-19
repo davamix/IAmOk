@@ -31,10 +31,23 @@ import '../platform/notification_service.dart';
 /// synthetic FCM payload — the last of which arrives in Phase 4 with FCM
 /// itself, and is listed here rather than silently dropped.
 ///
-/// Nothing here is reachable outside a debug build: [DebugHarnessButton]
-/// renders nothing unless [kDebugMode], so the tree is never built at all and
+/// Nothing here is reachable outside a debug build, and the reason is worth
+/// stating precisely, because the obvious phrasing is wrong. [DebugHarnessButton]
+/// **is** constructed and built in a release build — `tap_screen.dart` creates
+/// it unconditionally — and it returns `SizedBox.shrink()`. What makes the
+/// harness unreachable is that `DebugHarnessScreen` is referenced from exactly
+/// one place in the repo, the `onPressed` closure of a widget that is never
+/// returned: no route table, no deep link, no other construction site. So
+/// reachability is nil by construction rather than by compilation.
+///
+/// This docstring used to add "so the tree is never built at all and
 /// `DebugHarnessScreen` — with it `LocalStore.dump()` and `LocalStore.wipe()` —
-/// is tree-shaken.
+/// is tree-shaken". That is the *expected* AOT outcome of dead code behind a
+/// const-`false` branch, but nothing here measures it, and `flutter test` cannot:
+/// the test VM is a debug VM, so the false branch is unreachable from a unit
+/// test. It does not matter for security — reachability is already nil — only
+/// for APK size and for what strings a release binary contains. Corrected at the
+/// Phase 3 security gate rather than left as an unmeasured claim.
 ///
 /// Gated on `kDebugMode` rather than `!kReleaseMode`: the latter leaves the
 /// harness in **profile** builds, which additionally carry the `INTERNET`

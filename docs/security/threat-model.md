@@ -152,6 +152,37 @@ and the links naming them, which are documents the *other* party can also read.
 **Not yet designed.** Phase 8 owns the privacy policy; the deletion path needs a decision before
 Play submission. Flagged, not solved.
 
+#### On-device retention: `warnings_shown` grows without bound, and that is currently unowned
+
+Raised by the security review at the Phase 3 gate. A day leaves `warnings_shown` only by a
+correction — a check-in arriving for that exact day — or by revocation, so **a genuinely missed day
+stays in it for ever**. What accumulates on a watcher's phone is a per-day, machine-readable record
+of which days an identifiable elderly person living alone was *not* verified fine: the complement of
+the asset this document already rates High by inference, and arguably the more revealing half.
+
+**Not exploitable today.** `allowBackup="false"` and `@xml/data_extraction_rules` keep it off Drive
+and out of device-to-device transfer, the app sandbox is the boundary, and no release build can
+transmit anything (see below).
+
+**No prune is proposed here, deliberately.** The ledger is unbounded *because* corrections are
+unbounded: §10 can retract a warning for any past day, and integrity outranks storage. A prune with
+the wrong bound either re-posts an old warning or strands one that can never be corrected — this
+project's worst failure class, on the side where a false claim reaches a family. So this is recorded
+as **owed** rather than quietly decided. Before Phase 8's privacy policy has to describe it, pick
+one: a stated bound (days older than the oldest day any reconcile can still decide about), or
+"retained indefinitely, and here is why".
+
+#### Nothing leaves the device in Phase 3 — and that expires in Phase 4
+
+Verified at the gate rather than assumed: no `print`/`debugPrint`/`dart:developer`, no analytics or
+crash reporter, no `dart:io`, `http` or socket anywhere in `lib/` — and the **release manifest
+declares no `INTERNET` permission**, which exists only in the debug and profile manifests. A release
+build physically cannot transmit.
+
+That last line is load-bearing and Phase 4 removes it: adding Firebase adds `INTERNET`. From then on
+"nothing leaves the device" has to be re-derived from the code rather than inherited from this
+review.
+
 ---
 
 ## Deliberately accepted
@@ -168,5 +199,7 @@ Play submission. Flagged, not solved.
 
 - **T3 residual** — rate limiting on `redeemInvite`. Phase 5.
 - **T9** — the account-deletion path and what happens to links and history. Before Phase 8.
+- **T9, on-device** — the retention bound for `warnings_shown`, which currently keeps every missed
+  day for ever. Recorded above; owed before Phase 8's privacy policy describes it.
 - **App Check enforcement** — turning it from monitoring to enforcing, and how to verify real
   traffic is attested first. Phase 4 provisions it; enabling enforcement is a later, separate step.

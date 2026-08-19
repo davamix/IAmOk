@@ -52,6 +52,15 @@ $mustBeIgnored = @(
     # Service accounts and OAuth downloads
     'i-am-ok-c74ca-firebase-adminsdk-ab12c-3d4e5f6789.json'
     'functions/service-account.json'
+    # These two look redundant with the line above and are not. Checked with
+    # `git check-ignore -v --no-index`, which names the matching rule:
+    # `functions/service-account.json` is caught by `**/service-account*.json`,
+    # so the two camelCase/suffix spellings beside it had no assertion at all
+    # and could have been deleted with this script still printing OK. The
+    # policy's own rule is that a guard nobody asserts is a guard nobody
+    # notices losing.
+    'serviceAccount.json'
+    'my-service-account.json'
     'client_secret_744276314021-abc.apps.googleusercontent.com.json'
     'credentials.json'
     # Functions runtime config — where `functions:config:get` output lands
@@ -60,6 +69,9 @@ $mustBeIgnored = @(
     # Emulator exports can contain real check-in history
     'firebase-export-1755000000000/firestore_export/x'
     'emulator-data/firestore_export/x'
+    # The Firebase CLI's own local state. Unasserted until the Phase 3 gate, and
+    # it is the one that starts holding content the moment Phase 4 runs the CLI.
+    '.firebase/hosting.cache'
     # Environment
     '.env'
     '.env.local'

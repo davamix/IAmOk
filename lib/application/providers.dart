@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../data/check_in_reader.dart';
 import '../data/local_store.dart';
+import '../domain/domain.dart';
 import '../platform/alarm_scheduler.dart';
 import '../platform/clock.dart';
 import '../platform/clock_service.dart';
@@ -56,7 +57,7 @@ class AppServices {
         notifications.canScheduleExact,
       );
 
-  /// Whether [linkId] is one this user actually watches.
+  /// The link [linkId] names, if this user watches it — otherwise null.
   ///
   /// **On `AppServices` rather than reached for directly from a widget.** §5's
   /// arrows are Presentation → Application → Domain, with Data driven by
@@ -64,11 +65,46 @@ class AppServices {
   /// which inverts that for one lookup.
   ///
   /// It exists because a notification payload is an **untrusted hint** — see
-  /// `NotificationRouter.tappedLink`. Nothing may open a screen on the strength
-  /// of a string that arrived from outside, and this is the resolution step that
-  /// must be in place before Phase 5 keys Firestore reads on link ids.
-  Future<bool> watches(String linkId) async =>
-      (await store.linksWatchedBy(selfUid)).any((link) => link.id == linkId);
+  /// `NotificationRouter.tappedLink`. The concrete attack is not hypothetical:
+  /// `MainActivity` is exported, as every LAUNCHER activity must be, so a
+  /// co-installed app can start it with an intent carrying a payload extra, and
+  /// `getNotificationAppLaunchDetails()` hands that string straight back. Before
+  /// this existed, any non-null value pushed a screen.
+  ///
+  /// ## It returns the `Link`, not a bool, and that is the whole point
+  ///
+  /// A bool answers *"is this string one of mine"* and then leaves the caller
+  /// holding the string — which invites exactly the Phase 4 shape this is meant
+  /// to prevent: `if (await watches(id)) read('links/$id')`, membership proven
+  /// against a local cache and the raw payload dereferenced anyway. Handing back
+  /// the resolved object means the string can be dropped at the boundary.
+  ///
+  /// ## What it is not
+  ///
+  /// **It is a UX affordance, not an authorisation control, and it can never
+  /// become one.** `LocalStore` is a decision cache — the threat model's trust
+  /// boundary 4 says it is never an authorisation record — so this proves only
+  /// that *this device once wrote a row saying so*. From Phase 4 the thing
+  /// standing between a crafted payload and a stranger's data is the security
+  /// rule on `links/{id}` and `checkins/{uid}/days/{date}`. Resolve here, and
+  /// let the rules deny; never let this stand in for them.
+  ///
+  /// ## Revoked links resolve, deliberately
+  ///
+  /// The security review proposed filtering on `Link.isAccepted`. That is right
+  /// for any future *read* path and wrong for this one, which decides whether to
+  /// open a screen. A notification posted before revocation can still be sitting
+  /// in the tray, and the watcher list has a revoked row — *"Your link with Mum
+  /// has ended."* — that exists precisely to explain it. Filtering here would
+  /// make that tap do nothing at all: no screen, no explanation, on the one
+  /// surface that could give one. A caller that needs an *accepted* link must
+  /// check `isAccepted` on the value returned, where the distinction is visible.
+  Future<Link?> resolveWatchedLink(String linkId) async {
+    for (final link in await store.linksWatchedBy(selfUid)) {
+      if (link.id == linkId) return link;
+    }
+    return null;
+  }
 
   /// The watcher's reconcile.
   ///
@@ -93,6 +129,25 @@ class AppServices {
       WatcherReconcileService(
         store: store,
         clock: clock,
+        // **Not gated on `kDebugMode`, unlike the clock offset — and the
+        // difference is worth stating, because the security review reasonably
+        // asked why.**
+        //
+        // `main.dart` gates `debug_clock_offset_ms` so that "zero in every
+        // release build" is enforced by the reading code rather than resting on
+        // the writer being compiled out — a restore or a rooted device could
+        // otherwise put a row there. That argument applies just as well to
+        // `debug_simulated_backend`, which decides whether a family is warned.
+        //
+        // It cannot be applied, because the two are not symmetric: the clock
+        // offset has a real fallback (`Duration.zero`) and this has none. In
+        // Phase 3 the simulated reader **is** the implementation — there is no
+        // Firebase dependency to fall back to — so gating it would leave a
+        // release build with no reader at all rather than with a safe default.
+        //
+        // Phase 4 replaces this line with the real Firestore reader and the
+        // question disappears. If for any reason it does not, gate it then,
+        // when there is something to fall back to.
         reader: SimulatedCheckInReader(store),
         notifications: notifications,
         alarms: warningAlarms,

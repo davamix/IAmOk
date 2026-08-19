@@ -313,7 +313,14 @@ class _IAmOkAppState extends ConsumerState<IAmOkApp>
   Future<void> _openIfWatched(String linkId, NavigatorState navigator) async {
     // Through `AppServices`, not `store` — §5's arrows are Presentation →
     // Application → Data, and this is a widget.
-    if (!await ref.read(appServicesProvider).watches(linkId)) {
+    //
+    // The resolved `Link` rather than a bool, so the untrusted payload string
+    // stops here: from this line on the app holds an object it looked up
+    // itself. Nothing downstream needs the id yet — the list matches on its own
+    // state — but the shape is what stops Phase 4 keying a Firestore read on
+    // the string. See [AppServices.resolveWatchedLink].
+    final link = await ref.read(appServicesProvider).resolveWatchedLink(linkId);
+    if (link == null) {
       // Not this user's business. Consumed so a rebuild does not retry it —
       // and deliberately NOT navigated anywhere, because there is nothing to
       // show and no screen that could explain it honestly.

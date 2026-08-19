@@ -55,11 +55,19 @@ class NotificationRouter {
   /// `main.dart` refuses to open the list for an unknown one. Both of those are
   /// load-bearing rather than defensive tidiness.
   ///
-  /// The rule for Phase 5 onward, when pairing makes link ids meaningful and
-  /// Firestore reads are keyed on them: **resolve it against the user's own
-  /// links first, and use the resolved `Link`.** Passing this string into a
-  /// query, a document path, or a security-rule-bearing call would let a
-  /// crafted notification name a link its reader has no right to.
+  /// The rule for Phase 4 onward, when Firestore reads are keyed on link ids:
+  /// **resolve it against the user's own links first, and use the resolved
+  /// `Link`** — `AppServices.resolveWatchedLink` returns the object rather than
+  /// a bool for exactly this reason, so the string can be dropped at the
+  /// boundary. Passing it into a query, a document path, or a
+  /// security-rule-bearing call would let a crafted notification name a link its
+  /// reader has no right to.
+  ///
+  /// **And resolving is not authorising.** The lookup reads `LocalStore`, which
+  /// the threat model calls a decision cache and never an authorisation record,
+  /// so it proves only that this device once wrote a row saying so. The security
+  /// rules are what actually deny; resolution keeps the untrusted string out of
+  /// the path, and buys nothing else.
   final ValueNotifier<String?> tappedLink = ValueNotifier<String?>(null);
 
   /// Called by `flutter_local_notifications` when the app is already running.

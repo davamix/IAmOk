@@ -41,8 +41,10 @@ import 'support/zones.dart';
 /// * **`WatcherScreen.isShowing`**, which chooses between the shell's reconcile
 ///   and the list's own. The two disagree about `NotificationDelivery`, and one
 ///   of those answers consumes a day while showing nobody anything.
-/// * **`AppServices.watches`**, which is what stops an untrusted notification
-///   payload opening a screen.
+/// * **`AppServices.resolveWatchedLink`**, which is what stops an untrusted
+///   notification payload opening a screen — and which returns the resolved
+///   `Link` rather than a bool, so the payload string stops at that boundary
+///   instead of being carried onward into a Phase 4 document path.
 ///
 /// ## What remains genuinely device-only, and where it is recorded
 ///
@@ -123,25 +125,64 @@ void main() {
       ));
 
   group('a notification payload is resolved, never trusted', () {
-    test('a link this user watches resolves', () async {
+    test('a link this user watches resolves to the link itself', () async {
+      // **The `Link`, not a bool.** A bool leaves the caller holding the
+      // untrusted string, which invites the Phase 4 shape this exists to
+      // prevent: membership proven against a local cache, then the raw payload
+      // dereferenced into a document path anyway.
       await seedLink('mum', 'Mum');
-      expect(await services.watches('mum_ana'), isTrue);
+
+      final link = await services.resolveWatchedLink('mum_ana');
+      expect(link, isNotNull);
+      expect(link!.id, 'mum_ana');
+      expect(link.watchedName, 'Mum');
     });
 
     test('a link belonging to someone else does not', () async {
       // The whole point. `tappedLink` is whatever string arrived on a
       // notification, and the app pushed a screen for any non-null value.
+      // `MainActivity` is exported, as every LAUNCHER activity must be, so a
+      // co-installed app can hand this string in through a crafted intent.
       await seedLink('mum', 'Mum');
-      expect(await services.watches('mum_bob'), isFalse);
+      expect(await services.resolveWatchedLink('mum_bob'), isNull);
     });
 
     test('a link that does not exist does not', () async {
       await seedLink('mum', 'Mum');
-      expect(await services.watches('stranger_ana'), isFalse);
+      expect(await services.resolveWatchedLink('stranger_ana'), isNull);
     });
 
     test('nothing resolves when this user watches nobody', () async {
-      expect(await services.watches('mum_ana'), isFalse);
+      expect(await services.resolveWatchedLink('mum_ana'), isNull);
+    });
+
+    test('a REVOKED link still resolves — the row is the explanation',
+        () async {
+      // The security review proposed filtering on `isAccepted` here. That is
+      // right for a future read path and wrong for this one, which decides
+      // whether to open a screen: a notification posted before revocation can
+      // still be in the tray, and the watcher list has a revoked row that
+      // exists precisely to explain it. Filtering would make that tap do
+      // nothing — no screen, no explanation, on the one surface that has one.
+      //
+      // The status is on the returned value, so a caller that needs an accepted
+      // link can see it. That is the argument for returning the Link.
+      await store.upsertLink(Link(
+        watchedUid: 'mum',
+        watcherUid: 'ana',
+        status: LinkStatus.revoked,
+        watchedName: 'Mum',
+        watcherName: 'Ana',
+        watchedTimezone: 'Europe/Madrid',
+        activeFrom: day('2026-08-01'),
+        warningLocalTime: const LocalTimeOfDay(10, 0),
+        createdAt: DateTime.utc(2026, 8, 1),
+      ));
+
+      final link = await services.resolveWatchedLink('mum_ana');
+      expect(link, isNotNull);
+      expect(link!.isAccepted, isFalse,
+          reason: 'resolved, and the caller can see it is not accepted');
     });
   });
 

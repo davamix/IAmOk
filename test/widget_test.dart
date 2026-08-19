@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:i_am_ok/application/watched_reconcile_service.dart';
 import 'package:i_am_ok/copy/tap_copy.dart';
 import 'package:i_am_ok/domain/domain.dart';
+import 'package:i_am_ok/presentation/app_theme.dart';
 import 'package:i_am_ok/presentation/tap_screen.dart';
 
 /// The Tap screen's states.
@@ -54,6 +55,7 @@ void main() {
     await tester.pumpWidget(
       ProviderScope(
         child: MaterialApp(
+          theme: AppTheme.light,
           // `copyWith` on the inherited data, never a fresh `MediaQueryData`:
           // constructing one wholesale zeroes `size`, which silently collapses
           // the tap target to a diameter of 0 and makes every layout assertion

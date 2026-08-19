@@ -95,6 +95,12 @@ abstract final class NotificationCopy {
     /// than a week is dated rather than left as a bare weekday the reader will
     /// take for this week — see [_moment].
     required DayKey today,
+
+    /// Whether this device shows 24-hour times. Cached to `LocalStore` by the
+    /// UI, because reading `MediaQuery.alwaysUse24HourFormat` needs a
+    /// `BuildContext` and the isolate that posts most of these has no widget
+    /// tree — the same shape as the device timezone (ADR-0002).
+    required bool uses24Hour,
   }) =>
       switch (outcome) {
         WarningOutcome.silent => throw ArgumentError(
@@ -103,10 +109,10 @@ abstract final class NotificationCopy {
           ),
         WarningOutcome.warnOnline => 'No check-in from $watchedName yesterday.',
         WarningOutcome.warnOffline => 'No check-in received from $watchedName '
-            'yesterday — ${_offlineClause(unverifiedSince, watcherZone, today)}',
+            'yesterday — ${_offlineClause(unverifiedSince, watcherZone, today, uses24Hour)}',
         WarningOutcome.warnUnverifiableAway =>
           'Can\'t check on $watchedName — '
-              '${_offlineClause(unverifiedSince, watcherZone, today)} '
+              '${_offlineClause(unverifiedSince, watcherZone, today, uses24Hour)} '
               '${_awayClause(watchedName, away)}',
         WarningOutcome.warnAccessLost => _accessLostBody(
             watchedName: watchedName,
@@ -127,10 +133,11 @@ abstract final class NotificationCopy {
     DateTime? since,
     tz.Location zone,
     DayKey today,
+    bool uses24Hour,
   ) =>
       since == null
           ? 'your phone has not been able to check even once.'
-          : 'your phone has been offline since ${_moment(since, zone, today)}.';
+          : 'your phone has been offline since ${_moment(since, zone, today, uses24Hour)}.';
 
   /// *"Mum was marked away until Saturday 22 August."*
   ///
@@ -215,6 +222,12 @@ abstract final class NotificationCopy {
     required String watchedName,
     required DayKey day,
     required DayKey today,
+
+    /// Whether this device shows 24-hour times. Cached to `LocalStore` by the
+    /// UI, because reading `MediaQuery.alwaysUse24HourFormat` needs a
+    /// `BuildContext` and the isolate that posts most of these has no widget
+    /// tree — the same shape as the device timezone (ADR-0002).
+    required bool uses24Hour,
     required DateTime? tappedAt,
     required tz.Location watcherZone,
   }) {
@@ -224,7 +237,7 @@ abstract final class NotificationCopy {
     return tappedAt == null
         ? 'Correction: $watchedName did check in $when.'
         : 'Correction: $watchedName did check in $when, '
-            'at ${_time(tappedAt, watcherZone)}.';
+            'at ${_time(tappedAt, watcherZone, uses24Hour)}.';
   }
 
   /// *"Tuesday 10:14"*, for a surface outside this file.
@@ -232,8 +245,13 @@ abstract final class NotificationCopy {
   /// Shared with the watcher list for the same reason [dayLabel] is: two
   /// formatters is two things to keep true, and the reader compares the row and
   /// the notification about the same moment directly.
-  static String momentLabel(DateTime instant, tz.Location zone, DayKey today) =>
-      _moment(instant, zone, today);
+  static String momentLabel(
+    DateTime instant,
+    tz.Location zone,
+    DayKey today,
+    bool uses24Hour,
+  ) =>
+      _moment(instant, zone, today, uses24Hour);
 
   /// *"Saturday 22 August"*, for a surface outside this file.
   ///
@@ -278,7 +296,12 @@ abstract final class NotificationCopy {
   /// misleading when the 10:14 in question was nine days ago — it reads as this
   /// morning, which understates the problem in exactly the direction this app
   /// must not.
-  static String _moment(DateTime instant, tz.Location zone, DayKey today) {
+  static String _moment(
+    DateTime instant,
+    tz.Location zone,
+    DayKey today,
+    bool uses24Hour,
+  ) {
     final local = tz.TZDateTime.from(instant, zone);
     const weekdays = [
       'Monday',
@@ -305,9 +328,16 @@ abstract final class NotificationCopy {
     if (days > 6) {
       // `_date` already carries the weekday — "Saturday 15 August, 10:14".
       return '${_date(DayKey.fromInstant(instant, zone))}, '
-          '${_time(instant, zone)}';
+          '${_time(instant, zone, uses24Hour)}';
     }
-    return '$weekday ${_time(instant, zone)}';
+    // **Today is just the time**, which is what this function's own docstring
+    // and `screens.md` have always said and what the code did not do. Naming
+    // the weekday for something four hours ago — *"Tuesday 10:14"* at 14:00 on
+    // Tuesday — reads as a different day, and pushes the reader to work out
+    // that it is in fact this morning. The weekday earns its place only once
+    // there is another day it could be.
+    if (days == 0) return _time(instant, zone, uses24Hour);
+    return '$weekday ${_time(instant, zone, uses24Hour)}';
   }
 
   /// *"23:40"*, in the reader's own zone.
@@ -318,10 +348,15 @@ abstract final class NotificationCopy {
   /// `BuildContext`, which a notification posted from a bare isolate does not
   /// have. Recorded as a deviation in the Phase 3 summary rather than silently
   /// resolved the easy way.
-  static String _time(DateTime instant, tz.Location zone) {
+  static String _time(DateTime instant, tz.Location zone, bool uses24Hour) {
     final local = tz.TZDateTime.from(instant, zone);
-    final h = local.hour.toString().padLeft(2, '0');
     final m = local.minute.toString().padLeft(2, '0');
-    return '$h:$m';
+    if (uses24Hour) {
+      return '${local.hour.toString().padLeft(2, '0')}:$m';
+    }
+    // 12-hour, in the shape a reader of this locale expects: no leading zero on
+    // the hour, lowercase suffix, midnight and noon as 12 rather than 0.
+    final hour12 = local.hour % 12 == 0 ? 12 : local.hour % 12;
+    return '$hour12:$m ${local.hour < 12 ? 'am' : 'pm'}';
   }
 }

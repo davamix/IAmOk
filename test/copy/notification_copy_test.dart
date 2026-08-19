@@ -33,6 +33,7 @@ void main() {
     // Null means five days after `since` — inside the week, so the existing
     // assertions keep exercising the weekday form.
     DayKey? today,
+    bool uses24Hour = true,
   }) =>
       NotificationCopy.warningBody(
         outcome: outcome,
@@ -42,6 +43,7 @@ void main() {
         unverifiedSince: unverifiedSince,
         lastConfirmedDay: lastConfirmedDay,
         watcherZone: madrid,
+        uses24Hour: uses24Hour,
         today: today ?? day('2026-08-16'),
       );
 
@@ -157,6 +159,7 @@ void main() {
           today: day('2026-08-17'),
           tappedAt: since,
           watcherZone: madrid,
+          uses24Hour: true,
         ),
       ];
 
@@ -250,6 +253,7 @@ void main() {
           today: day('2026-08-17'),
           tappedAt: null,
           watcherZone: madrid,
+          uses24Hour: true,
         ),
         'Correction: Mum did check in yesterday.',
       );
@@ -274,6 +278,7 @@ void main() {
           today: day('2026-08-17'),
           tappedAt: null,
           watcherZone: madrid,
+          uses24Hour: true,
         ),
         'Correction: Mum did check in on Saturday 15 August.',
       );
@@ -286,6 +291,7 @@ void main() {
         today: day('2026-08-17'),
         tappedAt: null,
         watcherZone: madrid,
+        uses24Hour: true,
       );
       final yesterday = NotificationCopy.correctionBody(
         watchedName: 'Mum',
@@ -293,8 +299,41 @@ void main() {
         today: day('2026-08-17'),
         tappedAt: null,
         watcherZone: madrid,
+        uses24Hour: true,
       );
       expect(saturday, isNot(yesterday));
+    });
+
+    test('a 12-hour device gets 12-hour times', () {
+      // `guidelines.md` asks for the device's own setting rather than a
+      // hard-coded one. The approved strings are 24-hour because the owner's
+      // locale is, and that was rendered unconditionally — wrong for the first
+      // user whose phone is set the other way, and recorded as a deviation
+      // twice before this closed it.
+      expect(
+        body(WarningOutcome.warnOffline,
+            unverifiedSince: at(madrid, 2026, 8, 16, 22, 10), uses24Hour: false),
+        contains('offline since 10:10 pm.'),
+      );
+      expect(
+        body(WarningOutcome.warnOffline,
+            unverifiedSince: at(madrid, 2026, 8, 16, 22, 10)),
+        contains('offline since 22:10.'),
+      );
+    });
+
+    test('midnight and noon are 12, not 0', () {
+      // The arithmetic every 12-hour clock gets wrong once.
+      expect(
+        body(WarningOutcome.warnOffline,
+            unverifiedSince: at(madrid, 2026, 8, 16, 0, 5), uses24Hour: false),
+        contains('12:05 am'),
+      );
+      expect(
+        body(WarningOutcome.warnOffline,
+            unverifiedSince: at(madrid, 2026, 8, 16, 12, 5), uses24Hour: false),
+        contains('12:05 pm'),
+      );
     });
 
     test('STAGED FOR PHASE 4 — with a real tap time, it says so', () {
@@ -316,6 +355,7 @@ void main() {
           today: day('2026-08-17'),
           tappedAt: at(madrid, 2026, 8, 16, 23, 40),
           watcherZone: madrid,
+          uses24Hour: true,
         ),
         'Correction: Mum did check in yesterday, at 23:40.',
       );

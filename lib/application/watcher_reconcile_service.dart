@@ -244,6 +244,9 @@ class WatcherReconcileService {
   Future<WatcherState> reconcile({required String selfUid}) async {
     final now = clock.now();
     final watcherZone = await _watcherZone();
+    // The device's 12h/24h preference, off disk for the same reason the zone is
+    // (ADR-0002): this runs in an isolate with no `MediaQuery` to ask.
+    final uses24Hour = await store.uses24HourClock();
     final links = await store.linksWatchedBy(selfUid);
     final canDeliver = await delivery();
 
@@ -287,6 +290,7 @@ class WatcherReconcileService {
             now: now,
             watcherZone: watcherZone,
             delivery: canDeliver,
+            uses24Hour: uses24Hour,
             mayChangeAlarms: holdsLock,
           );
           people.add(state);
@@ -324,6 +328,7 @@ class WatcherReconcileService {
     required tz.Location watcherZone,
     required WatcherDelivery delivery,
     required bool mayChangeAlarms,
+    required bool uses24Hour,
   }) async {
     // 1. Tier 1 first. A failed read is a value, never a throw — the difference
     //    between "could not reach" and "was refused" is the whole of ADR-0004,
@@ -376,6 +381,7 @@ class WatcherReconcileService {
           // [NotificationCopy.correctionBody].
           day: correction.day,
           today: DayKey.fromInstant(now, watcherZone),
+          uses24Hour: uses24Hour,
           // **Null, deliberately.** The approved string ends *"at 23:40"*, and
           // that is a claim about the moment SHE tapped. Phase 3's fake backend
           // carries no per-check-in timestamp, so the only instant available
@@ -419,6 +425,7 @@ class WatcherReconcileService {
         unverifiedSince: result.decision.unverifiedSince,
         lastConfirmedDay: result.decision.lastConfirmedDay,
         today: DayKey.fromInstant(now, watcherZone),
+        uses24Hour: uses24Hour,
         watcherZone: watcherZone,
       );
       if (result.decision.outcome == WarningOutcome.warnAccessLost) {

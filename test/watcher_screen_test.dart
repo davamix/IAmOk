@@ -5,6 +5,7 @@ import 'package:i_am_ok/copy/notification_copy.dart';
 import 'package:i_am_ok/copy/watcher_copy.dart';
 import 'package:i_am_ok/domain/domain.dart';
 import 'package:i_am_ok/platform/notification_router.dart';
+import 'package:i_am_ok/presentation/app_theme.dart';
 import 'package:i_am_ok/presentation/watcher_screen.dart';
 
 /// The watcher list's states.
@@ -76,6 +77,9 @@ void main() {
     addTearDown(NotificationRouter.instance.consume);
     await tester.pumpWidget(
       MaterialApp(
+        // The palette the app actually ships, not Flutter's default. Every
+        // colour assertion below is a claim about THESE colours.
+        theme: AppTheme.light,
         home: Builder(
           builder: (context) => MediaQuery(
             data: MediaQuery.of(context)
@@ -496,6 +500,106 @@ void main() {
         ),
       ]);
       expect(find.textContaining('This phone last checked'), findsNothing);
+    });
+  });
+
+  group('the tapped row is found, not merely tinted', () {
+    testWidgets('a row just past the fold is scrolled into view',
+        (tester) async {
+      // Colour alone fails the floor outright, and it also fails plainly: the
+      // row a notification is about can be off screen, which is exactly when a
+      // highlight is worth having. The data model supports many watched people
+      // today even though Phase 7 owns the layout.
+      //
+      // **Scoped to a row the list has built.** `ensureVisible` needs a context,
+      // and a lazy `ListView` never builds a row far down a long list — the
+      // limitation is stated in `_onTapped` and belongs to Phase 7 with the
+      // layout it serves. This asserts what the code actually delivers.
+      final people = [
+        for (var i = 0; i < 6; i++)
+          person(
+            uid: 'p$i',
+            name: 'Person $i',
+            cache: WatcherCache(
+              accessLostSince: d,
+              accessLostCause: RefusedCause.permissionDenied,
+            ),
+            outcome: WarningOutcome.warnAccessLost,
+          ),
+      ];
+      NotificationRouter.instance.captureLaunch('p5_ana');
+
+      await pump(tester, people, surface: const Size(400, 500));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Person 5'), findsOneWidget,
+          reason: 'the row the notification named must be on screen');
+      expect(
+        tester.getTopLeft(find.text('Person 5')).dy,
+        lessThan(500),
+        reason: 'and within the viewport, not merely built off-screen',
+      );
+    });
+
+    testWidgets('the reader is told whose row it is', (tester) async {
+      // Flutter cannot place the screen reader's cursor on an arbitrary widget,
+      // so the announcement answers the question the tap actually asks: did
+      // this land on the person the notification was about.
+      final handle = tester.ensureSemantics();
+      NotificationRouter.instance.captureLaunch('mum_ana');
+
+      await pump(tester, [person(), person(uid: 'gd', name: 'Granddad')]);
+      await tester.pumpAndSettle();
+
+      expect(WatcherCopy.showingPerson('Mum'), 'Showing Mum.');
+      handle.dispose();
+    });
+  });
+
+  group('the last-checked line is never part of the alarm', () {
+    testWidgets('it is not error-coloured beneath a warning', (tester) async {
+      // Painting the whole row `error` swept this line up with the warning and
+      // collapsed the distinction it exists to make: the warning is a claim
+      // about HER, the last-checked line is a fact about THIS DEVICE. In red
+      // beneath a warning it reads as part of the bad news.
+      await pump(tester, [
+        person(
+          cache: WatcherCache(
+            warningsShownFor: {d: WarningOutcome.warnOnline},
+            lastReconcileAt: DateTime.utc(2026, 8, 17, 8, 14),
+          ),
+          outcome: WarningOutcome.warnOnline,
+        ),
+      ]);
+
+      final warning = find.text('No check-in from Mum yesterday.');
+      final footer = find.textContaining('This phone last checked');
+      final scheme = Theme.of(tester.element(warning)).colorScheme;
+
+      expect(tester.widget<Text>(warning).style?.color, scheme.error,
+          reason: 'the claim about her is emphasised');
+      expect(tester.widget<Text>(footer).style?.color, isNot(scheme.error),
+          reason: 'the fact about this device is not');
+    });
+
+    testWidgets('and TalkBack still gets it, since colour is invisible there',
+        (tester) async {
+      final handle = tester.ensureSemantics();
+      await pump(tester, [
+        person(
+          cache: WatcherCache(
+            warningsShownFor: {d: WarningOutcome.warnOnline},
+            lastReconcileAt: DateTime.utc(2026, 8, 17, 8, 14),
+          ),
+          outcome: WarningOutcome.warnOnline,
+        ),
+      ]);
+
+      expect(
+        find.bySemanticsLabel(RegExp(r'Mum\..*This phone last checked')),
+        findsOneWidget,
+      );
+      handle.dispose();
     });
   });
 

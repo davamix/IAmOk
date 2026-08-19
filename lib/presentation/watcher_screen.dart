@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:timezone/timezone.dart' as tz;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -121,20 +122,40 @@ class _Failed extends StatelessWidget {
 }
 
 class _Empty extends StatelessWidget {
-  const _Empty();
+  const _Empty({this.onRefresh});
+
+  final Future<void> Function()? onRefresh;
 
   @override
-  Widget build(BuildContext context) => Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Text(
-            WatcherCopy.nobody,
-            textAlign: TextAlign.center,
-            // Ordinary secondary text, never a warning colour. Styling an empty
-            // state as an alarm makes it a status message about other people's
-            // behaviour, which is the thing this app deliberately does not do.
-            style: Theme.of(context).textTheme.bodyLarge,
-          ),
+  Widget build(BuildContext context) => RefreshIndicator(
+        // **Pull-to-refresh works here too.** The empty state returned early,
+        // before the `RefreshIndicator` existed, so the one screen where a
+        // reader most wants to try again — "I was just added, is it working
+        // yet?" — was the one screen that could not. Backgrounding and
+        // resuming reconciles, but nobody guesses that.
+        onRefresh: () async => onRefresh?.call(),
+        child: ListView(
+          // Always scrollable, so the gesture is available with no content.
+          physics: const AlwaysScrollableScrollPhysics(),
+          children: [
+            SizedBox(
+              height: MediaQuery.sizeOf(context).height * 0.6,
+              child: Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Text(
+                    WatcherCopy.nobody,
+                    textAlign: TextAlign.center,
+                    // Ordinary secondary text, never a warning colour. Styling
+                    // an empty state as an alarm makes it a status message
+                    // about other people's behaviour, which is the thing this
+                    // app deliberately does not do.
+                    style: Theme.of(context).textTheme.bodyLarge,
+                  ),
+                ),
+              ),
+            ),
+          ],
         ),
       );
 }
@@ -187,6 +208,28 @@ class _WatcherBodyState extends State<WatcherBody> {
     super.dispose();
   }
 
+  /// Reached by a tap on a notification, so the row it names has to be
+  /// **found**, not merely tinted.
+  ///
+  /// The first version set a background colour and stopped. Three things were
+  /// wrong with that, and all three fail the reader who most needs this to work:
+  ///
+  /// * **Colour was the only signal**, which the accessibility floor forbids
+  ///   outright. A watcher with any colour-vision difference tapped a
+  ///   notification about Mum and arrived at an undifferentiated list.
+  /// * **No scrolling.** Phase 7's multi-person layout is undesigned, but the
+  ///   data model already supports it — and the row a notification is about can
+  ///   be below the fold, which is exactly when a highlight is worth having.
+  ///
+  ///   `ensureVisible` reaches a row the `ListView` has **built**, which covers
+  ///   the fold and a little past it. A row far down a long list is never built,
+  ///   so its key has no context and nothing scrolls — stated here rather than
+  ///   left to be discovered, because the code reads as though it handles any
+  ///   distance. Reaching an arbitrary index needs fixed extents or a positioned
+  ///   list, and that is a decision for Phase 7 along with the layout it serves.
+  /// * **No semantic focus.** TalkBack read from the top of the list. The
+  ///   notification's promise is *"open the app to see what to do"*, and a
+  ///   screen-reader user got a list and no indication which row was meant.
   void _onTapped() {
     final linkId = NotificationRouter.instance.tappedLink.value;
     if (linkId == null || !mounted) return;
@@ -194,13 +237,36 @@ class _WatcherBodyState extends State<WatcherBody> {
     if (index < 0) return;
     NotificationRouter.instance.consume();
     setState(() => _highlighted = linkId);
+
+    final name = widget.state.people[index].name;
+
+    // After the frame that builds the highlighted row, so its context exists.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final context = _highlightedRow.currentContext;
+      if (context == null) return;
+      Scrollable.ensureVisible(context, alignment: 0.1);
+      // **An announcement, not a focus move.** Flutter has no supported way to
+      // place the screen reader's cursor on an arbitrary widget, so rather than
+      // pretend otherwise this says whose row was opened. The reader hears the
+      // answer to "did this land on Mum" immediately, and the row is now on
+      // screen for the next swipe to read in full.
+      SemanticsService.sendAnnouncement(
+        View.of(context),
+        WatcherCopy.showingPerson(name),
+        Directionality.of(context),
+      );
+    });
   }
 
   String? _highlighted;
 
+  /// Points at the highlighted row so it can be scrolled to and focused.
+  final _highlightedRow = GlobalKey();
+
   @override
   Widget build(BuildContext context) {
-    if (widget.state.isEmpty) return const _Empty();
+    if (widget.state.isEmpty) return _Empty(onRefresh: widget.onRefresh);
     return Column(
       children: [
         // Above the list, because when it is showing it is the most important
@@ -217,16 +283,32 @@ class _WatcherBodyState extends State<WatcherBody> {
             child: ListView.separated(
               // Always scrollable, so pull-to-refresh works with one short row.
               physics: const AlwaysScrollableScrollPhysics(),
+              // **Builds well past the fold, so a tapped notification can
+              // actually reach its row.** `Scrollable.ensureVisible` needs the
+              // target to exist, and the default cache extent leaves a row a
+              // couple of positions down unbuilt — so the highlight silently
+              // did nothing in precisely the case it was added for.
+              //
+              // The cost is laying out a few extra short rows; this list is one
+              // family, not a feed. Phase 7 owns the multi-person layout and
+              // should replace this with fixed extents or a positioned list if
+              // the number ever justifies it.
+              scrollCacheExtent: const ScrollCacheExtent.pixels(1200),
               padding: const EdgeInsets.symmetric(vertical: 8),
               itemCount: widget.state.people.length,
               separatorBuilder: (_, _) => const Divider(height: 1),
               itemBuilder: (context, i) {
                 final person = widget.state.people[i];
+                final highlighted = person.link.id == _highlighted;
                 return _PersonRow(
+                  // Only the highlighted row carries the key — a GlobalKey must
+                  // be unique in the tree, and it is what `ensureVisible` and
+                  // the announcement both resolve through.
+                  key: highlighted ? _highlightedRow : null,
                   person: person,
                   watcherZone: widget.state.watcherZone,
                   today: widget.state.today,
-                  highlighted: person.link.id == _highlighted,
+                  highlighted: highlighted,
                 );
               },
             ),
@@ -287,6 +369,7 @@ class _WarningsOffBanner extends StatelessWidget {
 
 class _PersonRow extends StatelessWidget {
   const _PersonRow({
+    super.key,
     required this.person,
     required this.watcherZone,
     required this.today,
@@ -312,7 +395,8 @@ class _PersonRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final status = _status(context);
+    final uses24Hour = MediaQuery.of(context).alwaysUse24HourFormat;
+    final status = _status(uses24Hour);
 
     return Container(
       color: highlighted ? theme.colorScheme.surfaceContainerHighest : null,
@@ -325,19 +409,37 @@ class _PersonRow extends StatelessWidget {
             children: [
               Text(person.name, style: theme.textTheme.titleLarge),
               const SizedBox(height: 4),
+              // The claim itself. Colour is never the only signal — every
+              // status carries its own words — so this only reinforces them.
               ...status.lines.map(
                 (line) => Padding(
                   padding: const EdgeInsets.only(top: 2),
                   child: Text(
                     line,
                     style: theme.textTheme.bodyMedium?.copyWith(
-                      // Colour is never the only signal — every status carries
-                      // its own words. This only reinforces what the text says.
                       color: status.isBad ? theme.colorScheme.error : null,
                     ),
                   ),
                 ),
               ),
+              // **Never coloured, on any row.**
+              //
+              // Painting the whole row `error` swept this line up with the
+              // warning and collapsed the very distinction it was added to
+              // make: *"No check-in from Mum yesterday"* is a claim about
+              // **her**, and *"This phone last checked Tuesday 10:14"* is a
+              // fact about **this device's own effort**. In red beneath a
+              // warning it reads as part of the alarm — as though the last
+              // check were itself the bad news — and a reader at 3am has no way
+              // to separate them.
+              if (status.footer != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 2),
+                  child: Text(
+                    status.footer!,
+                    style: theme.textTheme.bodyMedium,
+                  ),
+                ),
             ],
           ),
         ),
@@ -345,7 +447,11 @@ class _PersonRow extends StatelessWidget {
     );
   }
 
-  _RowStatus _status(BuildContext context) {
+  /// [uses24Hour] comes from `MediaQuery` here rather than from `LocalStore`:
+  /// this side HAS a `BuildContext`, so it can read the live setting instead of
+  /// whatever the last resume happened to cache. The store copy exists for the
+  /// alarm isolate, which has no widget tree at all.
+  _RowStatus _status(bool uses24Hour) {
     final cache = person.cache;
 
     // A revoked link outranks everything, including lost access — §10 step 1
@@ -392,8 +498,8 @@ class _PersonRow extends StatelessWidget {
           WatcherCopy.accessLostLabel(person.name),
           WatcherCopy.accessLostConsequence(person.name),
           WatcherCopy.accessLostRemedy(cache.accessLostCause),
-          _lastChecked(cache),
         ],
+        footer: _lastChecked(cache, uses24Hour),
         isBad: true,
       );
     }
@@ -411,9 +517,10 @@ class _PersonRow extends StatelessWidget {
             lastConfirmedDay: cache.lastConfirmedDay,
             watcherZone: watcherZone,
             today: today,
+            uses24Hour: uses24Hour,
           ),
-          _lastChecked(cache),
         ],
+        footer: _lastChecked(cache, uses24Hour),
         isBad: true,
       );
     }
@@ -425,7 +532,7 @@ class _PersonRow extends StatelessWidget {
             ? WatcherCopy.neverSeen
             : WatcherCopy.lastSeen(
                 NotificationCopy.dayLabel(cache.lastConfirmedDay!)),
-        _lastChecked(cache),
+        _lastChecked(cache, uses24Hour),
       ],
       isBad: false,
     );
@@ -438,17 +545,33 @@ class _PersonRow extends StatelessWidget {
   /// OK"* — which is true of the last thing this phone read and says nothing
   /// about whether it has read anything since. This is the only surface that
   /// distinguishes *working* from *stopped* before §13's panel lands in Phase 7.
-  String _lastChecked(WatcherCache cache) => cache.lastReconcileAt == null
+  String _lastChecked(WatcherCache cache, bool uses24Hour) =>
+      cache.lastReconcileAt == null
       ? WatcherCopy.neverChecked
       : WatcherCopy.lastChecked(
-          NotificationCopy.momentLabel(cache.lastReconcileAt!, watcherZone, today));
+          NotificationCopy.momentLabel(
+              cache.lastReconcileAt!, watcherZone, today, uses24Hour));
 }
 
 class _RowStatus {
-  const _RowStatus({required this.lines, required this.isBad});
+  const _RowStatus({
+    required this.lines,
+    required this.isBad,
+    this.footer,
+  });
 
+  /// The claim — what is true about this person, or about the app's access to
+  /// them. Emphasised when [isBad].
   final List<String> lines;
+
+  /// A fact about **this device**, rendered as ordinary text whatever the rows
+  /// above it say. Null on the revoked row, which has nothing to report about
+  /// an effort it is no longer making.
+  final String? footer;
+
   final bool isBad;
 
-  String get spoken => lines.join(' ');
+  /// TalkBack gets one utterance, so the footer is part of it — the visual
+  /// distinction is carried by colour, which a screen reader does not see.
+  String get spoken => [...lines, ?footer].join(' ');
 }

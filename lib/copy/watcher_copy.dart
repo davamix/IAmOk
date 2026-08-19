@@ -28,7 +28,13 @@ abstract final class WatcherCopy {
   /// no content and no explanation is its own silent failure. It names a next
   /// human, because the pairing flow assumes a family member sets up both
   /// phones.
-  static const String nobody = 'You\'re not looking after anyone yet. '
+  ///
+  /// **No *"yet"*.** Two reviewers struck it from the Tap screen's twin at the
+  /// Phase 2 gate and it came back here. *"Yet"* asserts **not started**, which
+  /// is false in the other state this same line covers: the last link was
+  /// revoked, so something was set up and is not any more. One line has to be
+  /// true in both, which is the whole reason it is deliberately one line.
+  static const String nobody = 'You\'re not looking after anyone. '
       'Ask a family member to help you add someone.';
 
   /// The good state — **current state, never history**.
@@ -191,4 +197,13 @@ abstract final class WatcherCopy {
 
   /// Announced while the first reconcile runs.
   static const String loadingLabel = 'Checking';
+
+  /// Spoken when a tapped notification opens the list on someone's row.
+  ///
+  /// The visual highlight is a background tint, and colour may never be the only
+  /// signal. Flutter cannot place the screen reader's cursor on an arbitrary
+  /// widget, so this answers the reader's actual question — *did this land on
+  /// the person the notification was about* — and the row is scrolled into view
+  /// for the next swipe to read in full.
+  static String showingPerson(String watchedName) => 'Showing $watchedName.';
 }

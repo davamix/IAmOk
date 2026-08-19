@@ -242,6 +242,7 @@ class LocalStore {
   static const String _keyWarningAlarmsExact = 'warning_alarms_exact';
   static const String _keyWatchedZoneUnknown = 'watched_zone_unknown';
   static const String _keyLinkReconcileFailed = 'link_reconcile_failed';
+  static const String _keyUses24HourClock = 'uses_24_hour_clock';
 
   Future<String?> _setting(String key) async {
     final rows = await _db.query(
@@ -363,6 +364,27 @@ class LocalStore {
         _keyLinkReconcileFailed,
         failed ? 'true' : null,
       );
+
+  /// Whether this device shows times as 24-hour.
+  ///
+  /// `docs/ui-ux/guidelines.md` asks for the device's own 12h/24h setting rather
+  /// than a hard-coded one. Reading it needs `MediaQuery.alwaysUse24HourFormat`
+  /// — a `BuildContext` — and the isolate that posts most of these notifications
+  /// has no widget tree at all.
+  ///
+  /// **So it is cached here, exactly as the device's timezone is** (ADR-0002
+  /// decision 2), and for the same reason: what a background isolate needs is on
+  /// disk. The UI writes it on every resume, because a reader can change it in
+  /// Android settings while the app is backgrounded.
+  ///
+  /// Defaults to true before the UI has ever run — the approved strings are
+  /// 24-hour, so an uncached device renders what `screens.md` shows rather than
+  /// something neither setting asked for.
+  Future<bool> uses24HourClock() async =>
+      await _setting(_keyUses24HourClock) != 'false';
+
+  Future<void> setUses24HourClock(bool uses24Hour) =>
+      _putSetting(_keyUses24HourClock, uses24Hour ? null : 'false');
 
   // ------------------------------------------------------------------- links
 

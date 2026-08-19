@@ -15,6 +15,7 @@ import 'platform/clock_service.dart';
 import 'platform/notification_router.dart';
 import 'platform/notification_service.dart';
 import 'platform/permission_service.dart';
+import 'presentation/app_theme.dart';
 import 'presentation/tap_screen.dart';
 import 'presentation/watcher_screen.dart';
 
@@ -177,8 +178,37 @@ class _IAmOkAppState extends ConsumerState<IAmOkApp>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state != AppLifecycleState.resumed) return;
+    _cacheClockFormat();
     if (_watcherListShowing) return;
     _reconcileBothSides();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _cacheClockFormat();
+  }
+
+  /// Writes the device's 12h/24h preference where a bare isolate can read it.
+  ///
+  /// `guidelines.md` asks for the device's own setting rather than a hard-coded
+  /// one, and reading it needs `MediaQuery.alwaysUse24HourFormat` — a
+  /// `BuildContext`. The isolate that posts most of these notifications has no
+  /// widget tree, so this is the same arrangement as the device timezone
+  /// (ADR-0002 decision 2): the UI observes, the store carries.
+  ///
+  /// Re-written on resume as well as on dependency change, because a reader can
+  /// switch it in Android settings while the app is backgrounded — and the next
+  /// thing to render a time is likely to be a warning at 10:00 tomorrow.
+  void _cacheClockFormat() {
+    final uses24Hour = MediaQuery.of(context).alwaysUse24HourFormat;
+    unawaited(
+      ref
+          .read(appServicesProvider)
+          .store
+          .setUses24HourClock(uses24Hour)
+          .catchError((Object _, StackTrace _) {}),
+    );
   }
 
   @override
@@ -303,17 +333,11 @@ class _IAmOkAppState extends ConsumerState<IAmOkApp>
     navigatorKey: _navigator,
     title: 'I Am Ok',
     debugShowCheckedModeBanner: false,
-    theme: ThemeData(
-      colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF00658F)),
-      useMaterial3: true,
-    ),
-    darkTheme: ThemeData(
-      colorScheme: ColorScheme.fromSeed(
-        seedColor: const Color(0xFF00658F),
-        brightness: Brightness.dark,
-      ),
-      useMaterial3: true,
-    ),
+    // In `AppTheme` rather than inline, so the widget tests pump the palette
+    // the app actually ships — the contrast floor is a claim about these
+    // colours, and it was being asserted against Flutter's defaults.
+    theme: AppTheme.light,
+    darkTheme: AppTheme.dark,
     // PLAN.md routes on the two onboarding selections in Phase 5. Until
     // then the watched side is the whole app, which is what Phase 2 is for.
     home: const TapScreen(),

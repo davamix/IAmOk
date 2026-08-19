@@ -63,10 +63,21 @@ Future<void> main() async {
   try {
     final zone = await clockService.deviceTimezone();
     if (zone != null) await store.setDeviceTimezone(zone);
-    // The device's 12h/24h preference, cached beside the zone and for the same
-    // reason: the alarm isolate has no way to ask. Awaited here rather than
-    // written fire-and-forget from a widget, so the first reconcile cannot read
-    // a default the device disagrees with.
+  } on Object {
+    // Deliberate; see above.
+  }
+
+  // The device's 12h/24h preference, cached beside the zone and for the same
+  // reason: the alarm isolate has no way to ask. Awaited here rather than
+  // written fire-and-forget from a widget, so the first reconcile cannot read a
+  // default the device disagrees with.
+  //
+  // **In its own `try`, not the zone's.** It shared one, and the zone's is the
+  // half that calls a plugin — so a `flutter_timezone` hiccup, the very thing
+  // that `try` exists to swallow, took this line with it and left the format at
+  // its 24-hour default for the whole session. This read touches no plugin and
+  // cannot fail for the same reasons; only the store write can.
+  try {
     await store.setUses24HourClock(clockService.uses24HourClock());
   } on Object {
     // Deliberate; see above.
@@ -124,6 +135,47 @@ Future<void> main() async {
 class IAmOkApp extends ConsumerStatefulWidget {
   const IAmOkApp({super.key});
 
+  /// **A resume is a real reconcile, not only a launch.**
+  ///
+  /// The watcher-side repair ran from a post-frame callback and nowhere else, so
+  /// it covered the cold start and nothing after it. A watcher who backgrounds
+  /// the app and comes back — which is most of how a phone is used — reconciled
+  /// only the watched side, because that is the side whose provider rebuilds.
+  ///
+  /// That matters most in the state it was added for. A force-stop cancels every
+  /// alarm and tells the app nothing; opening the app repairs it. But "opening"
+  /// after a background-and-return is a *resume*, not a launch, and the repair
+  /// did not run there. Android also revokes permissions from apps nobody opens
+  /// (§13), and a resume is exactly when that must be re-observed.
+  ///
+  /// **It defers to the list when the list is showing**, rather than running
+  /// alongside it — the list has an observer of its own and passes
+  /// `watcherListShowing: true`, which this would contradict.
+  ///
+  /// The guard is about **noise and duplicate work**, not about a lost warning,
+  /// and the distinction matters for whoever changes it next. Running with
+  /// `false` while the list shows would post a notification the reader can
+  /// already see: mildly wrong. Running with `true` while it does not consumes
+  /// the day and shows nobody anything: a lost warning, and the defect measured
+  /// on the POCO F3. So if this guard is ever wrong, it must be wrong in the
+  /// direction of running — never in the direction of defaulting to `true`.
+  ///
+  /// ## Why this is a static function and not three lines in the callback
+  ///
+  /// It was those three lines, and that put a two-input boolean decision
+  /// somewhere only a device could reach: inverting the guard leaves a
+  /// force-stopped watcher permanently deaf, with the whole suite green and no
+  /// device row that would catch it. `docs/testing/strategy.md`'s rule is that if a
+  /// test needs a device to answer a question about *logic*, the logic is in the
+  /// wrong layer — and a predicate over two enums is logic. The widget now holds
+  /// no decision, only a call; the truth table is asserted in
+  /// `test/app_lifecycle_test.dart`.
+  static bool repairOnResume({
+    required AppLifecycleState state,
+    required bool watcherListShowing,
+  }) =>
+      state == AppLifecycleState.resumed && !watcherListShowing;
+
   @override
   ConsumerState<IAmOkApp> createState() => _IAmOkAppState();
 }
@@ -151,37 +203,20 @@ class _IAmOkAppState extends ConsumerState<IAmOkApp>
     });
   }
 
-  /// **A resume is a real reconcile, not only a launch.**
+  /// Carries out [IAmOkApp.repairOnResume]'s answer, and decides nothing itself.
   ///
-  /// The watcher-side repair ran from a post-frame callback and nowhere else, so
-  /// it covered the cold start and nothing after it. A watcher who backgrounds
-  /// the app and comes back — which is most of how a phone is used — reconciled
-  /// only the watched side, because that is the side whose provider rebuilds.
-  ///
-  /// That matters most in the state it was added for. A force-stop cancels every
-  /// alarm and tells the app nothing; opening the app repairs it. But "opening"
-  /// after a background-and-return is a *resume*, not a launch, and the repair
-  /// did not run there. Android also revokes permissions from apps nobody opens
-  /// (§13), and a resume is exactly when that must be re-observed.
-  ///
-  /// **It defers to the list when the list is showing**, rather than running
-  /// alongside it — the list has an observer of its own and passes
-  /// `watcherListShowing: true`, which this would contradict.
-  ///
-  /// The guard is about **noise and duplicate work**, not about a lost warning,
-  /// and the distinction matters for whoever changes it next. Running with
-  /// `false` while the list shows would post a notification the reader can
-  /// already see: mildly wrong. Running with `true` while it does not consumes
-  /// the day and shows nobody anything: a lost warning, and the defect measured
-  /// on the POCO F3. So if this guard is ever wrong, it must be wrong in the
-  /// direction of running — never in the direction of defaulting to `true`.
+  /// The reasoning — including why the guard must never be wrong in the
+  /// direction of defaulting to `true` — is on the predicate, where it can be
+  /// tested. `WatcherScreen.isShowing` is read here rather than tracked, because
+  /// the screen owns that fact; see its docstring for what duplicating it cost.
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state != AppLifecycleState.resumed) return;
-    // The list has its own observer and passes `watcherListShowing: true`, which
-    // this must not race — see `WatcherScreen.isShowing` for why the screen owns
-    // that fact rather than this file tracking it.
-    if (WatcherScreen.isShowing) return;
+    if (!IAmOkApp.repairOnResume(
+      state: state,
+      watcherListShowing: WatcherScreen.isShowing,
+    )) {
+      return;
+    }
     _reconcileWatcherSide();
   }
 

@@ -351,8 +351,15 @@ class LocalStore {
   ///
   /// **So it is cached here, exactly as the device's timezone is** (ADR-0002
   /// decision 2), and for the same reason: what a background isolate needs is on
-  /// disk. The UI writes it on every resume, because a reader can change it in
-  /// Android settings while the app is backgrounded.
+  /// disk. `ClockService` supplies it, and the UI writes it in `main()` and again
+  /// on every resume, because a reader can change it in Android settings while
+  /// the app is backgrounded — the same round trip the zone beside it makes.
+  ///
+  /// It was written in `main()` only, which made the sentence above false in two
+  /// ways worth keeping a note of: a reader who changed the setting kept the old
+  /// format for the life of the process, and the write shared a `try` with the
+  /// zone's plugin call, so a `flutter_timezone` hiccup at launch left a 12-hour
+  /// device on the 24-hour default for the whole session.
   ///
   /// Defaults to true before the UI has ever run — the approved strings are
   /// 24-hour, so an uncached device renders what `screens.md` shows rather than

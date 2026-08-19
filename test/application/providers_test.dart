@@ -49,11 +49,33 @@ class _FakeNotifications extends NotificationService {
 
 /// Answers Madrid without touching `flutter_timezone`, which has no platform
 /// side in a test process.
+///
+/// Also reports a **12-hour** device, overridden for the same reason: the real
+/// getter reads `platformDispatcher`, and the point here is the round trip to
+/// `LocalStore` rather than the platform read.
 class _MadridClockService extends ClockService {
   const _MadridClockService();
 
   @override
   Future<String?> deviceTimezone() async => 'Europe/Madrid';
+
+  @override
+  bool uses24HourClock() => false;
+}
+
+/// A plugin hiccup on the zone lookup, with the clock format still readable.
+///
+/// `ClockService.deviceTimezone` swallows its own `Exception`s and returns null,
+/// so this throws an `Error` to model what actually reaches the caller: a
+/// platform channel failure that is not an `Exception`.
+class _ThrowingZoneClockService extends ClockService {
+  const _ThrowingZoneClockService();
+
+  @override
+  Future<String?> deviceTimezone() async => throw StateError('no platform');
+
+  @override
+  bool uses24HourClock() => false;
 }
 
 class _RecordingAlarms implements AlarmScheduler {
@@ -251,6 +273,54 @@ void main() {
     test('and the zone is on disk afterwards, for the bare isolates', () async {
       await container.read(watchedStateProvider.future);
       expect(await store.deviceTimezone(), 'Europe/Madrid');
+    });
+
+    test('and so is the 12h/24h setting, which is the other bare-isolate fact',
+        () async {
+      // **Both device facts, one writer.** The clock format was written in
+      // `main()` only, so a reader who changed it in Android settings kept the
+      // old format for the life of the process — while the zone beside it was
+      // re-read on every resume. It is now cached here too, which is what makes
+      // `LocalStore.uses24HourClock`'s docstring true.
+      expect(await store.uses24HourClock(), isTrue, reason: 'the default');
+
+      await container.read(watchedStateProvider.future);
+
+      expect(await store.uses24HourClock(), isFalse,
+          reason: 'the platform says 12-hour, and the alarm isolate has no way '
+              'to ask — so a wrong value here renders every notification in a '
+              'format the device does not use');
+    });
+
+    test('a zone lookup that throws does not take the clock format with it',
+        () async {
+      // The two writes shared one `try`, and only the zone's half calls a
+      // plugin. So a `flutter_timezone` hiccup — the exact failure that `try`
+      // exists to swallow — silently skipped the format as well, and a 12-hour
+      // device spent the whole session on the 24-hour default.
+      final throwing = ProviderContainer(
+        overrides: [
+          appServicesProvider.overrideWithValue(
+            AppServices(
+              store: store,
+              clock: FixedClock(at(madrid, 2026, 8, 17, 9)),
+              notifications: notifications,
+              alarms: alarms,
+              permissions: PermissionService(notifications),
+              clockService: const _ThrowingZoneClockService(),
+              selfUid: LocalStore.defaultSelfUid,
+            ),
+          ),
+        ],
+      );
+      addTearDown(throwing.dispose);
+
+      await throwing.read(watchedStateProvider.future);
+
+      expect(await store.deviceTimezone(), isNull,
+          reason: 'the zone genuinely could not be read');
+      expect(await store.uses24HourClock(), isFalse,
+          reason: 'and the format was still written — separate guards');
     });
   });
 

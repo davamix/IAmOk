@@ -35,12 +35,17 @@ abstract final class AppTheme {
   /// because it clears the floor rather than because it maximises a number.
   ///
   /// `contrast_test.dart` holds these to it in both modes.
-  static const double _contrastLevel = 0.5;
+  ///
+  /// Public so that test can assert both schemes are generated from [seed] at
+  /// **this** level with nothing hand-tuned, without pinning the number itself —
+  /// the ratio assertions are what hold the level, and a test that pinned `0.5`
+  /// would fail on a legitimate *raise*.
+  static const double contrastLevel = 0.5;
 
   static final ThemeData light = ThemeData(
     colorScheme: ColorScheme.fromSeed(
       seedColor: seed,
-      contrastLevel: _contrastLevel,
+      contrastLevel: contrastLevel,
     ),
     useMaterial3: true,
   );
@@ -49,7 +54,7 @@ abstract final class AppTheme {
     colorScheme: ColorScheme.fromSeed(
       seedColor: seed,
       brightness: Brightness.dark,
-      contrastLevel: _contrastLevel,
+      contrastLevel: contrastLevel,
     ),
     useMaterial3: true,
   );

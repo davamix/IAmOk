@@ -42,10 +42,10 @@ class _TapScreenState extends ConsumerState<TapScreen>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      // The device's zone is refreshed from the plugin here and cached to
-      // LocalStore, which is the only way a bare alarm isolate ever learns it
-      // (ADR-0002 decision 2).
-      await ref.read(watchedStateProvider.notifier).refreshDeviceZone();
+      // The device's zone and 12h/24h setting are refreshed from the platform
+      // here and cached to LocalStore, which is the only way a bare alarm
+      // isolate ever learns either (ADR-0002 decision 2).
+      await ref.read(watchedStateProvider.notifier).refreshDeviceFacts();
       // First run on API 33+ has POST_NOTIFICATIONS denied by default. Ask
       // once, rather than showing her a red banner about a permission the app
       // never requested — and never firing a reminder, which is this phase's
@@ -65,10 +65,10 @@ class _TapScreenState extends ConsumerState<TapScreen>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     // A resume is a full reconcile, not a redraw. Android takes permissions
-    // back from apps nobody opens (§13), and the device zone can change while
-    // backgrounded.
+    // back from apps nobody opens (§13), and the device zone and clock format
+    // can both change while backgrounded.
     if (state == AppLifecycleState.resumed) {
-      ref.read(watchedStateProvider.notifier).refreshDeviceZone();
+      ref.read(watchedStateProvider.notifier).refreshDeviceFacts();
       _scheduleMidnightRefresh();
     }
   }

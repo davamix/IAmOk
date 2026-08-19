@@ -486,6 +486,35 @@ void main() {
           contains('your phone has been offline since Monday 10:00.'));
     });
 
+    test('a 12-hour device: one reconcile, one format, both surfaces',
+        () async {
+      // **The property the single `uses24Hour` source claims**, asserted where
+      // both halves of it are visible at once. The screen read `MediaQuery` live
+      // while the reconcile read the cached copy, so the row and the
+      // notification produced by THIS reconcile could disagree about the same
+      // instant — which the reader compares directly, one on the phone and one
+      // in the tray.
+      //
+      // The store's copy had no coverage at any level before the Phase 3 gate,
+      // so nothing failed when the two sources drifted.
+      await store.setUses24HourClock(false);
+
+      await service().reconcile(selfUid: selfUid);
+
+      clock = FixedClock(at(madrid, 2026, 8, 18, 10));
+      reader.result = const FirestoreRead.unreachable();
+      notifications.calls.clear();
+      final state = await service().reconcile(selfUid: selfUid);
+
+      expect(notifications.bodies['warn:$mumLink:${day('2026-08-17')}'],
+          contains('your phone has been offline since Monday 10:00 am.'),
+          reason: 'the message the alarm isolate posts, which has no '
+              'MediaQuery to ask and must read the cached setting');
+      expect(state.uses24Hour, isFalse,
+          reason: 'and the value the row renders from, off the same reconcile — '
+              'one source is the whole point');
+    });
+
     test('REFUSED is not offline — different words, different channel',
         () async {
       // ADR-0004. The server was reached and said no, so the phone is online and

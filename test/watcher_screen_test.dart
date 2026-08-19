@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:i_am_ok/application/watcher_reconcile_service.dart';
 import 'package:i_am_ok/copy/notification_copy.dart';
@@ -199,7 +200,52 @@ void main() {
           ),
         ),
       ]);
-      expect(find.textContaining('This phone last checked'), findsOneWidget);
+      // The **whole** line, not `textContaining('This phone last checked')`.
+      // That prefix passes for `10:00`, `10:00 am` and `Sunday 10:00` alike, so
+      // it could not tell the row's format from the notification's — which is
+      // exactly the drift the single `uses24Hour` source exists to prevent, and
+      // it went unasserted while the source was being fixed.
+      expect(
+        find.text('This phone last checked Sunday 10:00.'),
+        findsOneWidget,
+        reason: '10:00 Europe/Madrid, dated by weekday because it is inside '
+            'the week, and 24-hour because that is what was passed',
+      );
+    });
+
+    testWidgets('a 12-hour device gets 12-hour times on the row too',
+        (tester) async {
+      // **The regression `WatcherState.uses24Hour` was introduced to prevent.**
+      // The row read `MediaQuery` live while the reconcile read the cache, so the
+      // row and the notification posted by the SAME reconcile could disagree
+      // about the same instant — and the reader compares them directly.
+      //
+      // It has to be asserted here, because `flutter_test` defaults
+      // `alwaysUse24HourFormat` to FALSE while every test passes
+      // `uses24Hour: true`: restore the `MediaQuery` read and the row silently
+      // renders `10:00 am` under a notification reading `10:00`, with the whole
+      // suite green.
+      await pump(
+        tester,
+        [
+          person(
+            cache: WatcherCache(
+              lastConfirmedDay: d,
+              lastReconcileAt: DateTime.utc(2026, 8, 16, 8),
+            ),
+          ),
+        ],
+        uses24Hour: false,
+      );
+      expect(
+        find.text('This phone last checked Sunday 10:00 am.'),
+        findsOneWidget,
+      );
+      expect(
+        find.text('This phone last checked Sunday 10:00.'),
+        findsNothing,
+        reason: 'one source means the row cannot render the other format',
+      );
     });
 
     testWidgets('a row that has never checked says so, not a null',
@@ -618,13 +664,40 @@ void main() {
       // Flutter cannot place the screen reader's cursor on an arbitrary widget,
       // so the announcement answers the question the tap actually asks: did
       // this land on the person the notification was about.
+      //
+      // **Asserted on the platform message, not on the copy constant.** This
+      // test used to end at `expect(WatcherCopy.showingPerson('Mum'), 'Showing
+      // Mum.')` — a string-equality check on a constant, which passes with the
+      // entire `sendAnnouncement` call deleted. It was the only coverage of the
+      // screen-reader half of the notification-tap path: the path that exists
+      // for the reader who cannot see the highlight at all.
+      final announcements = <String>[];
+      tester.binding.defaultBinaryMessenger.setMockDecodedMessageHandler<Object?>(
+        SystemChannels.accessibility,
+        (message) async {
+          final event = message as Map<Object?, Object?>;
+          if (event['type'] == 'announce') {
+            final data = event['data'] as Map<Object?, Object?>;
+            announcements.add(data['message'] as String);
+          }
+          return null;
+        },
+      );
+      addTearDown(
+        () => tester.binding.defaultBinaryMessenger
+            .setMockDecodedMessageHandler<Object?>(
+                SystemChannels.accessibility, null),
+      );
+
       final handle = tester.ensureSemantics();
       NotificationRouter.instance.captureLaunch('mum_ana');
 
       await pump(tester, [person(), person(uid: 'gd', name: 'Granddad')]);
       await tester.pumpAndSettle();
 
-      expect(WatcherCopy.showingPerson('Mum'), 'Showing Mum.');
+      expect(announcements, ['Showing Mum.'],
+          reason: 'the tapped person is named, once, and it is Mum rather than '
+              'the first row in the list');
       handle.dispose();
     });
   });

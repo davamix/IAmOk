@@ -167,11 +167,15 @@ class WatcherState {
 
   /// Whether this device shows 24-hour times, as the reconcile read it.
   ///
-  /// **Off the state, not off .** The screen has a 
+  /// **Off the state, not off `MediaQuery`.** The screen has a `BuildContext`
   /// and could read the live value — and did, which gave one fact two sources:
   /// the row and the notification produced by the SAME reconcile could disagree
   /// about the same instant. That is the drift `momentLabel` and `dayLabel`
   /// were exposed to prevent, since the reader compares the two directly.
+  ///
+  /// The reconcile reads it from `LocalStore`, where `ClockService` caches it on
+  /// every launch and every resume — the same round trip the device zone makes,
+  /// and for the same reason: the alarm isolate has no widget tree to ask.
   final bool uses24Hour;
 
   /// Whether a warning decided now would actually reach this reader.

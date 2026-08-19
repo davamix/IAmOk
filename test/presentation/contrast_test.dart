@@ -47,10 +47,25 @@ void main() {
             greaterThanOrEqualTo(4.5));
       });
 
-      test('the row heading meets AA', () {
-        // The person's name, rendered in `titleLarge` on the list background.
-        expect(ratio(scheme.onSurface, scheme.surface),
+      test('the secondary lines meet AA', () {
+        // `onSurfaceVariant` on `surface` — the "who will be notified" line on
+        // the Tap screen. It was unasserted while `onSurface`/`surface` was
+        // asserted twice under two names, which is one fact wearing two hats and
+        // a real pair left uncovered.
+        expect(ratio(scheme.onSurfaceVariant, scheme.surface),
             greaterThanOrEqualTo(4.5));
+      });
+
+      test('the DISABLED tap target meets AAA — it is the target most of the day',
+          () {
+        // `onSurfaceVariant` on `surfaceContainerHighest`: the state the Tap
+        // screen is in from the moment she taps until midnight. Still the tap
+        // target, so still the AAA bar rather than AA — the guideline names the
+        // target, not the target's enabled state.
+        expect(
+          ratio(scheme.onSurfaceVariant, scheme.surfaceContainerHighest),
+          greaterThanOrEqualTo(7.0),
+        );
       });
 
       test('a WARNING meets AAA — the one line that must not be hard to read',
@@ -96,5 +111,28 @@ void main() {
     // dark mode is the one that gets forgotten.
     expect(AppTheme.light.colorScheme.brightness, Brightness.light);
     expect(AppTheme.dark.colorScheme.brightness, Brightness.dark);
+
+    // **The seed itself, which this test named and did not check.** Asserting
+    // only that the brightnesses differ passes for two hand-tuned palettes with
+    // nothing in common — the exact thing the single seed exists to prevent, and
+    // the reason `_contrastLevel` can be reasoned about once rather than twice.
+    for (final scheme in [
+      AppTheme.light.colorScheme,
+      AppTheme.dark.colorScheme,
+    ]) {
+      expect(
+        scheme,
+        ColorScheme.fromSeed(
+          seedColor: AppTheme.seed,
+          brightness: scheme.brightness,
+          // The declared level, not a pinned `0.5` — the ratio assertions above
+          // are what hold the level itself, and a literal here would fail on a
+          // legitimate raise while catching nothing extra.
+          contrastLevel: AppTheme.contrastLevel,
+        ),
+        reason: 'both schemes are generated from AppTheme.seed at the raised '
+            'contrast level, and nothing is overridden by hand',
+      );
+    }
   });
 }

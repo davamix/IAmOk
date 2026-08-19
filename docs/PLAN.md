@@ -171,9 +171,11 @@ says something **different and honest** when the device cannot reach the network
 > NOT signed off.** All five exit criteria are asserted at the composition level and every
 > assertion is on *which* message rather than that something fired. On the POCO F3 with stock
 > HyperOS settings the alarm isolate wakes — including from a killed process, where Android
-> cold-started a new one to run it. What is **not** yet done: the five reviewer agents (they hit a
-> session limit before reporting), driving the four outcomes end-to-end on the device rather than
-> from tests, and ADR-0007 recording the force-stop response now that there are numbers for it.
+> cold-started a new one to run it. What is **not** yet done: **security and infrastructure have not
+> reviewed this round at all** (architecture, testing and UI/UX have, and their findings are fixed —
+> see [phases/phase-3-review-handover.md](phases/phase-3-review-handover.md) for the live status),
+> driving the four outcomes end-to-end on the device rather than from tests, and the overnight Doze
+> run. ADR-0007 now records the force-stop response.
 > Evidence in [phases/phase-3-summary.md](phases/phase-3-summary.md).
 
 ---

@@ -269,6 +269,14 @@ in [phase-3-summary.md](../phases/phase-3-summary.md).
       right person's row highlighted and the cause-specific remediation showing.
 - [x] **A force-stop erases standing notifications as well as alarms** — 4 → 0. The unread warning
       goes with them, and `accessLostNotifiedOn` still records it as delivered.
+- [ ] **A *resume* repairs the watcher side, not only a launch** — force-stop, open the app,
+      background it, bring it back, and confirm the watcher alarms are armed and `last_reconcile_at`
+      moved. **Postdates the 2026-08-17 run**: the resume path was added afterwards, because the
+      repair ran only from a post-frame callback and a background-and-return is a resume rather than
+      a launch. The row above it covers the **launch** only, and the two are different code paths.
+      The predicate is now unit-tested (`IAmOkApp.repairOnResume`, in
+      `test/app_lifecycle_test.dart`); what needs a device is the wiring — that the observer is
+      registered and that the reconcile it triggers really re-arms. Owed with the overnight Doze run.
 
 **Phase 4 — end to end.** PLAN.md's exit criterion is *"a tap on one physical phone quietly updates
 a second physical phone"*, and only one physical phone exists today. Either a second handset is

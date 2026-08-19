@@ -255,6 +255,13 @@ class _WatcherBodyState extends State<WatcherBody> {
   void _onTapped() {
     final linkId = NotificationRouter.instance.tappedLink.value;
     if (linkId == null || !mounted) return;
+    // `people` only, so a payload naming a link that landed in `unreconciled`
+    // matches nothing: it is neither highlighted nor **consumed**. Both halves
+    // are deliberate. The reader still lands on the list and still sees that
+    // person's failed row, which is the honest answer; and leaving the payload
+    // unconsumed means the next pass that reconciles them successfully picks it
+    // up and highlights the row then. Consuming it here would spend the tap on a
+    // row that cannot say anything yet.
     final index = widget.state.people.indexWhere((p) => p.link.id == linkId);
     if (index < 0) return;
     NotificationRouter.instance.consume();
@@ -538,10 +545,15 @@ class _PersonRow extends StatelessWidget {
     );
   }
 
-  /// [uses24Hour] comes from `MediaQuery` here rather than from `LocalStore`:
-  /// this side HAS a `BuildContext`, so it can read the live setting instead of
-  /// whatever the last resume happened to cache. The store copy exists for the
-  /// alarm isolate, which has no widget tree at all.
+  /// Renders the row's claim from [person], and reads no device fact of its own.
+  ///
+  /// [uses24Hour] arrives from [WatcherState] — **not** from `MediaQuery`, which
+  /// is what this comment argued for until the drift it caused was measured. This
+  /// side does have a `BuildContext` and could read the live setting, and that is
+  /// precisely the defect: the row and the notification posted by the *same*
+  /// reconcile then had two sources for one fact and could disagree about the
+  /// same instant. One source, cached by `ClockService` on launch and on resume,
+  /// is what both surfaces now read.
   _RowStatus _status() {
     final cache = person.cache;
 

@@ -83,7 +83,10 @@ the server timestamp, and clock drift beyond threshold is **surfaced, never sile
 
 **Away edges** — the day `from` starts; the day `through` ends; the day *after* `through`; away set
 mid-period; away cancelled while a device was offline; away expiring on a device that has not been
-online since it started; `through < from` rejected; a 31-day period rejected; a retroactive `from`
+online since it started; `through < from` rejected; **a 31-day period allowed and a 32-day period
+rejected** — 31 is the longest permitted, and this line said "a 31-day period rejected" until the
+Phase 3 gate, which is a reviewer following the spec into a false finding against correct code; a
+retroactive `from`
 rejected. Also: **tapping during an away day is still allowed** and writes a normal check-in that
 watchers see as usual (§12) — the plausible bug is suppressing the write along with the reminders.
 

@@ -500,6 +500,45 @@ void main() {
       await store.setClockOffset(Duration.zero);
       expect(await store.clockOffset(), Duration.zero);
     });
+
+    test('the 12h/24h setting round-trips in both directions', () async {
+      // **Both directions, because the two are not symmetric.** `true` is stored
+      // by *deleting* the row, so the 12h → 24h transition is the only one that
+      // exercises that branch — and it is the direction a reader takes when they
+      // switch their phone back. Nothing covered either until the Phase 3 gate.
+      expect(await store.uses24HourClock(), isTrue,
+          reason: 'the approved strings are 24-hour, so an uncached device '
+              'renders what screens.md shows rather than a third thing');
+
+      await store.setUses24HourClock(false);
+      expect(await store.uses24HourClock(), isFalse);
+
+      await store.setUses24HourClock(true);
+      expect(await store.uses24HourClock(), isTrue,
+          reason: 'the delete branch: a reader switching back to 24-hour must '
+              'not be stuck on 12-hour');
+    });
+
+    test('the two health flags round-trip and clear', () async {
+      // Same null-deletes semantics as the setting above, and the same gap: both
+      // had behavioural coverage through the service and no store round-trip.
+      // §13's panel reads them in Phase 7; `dump` shows them meanwhile, and a
+      // flag that cannot clear itself reports a fault that is over.
+      expect(await store.linkReconcileFailed(), isFalse);
+      await store.setLinkReconcileFailed(true);
+      expect(await store.linkReconcileFailed(), isTrue);
+      await store.setLinkReconcileFailed(false);
+      expect(await store.linkReconcileFailed(), isFalse);
+
+      // Null, not false: before the first apply nothing has been armed, so there
+      // is no claim to make either way. A default of `false` would report a
+      // degradation that has not happened.
+      expect(await store.warningAlarmsExact(), isNull);
+      await store.setWarningAlarmsExact(false);
+      expect(await store.warningAlarmsExact(), isFalse);
+      await store.setWarningAlarmsExact(true);
+      expect(await store.warningAlarmsExact(), isTrue);
+    });
   });
 
   group('a row this build cannot interpret', () {

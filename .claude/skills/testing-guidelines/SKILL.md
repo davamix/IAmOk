@@ -63,8 +63,10 @@ These are not a wish list — they are where this design is known to be able to 
   risk; the test is what stops it being "simplified" back in Phase 4.
 - **Away edges** — the day `from` starts; the day `through` ends; the day *after* `through`; away
   set mid-period; away cancelled while a device was offline; away expiring on a device that has not
-  been online since it started; `through < from`, a 31-day period, and a retroactive `from` all
-  rejected. Tapping during away is still allowed and writes a normal check-in.
+  been online since it started; `through < from` and a retroactive `from` both rejected; and a
+  **31-day period allowed, a 32-day period rejected** — 31 is the longest ALLOWED
+  (`AwayRules.maxLengthInDays`), and this line called it a denied case until the Phase 3 gate.
+  Tapping during away is still allowed and writes a normal check-in.
 - **The rolling window** — 7 days, **extending to `through` + 7 during away with the away days
   absent**. Assert it cancels as well as creates. A window that does not extend past `through`
   means the watched side never re-arms after a holiday.

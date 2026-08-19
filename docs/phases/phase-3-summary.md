@@ -8,12 +8,24 @@ Phase 3 built the edge around a decision that already existed. `WarningPolicy` a
 isolate to wake them, somewhere to persist what they concluded, the words to say it in, and a
 surface to explain it on.
 
-**692 tests**, up from 547. `flutter analyze` clean. `flutter build apk --debug` succeeds.
+**755 tests**, up from 547. `flutter analyze` clean. `flutter build apk --debug` succeeds.
 
-> **This phase is NOT signed off.** The five reviewers have now run and reported, and the prediction
-> below held exactly: the author caught none of what they found. Two criticals — one found
-> independently by three of them — plus roughly thirty further findings. Tiers 1 and 2 are fixed and
-> committed; the outstanding tiers are listed at the end of this document.
+> **This phase is NOT signed off.** **Three of the five reviewers have run** — architecture and
+> testing (each twice, testing most recently at the gate itself) and UI/UX; **security and
+> infrastructure have not run at all this round.** The live status is
+> [phase-3-review-handover.md](phase-3-review-handover.md), which is authoritative over this
+> paragraph; what is still owed is listed there and at the end of this document.
+>
+> This paragraph read *"The five reviewers have now run and reported"* until the testing reviewer
+> caught it at the gate. It is the worst direction for this document to be wrong in: it is the
+> sign-off evidence, and the claim it got wrong was a **positive claim about review coverage** — the
+> one that would end a review early. It also contradicted the handover sitting beside it. The count
+> above was stale in the same edit (692, against 744 passing at the time). **Both numbers move with
+> the work** — check them against `flutter test` rather than trusting this line.
+>
+> What the reviewers found, in the rounds that have run: the prediction below held exactly, and the
+> author caught none of it. Two criticals — one found independently by three of them — plus roughly
+> thirty further findings. Tiers 1 and 2 are fixed and committed.
 >
 > The record is worth keeping as written, because it is the fourth time in this project that a
 > self-review has come out clean on code the reviewers then found real defects in:
@@ -538,11 +550,14 @@ The clause is now omitted. `screens.md` carries both variants; Phase 4 carries `
 through the read and the time returns with something true behind it. The retraction was always
 complete without it.
 
-**Notification times are rendered 24-hour rather than following the device's setting.**
-`docs/ui-ux/guidelines.md` asks for the device's own 12h/24h preference; reading it needs a
-`BuildContext`, which a notification posted from a bare isolate does not have. The approved strings
-are 24-hour and the owner's locale is 24-hour, so nothing is wrong today. It becomes wrong for the
-first user whose phone is set to 12-hour.
+**~~Notification times are rendered 24-hour rather than following the device's setting.~~ Closed.**
+This was recorded as an open deviation with the rationale that reading the setting needs a
+`BuildContext`, which a bare isolate does not have. That rationale was wrong:
+`platformDispatcher.alwaysUse24HourFormat` needs no context, so it sits on `ClockService` beside the
+timezone, is cached to `LocalStore` on launch and on every resume, and both the notification and the
+row read it from there — **one source, so the two cannot disagree about the same instant.** Left
+here struck through rather than deleted, because the reason it was believed impossible is worth
+keeping.
 
 **Both remaining device criteria have since been observed**, and the records are above: the
 unattended warning at its natural `warningLocalTime`, and the cold-start tap on the *lost access*
@@ -552,7 +567,11 @@ invites the work being done twice, and one that contradicts its own body cannot 
 either direction.
 
 What remains genuinely unobserved is the **overnight Doze run**, which is a different criterion and
-is still owed.
+is still owed — plus, added at the gate, **a *resume* repairing the watcher side**. That path did not
+exist on 2026-08-17: the repair ran only from a post-frame callback, so it covered a launch and not a
+background-and-return. Its decision is now a unit-tested predicate (`IAmOkApp.repairOnResume`); what
+needs a device is the wiring, and it is on the matrix as its own row rather than folded into the
+launch row above it.
 
 **The watcher list layout is deliberately plain.** `screens.md` marks the multi-person layout as
 Phase 7 and undesigned; what is settled is the row *content*, which is what this renders.

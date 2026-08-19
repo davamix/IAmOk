@@ -175,13 +175,13 @@ class WatchedStateNotifier extends AsyncNotifier<WatchedState> {
   Future<WatchedState> build() async {
     final services = ref.watch(appServicesProvider);
     // BEFORE the first reconcile, and the order is load-bearing — see
-    // [_cacheDeviceZone].
-    await _cacheDeviceZone(services);
+    // [_cacheDeviceFacts].
+    await _cacheDeviceFacts(services);
     return services.watchedReconcile.reconcile(selfUid: services.selfUid);
   }
 
-  /// Caches the device's IANA zone, and is called **before the first
-  /// reconcile**.
+  /// Caches the two device facts a background isolate cannot ask for, and is
+  /// called **before the first reconcile**.
   ///
   /// On a fresh install `LocalStore.deviceTimezone()` is null, so a reconcile
   /// that runs first takes ADR-0002's documented UTC fallback and arms the whole
@@ -207,10 +207,27 @@ class WatchedStateNotifier extends AsyncNotifier<WatchedState> {
   /// whole job is to be there every morning.
   ///
   /// [ADR-0006]: ../../docs/architecture/decisions/0006-reconcile-is-serialised-on-disk.md
-  Future<void> _cacheDeviceZone(AppServices services) async {
+  Future<void> _cacheDeviceFacts(AppServices services) async {
     try {
       final zone = await services.clockService.deviceTimezone();
       if (zone != null) await services.store.setDeviceTimezone(zone);
+    } on Object {
+      // Swallowed deliberately; see above.
+    }
+    // **Its own guard, not the zone's.** These are two independent facts and
+    // only the first calls a plugin — so sharing one `try` meant a
+    // `flutter_timezone` hiccup, the exact thing that `try` exists to swallow,
+    // silently skipped the clock format as well. It then stayed at its 24-hour
+    // default for the whole session, and on a 12-hour phone every time the app
+    // renders is in a format the device does not use.
+    //
+    // **Written on resume as well as at launch**, which is what makes
+    // `LocalStore.uses24HourClock`'s docstring true: a reader can change the
+    // setting in Android settings while the app is backgrounded, and the zone
+    // beside it has always been re-read here for the same reason.
+    try {
+      await services.store
+          .setUses24HourClock(services.clockService.uses24HourClock());
     } on Object {
       // Swallowed deliberately; see above.
     }
@@ -282,14 +299,20 @@ class WatchedStateNotifier extends AsyncNotifier<WatchedState> {
     await refresh();
   }
 
-  /// Refreshes the cached device zone from the platform, then reconciles.
+  /// Refreshes the cached device zone **and clock format** from the platform,
+  /// then reconciles.
   ///
   /// `flutter_timezone` is a plugin, so this can only happen here in the UI
-  /// isolate (ADR-0002 decision 2). Writing the result to `LocalStore` is what
-  /// lets a bare alarm isolate compute the day with no plugin access at all.
-  Future<void> refreshDeviceZone() async {
+  /// isolate (ADR-0002 decision 2). Writing the results to `LocalStore` is what
+  /// lets a bare alarm isolate compute the day, and render the times it posts,
+  /// with no plugin access at all.
+  ///
+  /// Named for both facts because it caches both. It cached one and was called
+  /// on resume; the clock format was written only in `main()`, so a reader who
+  /// changed the setting kept the old format for the life of the process.
+  Future<void> refreshDeviceFacts() async {
     final services = ref.read(appServicesProvider);
-    await _cacheDeviceZone(services);
+    await _cacheDeviceFacts(services);
     await refresh();
   }
 }

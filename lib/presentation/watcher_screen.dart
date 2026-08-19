@@ -35,6 +35,26 @@ import '../platform/notification_router.dart';
 class WatcherScreen extends ConsumerStatefulWidget {
   const WatcherScreen({super.key});
 
+  /// Whether this screen is on screen right now.
+  ///
+  /// **Owned by the screen, because it is a fact about the screen.** `main.dart`
+  /// tracked it around its own `push` instead, which made it duplicated state
+  /// and it went wrong the way duplicated state does: a second notification tap
+  /// while the list was already up pushed a *second* `WatcherScreen`, and when
+  /// the top one popped its `.then` cleared the flag while the bottom one was
+  /// still showing.
+  ///
+  /// It decides which reconcile runs on resume — this screen's own, or
+  /// `main.dart`'s — and the two differ in `watcherListShowing`, which is the
+  /// one parameter that can lose a warning silently. So the answer has to be
+  /// true rather than merely usually true.
+  ///
+  /// A counter rather than a bool so a stacked instance cannot clear it early.
+  /// It also survives Phase 5's routing on role, which a call-site flag would
+  /// not.
+  static bool get isShowing => _showing > 0;
+  static int _showing = 0;
+
   @override
   ConsumerState<WatcherScreen> createState() => _WatcherScreenState();
 }
@@ -44,11 +64,13 @@ class _WatcherScreenState extends ConsumerState<WatcherScreen>
   @override
   void initState() {
     super.initState();
+    WatcherScreen._showing++;
     WidgetsBinding.instance.addObserver(this);
   }
 
   @override
   void dispose() {
+    WatcherScreen._showing--;
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -295,9 +317,20 @@ class _WatcherBodyState extends State<WatcherBody> {
               // the number ever justifies it.
               scrollCacheExtent: const ScrollCacheExtent.pixels(1200),
               padding: const EdgeInsets.symmetric(vertical: 8),
-              itemCount: widget.state.people.length,
+              // Reconciled rows first, then the links this pass could not
+              // reconcile at all. They are **in** the list rather than omitted:
+              // an omitted link is invisible, and with one link that made the
+              // screen claim the reader was looking after nobody.
+              itemCount:
+                  widget.state.people.length + widget.state.unreconciled.length,
               separatorBuilder: (_, _) => const Divider(height: 1),
               itemBuilder: (context, i) {
+                if (i >= widget.state.people.length) {
+                  return _FailedRow(
+                    link: widget.state.unreconciled[i -
+                        widget.state.people.length],
+                  );
+                }
                 final person = widget.state.people[i];
                 final highlighted = person.link.id == _highlighted;
                 return _PersonRow(
@@ -308,6 +341,7 @@ class _WatcherBodyState extends State<WatcherBody> {
                   person: person,
                   watcherZone: widget.state.watcherZone,
                   today: widget.state.today,
+                  uses24Hour: widget.state.uses24Hour,
                   highlighted: highlighted,
                 );
               },
@@ -367,12 +401,64 @@ class _WarningsOffBanner extends StatelessWidget {
   }
 }
 
+/// A link the reconcile threw on.
+///
+/// Deliberately shaped like the lost-access row — a fault about **us**, naming
+/// the person, offering the honest next step — because that is the same kind of
+/// thing it is. What it must never do is imply anything about her: the app does
+/// not know whether she checked in, only that it could not find out.
+///
+/// It carries no *"this phone last checked"* line for the same reason it
+/// carries no status: the cache read is one of the things that may have thrown,
+/// so there is no value here the row can vouch for.
+class _FailedRow extends StatelessWidget {
+  const _FailedRow({required this.link});
+
+  final Link link;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final lines = [
+      WatcherCopy.couldNotCheckOn(link.watchedName),
+      WatcherCopy.couldNotCheckRemedy,
+    ];
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      child: Semantics(
+        label: WatcherCopy.rowLabel(link.watchedName, lines.join(' ')),
+        child: ExcludeSemantics(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(link.watchedName, style: theme.textTheme.titleLarge),
+              const SizedBox(height: 4),
+              ...lines.map(
+                (line) => Padding(
+                  padding: const EdgeInsets.only(top: 2),
+                  child: Text(
+                    line,
+                    style: theme.textTheme.bodyMedium
+                        ?.copyWith(color: theme.colorScheme.error),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _PersonRow extends StatelessWidget {
   const _PersonRow({
     super.key,
     required this.person,
     required this.watcherZone,
     required this.today,
+    required this.uses24Hour,
     required this.highlighted,
   });
 
@@ -390,13 +476,18 @@ class _PersonRow extends StatelessWidget {
   /// otherwise stand unchanged into week twelve while reading as this week.
   final DayKey today;
 
+  /// From [WatcherState], never from `MediaQuery` — one fact, one source. See
+  /// [WatcherState.uses24Hour].
+  final bool uses24Hour;
+
   final bool highlighted;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final uses24Hour = MediaQuery.of(context).alwaysUse24HourFormat;
-    final status = _status(uses24Hour);
+    // Off the state, so the row cannot disagree with the notification the same
+    // reconcile posted — see [WatcherState.uses24Hour].
+    final status = _status();
 
     return Container(
       color: highlighted ? theme.colorScheme.surfaceContainerHighest : null,
@@ -451,7 +542,7 @@ class _PersonRow extends StatelessWidget {
   /// this side HAS a `BuildContext`, so it can read the live setting instead of
   /// whatever the last resume happened to cache. The store copy exists for the
   /// alarm isolate, which has no widget tree at all.
-  _RowStatus _status(bool uses24Hour) {
+  _RowStatus _status() {
     final cache = person.cache;
 
     // A revoked link outranks everything, including lost access — §10 step 1

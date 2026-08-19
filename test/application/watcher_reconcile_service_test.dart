@@ -719,9 +719,29 @@ void main() {
       expect(notifications.calls, contains('warn:$mumLink:$d'),
           reason: 'Mum is fine and must still be warned about');
       expect(state.people.map((p) => p.link.id), [mumLink],
-          reason: 'the failed link is omitted rather than rendered from a '
-              'half-built reconcile — a row assembled out of a failure is the '
-              'false claim this side exists to avoid');
+          reason: 'the failed link is not rendered from a half-built '
+              'reconcile — a row assembled out of a failure is the false claim '
+              'this side exists to avoid');
+      expect(state.unreconciled.map((l) => l.id), ['granddad_ana'],
+          reason: 'but it is still IN the state. Omitting it made the screen '
+              'invisible to the failure, and with one link that reads as '
+              '"you are not looking after anyone"');
+    });
+
+    test('a watcher whose ONLY link fails is not told they watch nobody',
+        () async {
+      // The whole point of carrying the failure in-band. With one link — all of
+      // Phase 3, and the common case after — "short list" IS "empty list", and
+      // the empty list makes a positive false claim on the screen the lost
+      // access notification routes to.
+      reader.throwOnLink = mumLink;
+
+      final state = await service().reconcile(selfUid: selfUid);
+
+      expect(state.people, isEmpty);
+      expect(state.unreconciled.map((l) => l.watchedName), ['Mum']);
+      expect(state.isEmpty, isFalse,
+          reason: 'the screen must not fall through to "nobody is watched"');
     });
 
     test('and the failure is recorded rather than swallowed', () async {

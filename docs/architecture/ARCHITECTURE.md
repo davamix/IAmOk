@@ -147,7 +147,7 @@ Consequences that shape the design:
 │  AlarmScheduler  NotificationService  FcmService             │
 │  PermissionService  Clock  ClockService  ConnectivityService │
 ├─ Copy — a leaf, reached by Presentation AND Platform ───────┤
-│  NotificationCopy   TapCopy                                  │
+│  NotificationCopy   TapCopy   WatcherCopy                     │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -177,7 +177,7 @@ thing some readers get.
 | `CheckInRepository` | Data | Write today's check-in; read a watched person's days | UI, Alarm |
 | `AwayRepository` | Data | Read / set / cancel the away period for a watched user | UI, FCM, Alarm |
 | `InviteService` | Data | Create invite; call `redeemInvite` | UI |
-| `LocalStore` | Data | SQLite. Per-link `lastConfirmedDate`, `warningsShownFor` (day → **which** warning is standing, [ADR-0004](decisions/0004-refused-is-not-unreachable.md)), `activeFrom`, `watchedTimezone`, cached `awayPeriod`, `accessLostSince` + `accessLostCause` + `accessLostNotifiedOn`; plus `deviceTimezone`, `pendingAlarms`, `lastReconcileAt` (a **timestamp** — §10 renders "offline since 10:14"), and the `reconcileLock` lease ([ADR-0006](decisions/0006-reconcile-is-serialised-on-disk.md)) | **All three** |
+| `LocalStore` | Data | SQLite. Per-link `lastConfirmedDate`, `warningsShownFor` (day → **which** warning is standing, [ADR-0004](decisions/0004-refused-is-not-unreachable.md)), `activeFrom`, `watchedTimezone`, cached `awayPeriod`, `accessLostSince` + `accessLostCause` + `accessLostNotifiedOn`; plus `deviceTimezone`, `pendingAlarms`, `lastReconcileAt` (a **timestamp** — §10 renders "offline since 10:14"), and the `reconcileLock` lease ([ADR-0006](decisions/0006-reconcile-is-serialised-on-disk.md)); plus three device-health settings that §13's panel reads in Phase 7 and `dump` shows meanwhile — `warningAlarmsExact` (the exact-alarm degradation actually happened), `linkReconcileFailed` (a link this app silently stopped checking), and `uses24HourClock` (a device fact a bare isolate cannot ask for, cached exactly as `deviceTimezone` is) | **All three** |
 | `AlarmScheduler` | Platform | Schedule / cancel / enumerate alarms; `rescheduleOnReboot` | UI, Alarm |
 | `NotificationService` | Platform | Channels, display, cancel, replace-by-id, tap routing | All three |
 | `FcmService` | Platform | Token lifecycle → Firestore; route foreground + background messages | UI, FCM |

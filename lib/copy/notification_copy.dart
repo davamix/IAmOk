@@ -253,6 +253,15 @@ abstract final class NotificationCopy {
   ) =>
       _moment(instant, zone, today, uses24Hour);
 
+  /// *"09:14"* or *"9:14 am"*, for a surface outside this file.
+  ///
+  /// Exposed for the same reason [momentLabel] and [dayLabel] are: this app had
+  /// three separate ways of turning an instant into a time, and the Tap screen's
+  /// produced *"9:14 AM"* against everywhere else's *"9:14 am"*. One formatter
+  /// is one thing to keep true.
+  static String timeLabel(DateTime instant, tz.Location zone, bool uses24Hour) =>
+      _time(instant, zone, uses24Hour);
+
   /// *"Saturday 22 August"*, for a surface outside this file.
   ///
   /// Exposed rather than duplicated so the watcher list and the notification

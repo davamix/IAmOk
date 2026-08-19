@@ -16,10 +16,26 @@ class WatchedPersonState {
     required this.link,
     required this.cache,
     required this.decision,
+    this.zoneUnknown = false,
   });
 
   final Link link;
   final WatcherCache cache;
+
+  /// This build's tzdata does not carry `link.watchedTimezone`, so her day was
+  /// computed against the watcher's zone as a guess.
+  ///
+  /// **Per person, and not a device-wide setting.** It was one: a bool in
+  /// `settings`, OR-ed across every link. §13's panel is the stated consumer and
+  /// it has to name *which* person the app is guessing about — a bool cannot,
+  /// and aggregating a per-link fact into one flag loses exactly the part that
+  /// makes it actionable.
+  ///
+  /// Carried here rather than persisted in a new column because nothing needs it
+  /// across a process boundary: every surface that would show it gets it from a
+  /// live reconcile, and the underlying evidence — the zone string this build
+  /// cannot resolve — is already in `links` and already in `dump`.
+  final bool zoneUnknown;
 
   /// What the last reconcile concluded about `D`.
   final WarningDecision decision;
@@ -124,10 +140,39 @@ class WatcherState {
     required this.today,
     required this.watcherZone,
     required this.warningDelivery,
+    required this.uses24Hour,
+    this.unreconciled = const [],
   });
 
   final List<WatchedPersonState> people;
+
+  /// Links this pass could not reconcile at all.
+  ///
+  /// **In-band, because omitting them was a false claim.** The per-link guard
+  /// keeps one bad link from costing every other watched person their check —
+  /// but a link left out of [people] is invisible, and with a single link
+  /// "short list" *is* "empty list": the screen rendered *"You're not looking
+  /// after anyone."* about someone this watcher is very much still looking
+  /// after, on the surface the *lost access* notification routes to. That is
+  /// the same false all-clear the revoked row was fixed for, arriving by a
+  /// route the isolation opened.
+  ///
+  /// Carried as the [Link] rather than a half-built [WatchedPersonState],
+  /// because nothing about this person's state was successfully computed and a
+  /// row assembled from a failed reconcile is exactly what must not be shown.
+  /// The name is all the row needs, and it comes off the link.
+  final List<Link> unreconciled;
+
   final DayKey today;
+
+  /// Whether this device shows 24-hour times, as the reconcile read it.
+  ///
+  /// **Off the state, not off .** The screen has a 
+  /// and could read the live value — and did, which gave one fact two sources:
+  /// the row and the notification produced by the SAME reconcile could disagree
+  /// about the same instant. That is the drift `momentLabel` and `dayLabel`
+  /// were exposed to prevent, since the reader compares the two directly.
+  final bool uses24Hour;
 
   /// Whether a warning decided now would actually reach this reader.
   ///
@@ -161,7 +206,11 @@ class WatcherState {
   /// and different weekdays across midnight.
   final tz.Location watcherZone;
 
-  bool get isEmpty => people.isEmpty;
+  /// Nobody is being watched — **not** "nothing could be rendered".
+  ///
+  /// [unreconciled] counts, or a watcher whose only link failed is told they
+  /// are looking after nobody.
+  bool get isEmpty => people.isEmpty && unreconciled.isEmpty;
 }
 
 /// The watcher side's one idempotent entry point — **reconcile first, then
@@ -259,8 +308,8 @@ class WatcherReconcileService {
     );
 
     final people = <WatchedPersonState>[];
-    var anyZoneUnknown = false;
     var anyLinkFailed = false;
+    final unreconciled = <Link>[];
     try {
       for (final link in links) {
         // **One link's failure must not cost every other watched person their
@@ -279,50 +328,66 @@ class WatcherReconcileService {
         // Cheap today, with one link. It stops being cheap the moment pairing
         // lands in Phase 5, and by then the failure is invisible and permanent.
         //
-        // The person is **omitted from the returned state** rather than
-        // rendered from a half-built value: a row assembled out of a failed
-        // reconcile is exactly the false claim this side spends everything
-        // avoiding. The list is short by one, and the health flag below is what
-        // says why.
+        // The person is **not rendered from a half-built value** — a row
+        // assembled out of a failed reconcile is exactly the false claim this
+        // side spends everything avoiding. They go into `unreconciled` instead,
+        // which the screen renders as its own row, because a link merely left
+        // out of the list is invisible and with one link makes the screen say
+        // the reader is looking after nobody.
         try {
-          final (state, zoneUnknown) = await _reconcileLink(
+          people.add(await _reconcileLink(
             link: link,
             now: now,
             watcherZone: watcherZone,
             delivery: canDeliver,
             uses24Hour: uses24Hour,
             mayChangeAlarms: holdsLock,
-          );
-          people.add(state);
-          anyZoneUnknown |= zoneUnknown;
+          ));
+
         } on Object {
           anyLinkFailed = true;
+          // In the returned state, not merely counted — see
+          // [WatcherState.unreconciled].
+          unreconciled.add(link);
         }
       }
     } finally {
       if (holdsLock) await store.releaseReconcileLock(lockScope, owner);
     }
 
-    // Recorded for the same reason as the zone guess: a link this app silently
-    // stopped checking is the failure it cannot detect in itself. §13's panel
-    // reads it in Phase 7; until then it is in `dump`.
-    await store.setLinkReconcileFailed(anyLinkFailed);
-
-    // Across the whole watched set, and written on every pass so it clears
-    // itself once the offending link is gone. A guess the app cannot see is a
-    // fault nobody will ever be told about — §13's panel reads this in Phase 7.
-    await store.setWatchedZoneUnknown(anyZoneUnknown);
+    // **Guarded, because these sit outside the per-link isolation above.** A
+    // throw here — a full disk, a busy database — would abort `reconcile()`
+    // after every notification had been posted and every cache written, and in
+    // the alarm isolate that throw reaches nobody. The paragraph above argues
+    // that a failure must not cost the pass; these two writes were the one place
+    // that could still do it.
+    //
+    // Device-wide and written on every pass, so both clear themselves once the
+    // condition is gone. A fault the app cannot see is a fault nobody will ever
+    // be told about — §13's panel reads them in Phase 7; until then they are in
+    // `dump`.
+    //
+    // `link_reconcile_failed` is deliberately **not** per-link, unlike the zone
+    // guess: the thing that failed may be `watcher_cache` itself, so writing the
+    // flag into that table could throw for the same reason it is being set.
+    try {
+      await store.setLinkReconcileFailed(anyLinkFailed);
+    } on Object {
+      // Nothing here is worth the pass.
+    }
 
     return WatcherState(
       people: people,
       today: DayKey.fromInstant(now, watcherZone),
       watcherZone: watcherZone,
       warningDelivery: canDeliver.warning,
+      uses24Hour: uses24Hour,
+      unreconciled: unreconciled,
     );
   }
 
-  /// The person's state, and whether their link's zone had to be guessed.
-  Future<(WatchedPersonState, bool)> _reconcileLink({
+  /// One person, reconciled.
+  Future<WatchedPersonState> _reconcileLink({
     required Link link,
     required DateTime now,
     required tz.Location watcherZone,
@@ -472,13 +537,11 @@ class WatcherReconcileService {
     // 6. One write, after the platform calls returned.
     await store.saveWatcherCache(link.id, result.cache);
 
-    return (
-      WatchedPersonState(
-        link: link,
-        cache: result.cache,
-        decision: result.decision,
-      ),
-      result.watchedZoneUnknown,
+    return WatchedPersonState(
+      link: link,
+      cache: result.cache,
+      decision: result.decision,
+      zoneUnknown: result.watchedZoneUnknown,
     );
   }
 

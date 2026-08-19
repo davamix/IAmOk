@@ -71,6 +71,9 @@ void main() {
     double textScale = 1,
     Size surface = const Size(400, 800),
     NotificationDelivery warningDelivery = NotificationDelivery.redundant,
+    // Names of links this pass could not reconcile at all.
+    List<String> unreconciled = const [],
+    bool uses24Hour = true,
   }) async {
     tester.view.physicalSize = surface * tester.view.devicePixelRatio;
     addTearDown(tester.view.reset);
@@ -94,6 +97,11 @@ void main() {
                   // produces it, and it is what every case here is except the
                   // ones about the banner.
                   warningDelivery: warningDelivery,
+                  uses24Hour: uses24Hour,
+                  unreconciled: [
+                    for (final name in unreconciled)
+                      linkTo(name.toLowerCase(), name),
+                  ],
                 ),
               ),
             ),
@@ -420,6 +428,71 @@ void main() {
       );
       expect(find.text('Mum'), findsOneWidget);
       expect(find.text(WatcherCopy.everythingOk), findsOneWidget);
+    });
+  });
+
+  group('a link this pass could not reconcile', () {
+    testWidgets('is NOT rendered as "you are not looking after anyone"',
+        (tester) async {
+      // The per-link guard keeps one bad link from costing every other watched
+      // person their check — but omitting it from the list made it invisible,
+      // and with one link the list is then empty and says so. That is a
+      // positive false claim on the screen the lost-access notification routes
+      // to, and it is the revoked-row defect arriving by a new route.
+      await pump(tester, const [], unreconciled: ['Mum']);
+
+      expect(find.text(WatcherCopy.nobody), findsNothing);
+      expect(find.text('Mum'), findsOneWidget);
+    });
+
+    testWidgets('says it is a fault in this phone, not a claim about her',
+        (tester) async {
+      // The app does not know whether she checked in — only that it could not
+      // find out. ADR-0004's opening convention carries that distinction.
+      await pump(tester, const [], unreconciled: ['Mum']);
+
+      expect(find.text(WatcherCopy.couldNotCheckOn('Mum')), findsOneWidget);
+      expect(find.textContaining('No check-in'), findsNothing);
+    });
+
+    testWidgets('names a next step rather than dead-ending', (tester) async {
+      await pump(tester, const [], unreconciled: ['Mum']);
+      expect(find.text(WatcherCopy.couldNotCheckRemedy), findsOneWidget);
+    });
+
+    testWidgets('does not claim the reader will not be warned', (tester) async {
+      // The alarm may still be armed and the next fire may succeed. Saying
+      // otherwise would overstate what this phone knows.
+      await pump(tester, const [], unreconciled: ['Mum']);
+      expect(find.text(WatcherCopy.accessLostConsequence('Mum')), findsNothing);
+    });
+
+    testWidgets('appears alongside the links that DID reconcile',
+        (tester) async {
+      await pump(
+        tester,
+        [person(cache: WatcherCache(lastConfirmedDay: d))],
+        unreconciled: ['Granddad'],
+      );
+
+      expect(find.text(WatcherCopy.everythingOk), findsOneWidget);
+      expect(find.text(WatcherCopy.couldNotCheckOn('Granddad')), findsOneWidget);
+    });
+
+    testWidgets('and the warnings-off banner still shows above it',
+        (tester) async {
+      // The `isEmpty` early return skipped the banner too, so a muted watcher
+      // whose only link failed got neither the row nor the warning that they
+      // will not be told next time.
+      await pump(
+        tester,
+        const [],
+        unreconciled: ['Mum'],
+        warningDelivery: NotificationDelivery.unavailable,
+      );
+
+      expect(find.text(WatcherCopy.warningsOff), findsOneWidget);
+      expect(find.text(WatcherCopy.couldNotCheckOn('Mum')), findsOneWidget);
     });
   });
 

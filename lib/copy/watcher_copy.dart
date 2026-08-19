@@ -131,6 +131,29 @@ abstract final class WatcherCopy {
   /// the same trade `TapCopy.notificationsOffAction` already makes.
   static const String warningsOffAction = 'Turn warnings on';
 
+  // ------------------------------------------------- this pass could not run
+
+  /// The reconcile threw on this link and nothing about her state was computed.
+  ///
+  /// **A claim about us**, in ADR-0004's shape, because that is all the device
+  /// can support — it does not know whether she checked in, only that it could
+  /// not find out. *"No check-in from…"* would be a claim about her that
+  /// nothing here backs.
+  ///
+  /// The row exists because the alternative was worse: a link left out of the
+  /// list is invisible, and with one link that made the screen say *"You're not
+  /// looking after anyone."* about someone the reader is still looking after.
+  static String couldNotCheckOn(String watchedName) =>
+      'Can\'t check on $watchedName — something went wrong on this phone.';
+
+  /// Deliberately not *"you will not be warned"*: the alarm may well still be
+  /// armed and the next fire may succeed, so that would overstate what is
+  /// known. It names a next human on the second attempt, the same shape as
+  /// [accessLostRemedy]'s dead-end case.
+  static const String couldNotCheckRemedy =
+      'It will try again. If this is still here tomorrow, ask whoever set up '
+      'the app.';
+
   // ---------------------------------------------------------------- revoked
 
   /// The link has ended — `status` is no longer `accepted`.

@@ -7,6 +7,7 @@ import 'package:timezone/timezone.dart' as tz;
 
 import '../application/providers.dart';
 import '../application/watched_reconcile_service.dart';
+import '../copy/notification_copy.dart';
 import '../copy/tap_copy.dart';
 import '../domain/domain.dart';
 import 'debug_harness.dart';
@@ -209,7 +210,22 @@ class TapBody extends ConsumerWidget {
     final at = zone == null
         ? checkIn.deviceTappedAt
         : tz.TZDateTime.from(checkIn.deviceTappedAt, zone);
-    return TimeOfDay.fromDateTime(at).format(context);
+    // **`NotificationCopy`, not `TimeOfDay.format`.** This screen was the third
+    // place in the app that turned an instant into a time, and it rendered
+    // *"9:14 AM"* where every other surface says *"9:14 am"* — the same
+    // difference `momentLabel` and `dayLabel` are exposed to prevent, on a line
+    // an 80-year-old checks every morning.
+    //
+    // `MaterialLocalizations` would localise, which this one does not; that is a
+    // real trade and the right side of it today, because the app is not
+    // localised at all and one consistent set of words matters more than one
+    // correctly-localised outlier. Revisit together with the rest when
+    // translation lands.
+    return NotificationCopy.timeLabel(
+      at,
+      zone ?? TimeZones.utc,
+      MediaQuery.of(context).alwaysUse24HourFormat,
+    );
   }
 }
 

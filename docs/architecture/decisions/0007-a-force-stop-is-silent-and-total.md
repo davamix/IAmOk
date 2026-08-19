@@ -56,11 +56,17 @@ Stated as a repo constraint and repeated here because it is the trap this ADR ex
 optimisation that skips work because the store says it is already done re-opens this defect. The
 store's alarm rows exist to compute what to *cancel*, not to decide what to *arm*.
 
-**3. Opening the app repairs **both** sides, on launch and on resume.**
+**3. Opening the app repairs both sides — by two different mechanisms, on launch and on resume.**
 
-Home is the Tap screen, so only the watched side's provider rebuilds; the watcher side had to be
-reconciled explicitly or a watcher who opened the app was still deaf. And "opening" is usually a
-*resume* rather than a launch, so the repair runs on both. See `main.dart`'s `_reconcileBothSides`.
+Home is the Tap screen, so the **watched** side is repaired by `TapScreen`'s own lifecycle observer,
+which stays mounted underneath the pushed watcher list and so fires on every resume. The **watcher**
+side has no such screen in the common case, and had to be reconciled explicitly or a watcher who
+opened the app was still deaf: `main.dart`'s `_reconcileWatcherSide`, called from the post-frame
+callback on launch and from `didChangeAppLifecycleState` on resume.
+
+Naming one function for both was wrong and briefly written that way here. They are two mechanisms
+with two lifetimes, and the watcher one defers when the list is showing precisely because the list
+has an observer of its own.
 
 **4. The residue is surfaced, not fixed.**
 

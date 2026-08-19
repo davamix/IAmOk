@@ -1,3 +1,4 @@
+import 'package:flutter/widgets.dart';
 import 'package:flutter_timezone/flutter_timezone.dart';
 
 import '../domain/domain.dart';
@@ -54,4 +55,22 @@ class ClockService {
       return null;
     }
   }
+
+  /// Whether the device shows times as 24-hour.
+  ///
+  /// §6 already gives this class the job of discovering device facts and
+  /// writing them to `LocalStore` on resume; this is the second such fact, and
+  /// it belongs beside the first for the reason the first exists — a bare
+  /// isolate cannot ask.
+  ///
+  /// **From `platformDispatcher`, not `MediaQuery`.** Reading it through a
+  /// `BuildContext` is what produced two sources for one fact: the screen read
+  /// it live while the service read the cached copy, so the row and the
+  /// notification from the **same reconcile** could disagree about the same
+  /// instant — `10:14` against `10:14 am`. That is exactly the drift
+  /// `momentLabel` and `dayLabel` were exposed to prevent, since the reader
+  /// compares the two directly. No context is needed here, so there is one
+  /// writer, one reader, and nothing to drift.
+  bool uses24HourClock() =>
+      WidgetsBinding.instance.platformDispatcher.alwaysUse24HourFormat;
 }

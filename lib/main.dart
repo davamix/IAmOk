@@ -48,7 +48,7 @@ Future<void> main() async {
   // `WatchedStateNotifier.build()` already awaited this before its own first
   // reconcile — the fix for a defect measured on the POCO F3, where a fresh
   // install armed 19 alarms at UTC wall times, an hour or two late each. But
-  // `_reconcileBothSides` runs from a post-frame callback and awaits nothing, so
+  // `_reconcileWatcherSide` runs from a post-frame callback and awaits nothing, so
   // on the watcher side the same race was still open: `deviceTimezone()` is null
   // on a fresh install, `_watcherZone()` takes ADR-0002's documented UTC
   // fallback, and seven warning alarms are armed at 10:00 **UTC**.
@@ -59,9 +59,15 @@ Future<void> main() async {
   //
   // Swallowed, never fatal: a plugin hiccup must not stop the app starting, and
   // every reader below has a documented fallback.
+  const clockService = ClockService();
   try {
-    final zone = await const ClockService().deviceTimezone();
+    final zone = await clockService.deviceTimezone();
     if (zone != null) await store.setDeviceTimezone(zone);
+    // The device's 12h/24h preference, cached beside the zone and for the same
+    // reason: the alarm isolate has no way to ask. Awaited here rather than
+    // written fire-and-forget from a widget, so the first reconcile cannot read
+    // a default the device disagrees with.
+    await store.setUses24HourClock(clockService.uses24HourClock());
   } on Object {
     // Deliberate; see above.
   }
@@ -133,15 +139,6 @@ class _IAmOkAppState extends ConsumerState<IAmOkApp>
   /// cold start is the *normal* arrival rather than the edge case.
   final _navigator = GlobalKey<NavigatorState>();
 
-  /// Whether the watcher list is currently on top.
-  ///
-  /// Tracked because it decides which reconcile runs on resume, and the two
-  /// differ in the one parameter that can lose a warning silently — see
-  /// [didChangeAppLifecycleState]. The push below is the only route to that
-  /// screen in Phase 3, so this stays true; Phase 5 routes on role and will
-  /// need a real answer rather than a remembered one.
-  bool _watcherListShowing = false;
-
   @override
   void initState() {
     super.initState();
@@ -150,13 +147,13 @@ class _IAmOkAppState extends ConsumerState<IAmOkApp>
     // After the first frame, so a payload captured before runApp is honoured.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _openWatcherList();
-      _reconcileBothSides();
+      _reconcileWatcherSide();
     });
   }
 
-  /// **A resume is a real reconcile on both sides, not only on the one showing.**
+  /// **A resume is a real reconcile, not only a launch.**
   ///
-  /// `_reconcileBothSides` ran from a post-frame callback and nowhere else, so
+  /// The watcher-side repair ran from a post-frame callback and nowhere else, so
   /// it covered the cold start and nothing after it. A watcher who backgrounds
   /// the app and comes back — which is most of how a phone is used — reconciled
   /// only the watched side, because that is the side whose provider rebuilds.
@@ -168,47 +165,24 @@ class _IAmOkAppState extends ConsumerState<IAmOkApp>
   /// (§13), and a resume is exactly when that must be re-observed.
   ///
   /// **It defers to the list when the list is showing**, rather than running
-  /// alongside it. Two concurrent watcher reconciles are refused by the lease
-  /// (ADR-0006), but which one wins decides `NotificationDelivery`, and the two
-  /// answers are not symmetric: passing `false` while the list shows posts a
-  /// notification the reader can already see — noise. Passing `true` while it
-  /// does not consumes the day and shows nobody anything — a lost warning, and
-  /// the defect measured on the POCO F3. So the screen's own observer handles
-  /// its case, and this handles every other.
+  /// alongside it — the list has an observer of its own and passes
+  /// `watcherListShowing: true`, which this would contradict.
+  ///
+  /// The guard is about **noise and duplicate work**, not about a lost warning,
+  /// and the distinction matters for whoever changes it next. Running with
+  /// `false` while the list shows would post a notification the reader can
+  /// already see: mildly wrong. Running with `true` while it does not consumes
+  /// the day and shows nobody anything: a lost warning, and the defect measured
+  /// on the POCO F3. So if this guard is ever wrong, it must be wrong in the
+  /// direction of running — never in the direction of defaulting to `true`.
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state != AppLifecycleState.resumed) return;
-    _cacheClockFormat();
-    if (_watcherListShowing) return;
-    _reconcileBothSides();
-  }
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    _cacheClockFormat();
-  }
-
-  /// Writes the device's 12h/24h preference where a bare isolate can read it.
-  ///
-  /// `guidelines.md` asks for the device's own setting rather than a hard-coded
-  /// one, and reading it needs `MediaQuery.alwaysUse24HourFormat` — a
-  /// `BuildContext`. The isolate that posts most of these notifications has no
-  /// widget tree, so this is the same arrangement as the device timezone
-  /// (ADR-0002 decision 2): the UI observes, the store carries.
-  ///
-  /// Re-written on resume as well as on dependency change, because a reader can
-  /// switch it in Android settings while the app is backgrounded — and the next
-  /// thing to render a time is likely to be a warning at 10:00 tomorrow.
-  void _cacheClockFormat() {
-    final uses24Hour = MediaQuery.of(context).alwaysUse24HourFormat;
-    unawaited(
-      ref
-          .read(appServicesProvider)
-          .store
-          .setUses24HourClock(uses24Hour)
-          .catchError((Object _, StackTrace _) {}),
-    );
+    // The list has its own observer and passes `watcherListShowing: true`, which
+    // this must not race — see `WatcherScreen.isShowing` for why the screen owns
+    // that fact rather than this file tracking it.
+    if (WatcherScreen.isShowing) return;
+    _reconcileWatcherSide();
   }
 
   @override
@@ -255,7 +229,7 @@ class _IAmOkAppState extends ConsumerState<IAmOkApp>
   /// Errors are swallowed for the same reason `_cacheDeviceZone` swallows its
   /// own: this is a repair running behind whatever screen the user actually
   /// opened, and it must never be able to replace it with an error.
-  void _reconcileBothSides() {
+  void _reconcileWatcherSide() {
     final services = ref.read(appServicesProvider);
     unawaited(
       services
@@ -270,6 +244,7 @@ class _IAmOkAppState extends ConsumerState<IAmOkApp>
               today: DayKey(1970, 1, 1),
               watcherZone: TimeZones.utc,
               warningDelivery: NotificationDelivery.unavailable,
+              uses24Hour: true,
             ),
           ),
     );
@@ -301,9 +276,9 @@ class _IAmOkAppState extends ConsumerState<IAmOkApp>
   }
 
   Future<void> _openIfWatched(String linkId, NavigatorState navigator) async {
-    final services = ref.read(appServicesProvider);
-    final links = await services.store.linksWatchedBy(services.selfUid);
-    if (!links.any((link) => link.id == linkId)) {
+    // Through `AppServices`, not `store` — §5's arrows are Presentation →
+    // Application → Data, and this is a widget.
+    if (!await ref.read(appServicesProvider).watches(linkId)) {
       // Not this user's business. Consumed so a rebuild does not retry it —
       // and deliberately NOT navigated anywhere, because there is nothing to
       // show and no screen that could explain it honestly.
@@ -315,16 +290,16 @@ class _IAmOkAppState extends ConsumerState<IAmOkApp>
   }
 
   void _pushWatcherList(NavigatorState navigator) {
+    // **Never twice.** A second notification tap while the list is already up
+    // would otherwise stack a second `WatcherScreen`: two mounted lifecycle
+    // observers, two reconciles per resume, and a Back that returns to an
+    // identical screen. `_openIfWatched` captures its link id before awaiting,
+    // so the list consuming the tap does not prevent this.
+    if (WatcherScreen.isShowing) return;
     // Phase 5 routes on role; until then the watched screen is home and this is
     // pushed on top, so Back returns where the reader came from.
-    // The flag is set around the push rather than inferred from the navigator,
-    // because `didChangeAppLifecycleState` needs the answer synchronously and
-    // this is the only route to that screen in Phase 3.
-    _watcherListShowing = true;
-    unawaited(
-      navigator
-          .push(MaterialPageRoute<void>(builder: (_) => const WatcherScreen()))
-          .then((_) => _watcherListShowing = false),
+    navigator.push(
+      MaterialPageRoute<void>(builder: (_) => const WatcherScreen()),
     );
   }
 

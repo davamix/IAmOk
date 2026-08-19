@@ -54,11 +54,25 @@ third isolate.
 > reads, still decides, and still speaks — deliberately, because silence is the failure this side
 > cannot detect in itself. So the cadence is *not* serialised by this mechanism, and never was.
 >
-> What actually protects it is that the cadence is keyed on `accessLostNotifiedOn`, a value each run
-> re-reads and compares against the day it is deciding — so a second run for the same day finds the
-> milestone already served and owes nothing. That is idempotence, not exclusion, and it holds whether
-> or not this lease exists. Naming the wrong mechanism as the guard is how the right one gets removed
-> as redundant.
+> **The first correction of this paragraph named the wrong guard too**, and the review caught it.
+> It claimed the within-day dedupe protects the cadence — but `alreadyToday` sits *below* the
+> transition and cause-change branches in `WatcherReconciler`, deliberately, and that ordering is
+> itself a recorded POCO F3 finding. So on the first refusal of a spell, or on a cause change, the
+> dedupe does not run at all: two concurrent runs both see `since == null`, both compute `owed`, and
+> both notify. Under exactly the concurrency this ADR is about.
+>
+> Two things hold the outcome up, and neither is this lease:
+>
+> 1. **The notification id is keyed on the link alone** — `AlarmIds.accessLost(linkId)`, no day. The
+>    second post *replaces* the first rather than stacking, so the watcher sees one notice, which is
+>    also what makes ADR-0004's "a changed cause re-notifies" safe.
+> 2. **Both runs stamp `accessLostNotifiedOn` with the same `decision.day`.** Writing the same value
+>    twice advances nothing, so no milestone is skipped.
+>
+> That is a deterministic id plus same-value-write idempotence. Both are cheap to delete by accident
+> and neither looks load-bearing on its own, which is the whole reason for writing this down —
+> naming the wrong mechanism as the guard is how the right one gets removed as redundant, and this
+> paragraph has now done that once.
 
 ## Decision
 

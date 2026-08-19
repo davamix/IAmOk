@@ -56,6 +56,20 @@ class AppServices {
         notifications.canScheduleExact,
       );
 
+  /// Whether [linkId] is one this user actually watches.
+  ///
+  /// **On `AppServices` rather than reached for directly from a widget.** §5's
+  /// arrows are Presentation → Application → Domain, with Data driven by
+  /// Application; `main.dart` was calling `store.linksWatchedBy` from a widget,
+  /// which inverts that for one lookup.
+  ///
+  /// It exists because a notification payload is an **untrusted hint** — see
+  /// `NotificationRouter.tappedLink`. Nothing may open a screen on the strength
+  /// of a string that arrived from outside, and this is the resolution step that
+  /// must be in place before Phase 5 keys Firestore reads on link ids.
+  Future<bool> watches(String linkId) async =>
+      (await store.linksWatchedBy(selfUid)).any((link) => link.id == linkId);
+
   /// The watcher's reconcile.
   ///
   /// [watcherListShowing] is **not** "the UI isolate is running" — it is "the

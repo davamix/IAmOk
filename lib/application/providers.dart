@@ -142,6 +142,18 @@ class WatcherStateNotifier extends AsyncNotifier<WatcherState> {
           .reconcile(selfUid: services.selfUid),
     );
   }
+
+  /// The warnings-off banner's action, then a full reconcile so the banner
+  /// disappears the moment it stops being true.
+  ///
+  /// Android stops showing the prompt after two refusals, at which point this
+  /// is a no-op and the banner is the honest dead end — the same trade the Tap
+  /// screen's twin already makes.
+  Future<void> requestNotifications() async {
+    final services = ref.read(appServicesProvider);
+    await services.permissions.requestNotifications();
+    await refresh();
+  }
 }
 
 class WatchedStateNotifier extends AsyncNotifier<WatchedState> {

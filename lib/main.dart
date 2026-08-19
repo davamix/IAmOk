@@ -186,10 +186,14 @@ class _IAmOkAppState extends ConsumerState<IAmOkApp> {
           .watcherReconcile(watcherListShowing: false)
           .reconcile(selfUid: services.selfUid)
           .catchError(
+            // Discarded — nothing renders this. It exists only to satisfy
+            // `catchError`'s return type on a repair running behind whatever
+            // screen the user actually opened.
             (Object _, StackTrace _) => WatcherState(
               people: const [],
               today: DayKey(1970, 1, 1),
               watcherZone: TimeZones.utc,
+              warningDelivery: NotificationDelivery.unavailable,
             ),
           ),
     );

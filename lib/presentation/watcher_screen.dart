@@ -5,7 +5,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../application/providers.dart';
 import '../application/watcher_reconcile_service.dart';
 import '../copy/notification_copy.dart';
-import '../copy/tap_copy.dart';
 import '../copy/watcher_copy.dart';
 import '../domain/domain.dart';
 import '../platform/notification_router.dart';
@@ -89,6 +88,8 @@ class _WatcherScreenState extends ConsumerState<WatcherScreen>
         data: (watcher) => WatcherBody(
           state: watcher,
           onRefresh: ref.read(watcherStateProvider.notifier).refresh,
+          onTurnOnWarnings:
+              ref.read(watcherStateProvider.notifier).requestNotifications,
         ),
       ),
     );
@@ -107,11 +108,11 @@ class _Failed extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text(TapCopy.couldNotStart, textAlign: TextAlign.center),
+              Text(WatcherCopy.couldNotCheck, textAlign: TextAlign.center),
               const SizedBox(height: 16),
               FilledButton(
                 onPressed: onRetry,
-                child: const Text(TapCopy.retry),
+                child: const Text(WatcherCopy.retry),
               ),
             ],
           ),
@@ -148,13 +149,21 @@ class _Empty extends StatelessWidget {
 /// `docs/testing/strategy.md`'s rule is that if a test needs a device to answer
 /// a question about logic, the logic is in the wrong layer.
 class WatcherBody extends StatefulWidget {
-  const WatcherBody({super.key, required this.state, this.onRefresh});
+  const WatcherBody({
+    super.key,
+    required this.state,
+    this.onRefresh,
+    this.onTurnOnWarnings,
+  });
 
   final WatcherState state;
 
   /// Pull-to-refresh. Optional so a test can pump the body without a container;
   /// the screen supplies the real reconcile.
   final Future<void> Function()? onRefresh;
+
+  /// The warnings-off banner's action.
+  final Future<void> Function()? onTurnOnWarnings;
 
   @override
   State<WatcherBody> createState() => _WatcherBodyState();
@@ -192,23 +201,87 @@ class _WatcherBodyState extends State<WatcherBody> {
   @override
   Widget build(BuildContext context) {
     if (widget.state.isEmpty) return const _Empty();
-    return RefreshIndicator(
-        onRefresh: () async => widget.onRefresh?.call(),
-        child: ListView.separated(
-          // Always scrollable, so pull-to-refresh works with one short row.
-          physics: const AlwaysScrollableScrollPhysics(),
-          padding: const EdgeInsets.symmetric(vertical: 8),
-          itemCount: widget.state.people.length,
-          separatorBuilder: (_, _) => const Divider(height: 1),
-          itemBuilder: (context, i) {
-            final person = widget.state.people[i];
-            return _PersonRow(
-              person: person,
-              watcherZone: widget.state.watcherZone,
-              highlighted: person.link.id == _highlighted,
-            );
-          },
-        ));
+    return Column(
+      children: [
+        // Above the list, because when it is showing it is the most important
+        // thing on the screen: the rows describe what is true, this says the
+        // reader will not be told about it again.
+        if (widget.state.warningsSilenced)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+            child: _WarningsOffBanner(onTurnOn: widget.onTurnOnWarnings),
+          ),
+        Expanded(
+          child: RefreshIndicator(
+            onRefresh: () async => widget.onRefresh?.call(),
+            child: ListView.separated(
+              // Always scrollable, so pull-to-refresh works with one short row.
+              physics: const AlwaysScrollableScrollPhysics(),
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              itemCount: widget.state.people.length,
+              separatorBuilder: (_, _) => const Divider(height: 1),
+              itemBuilder: (context, i) {
+                final person = widget.state.people[i];
+                return _PersonRow(
+                  person: person,
+                  watcherZone: widget.state.watcherZone,
+                  today: widget.state.today,
+                  highlighted: person.link.id == _highlighted,
+                );
+              },
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// *"This phone will not warn you about anyone."*
+///
+/// The watcher-side twin of the Tap screen's `_NotificationsOffBanner`, and the
+/// same shape deliberately: says what stops working, and offers the action.
+/// *"Ask a family member"* is the dead-end wording and is only honest once there
+/// is nothing left to press — on this screen the reader **is** the family
+/// member, so it would never be honest here.
+///
+/// It appears while they are looking at the app, which is the one moment this
+/// state can still be communicated: every other channel for saying it is the
+/// channel that is switched off.
+class _WarningsOffBanner extends StatelessWidget {
+  const _WarningsOffBanner({required this.onTurnOn});
+
+  final Future<void> Function()? onTurnOn;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.errorContainer,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            WatcherCopy.warningsOff,
+            textAlign: TextAlign.center,
+            style: theme.textTheme.titleMedium
+                ?.copyWith(color: theme.colorScheme.onErrorContainer),
+          ),
+          TextButton(
+            onPressed: onTurnOn == null ? null : () => onTurnOn!(),
+            // The 48dp floor, which applies to everything that is not the Tap
+            // screen's primary target.
+            style: TextButton.styleFrom(minimumSize: const Size(88, 48)),
+            child: const Text(WatcherCopy.warningsOffAction),
+          ),
+        ],
+      ),
+    );
   }
 }
 
@@ -216,6 +289,7 @@ class _PersonRow extends StatelessWidget {
   const _PersonRow({
     required this.person,
     required this.watcherZone,
+    required this.today,
     required this.highlighted,
   });
 
@@ -226,6 +300,12 @@ class _PersonRow extends StatelessWidget {
   /// watched person's zone, which is a different question and was what the row
   /// used before.
   final tz.Location watcherZone;
+
+  /// Today in the reader's own zone, so an instant older than a week is dated
+  /// rather than rendered as a bare weekday. On a revoked or refused link
+  /// `lastReconcileAt` never advances again, so *"Tuesday 10:14"* would
+  /// otherwise stand unchanged into week twelve while reading as this week.
+  final DayKey today;
 
   final bool highlighted;
 
@@ -280,12 +360,20 @@ class _PersonRow extends StatelessWidget {
     // every later read refused by definition — so the access branch would fire
     // too, and send the reader off to sign in again and repair a permission
     // fault that does not exist. The link ended; there is nothing to fix.
-    if (!person.link.isAccepted) {
+    if (person.link.status == LinkStatus.revoked) {
       return _RowStatus(
+        // **No "this phone last checked" line here**, alone among the row
+        // states. That line exists to distinguish *working* from *stopped* for a
+        // force-stopped watcher whose rows all still read "Everything OK". On a
+        // revoked link nothing is working by design and the first sentence has
+        // already said so — what the line would add is the suggestion that this
+        // phone checks on her periodically and last managed it on Tuesday.
+        // Worse, a revoked link refuses every read forever, so
+        // `lastReconcileAt` never advances and it would say the same Tuesday in
+        // week twelve.
         lines: [
           WatcherCopy.linkEnded(person.name),
           WatcherCopy.accessLostConsequence(person.name),
-          _lastChecked(cache),
         ],
         // Not an error. A settled state, not bad news about her — "quiet
         // confirm, loud miss" keeps alarm styling for a miss. The words carry
@@ -322,6 +410,7 @@ class _PersonRow extends StatelessWidget {
             unverifiedSince: person.decision.unverifiedSince,
             lastConfirmedDay: cache.lastConfirmedDay,
             watcherZone: watcherZone,
+            today: today,
           ),
           _lastChecked(cache),
         ],
@@ -352,7 +441,7 @@ class _PersonRow extends StatelessWidget {
   String _lastChecked(WatcherCache cache) => cache.lastReconcileAt == null
       ? WatcherCopy.neverChecked
       : WatcherCopy.lastChecked(
-          NotificationCopy.momentLabel(cache.lastReconcileAt!, watcherZone));
+          NotificationCopy.momentLabel(cache.lastReconcileAt!, watcherZone, today));
 }
 
 class _RowStatus {

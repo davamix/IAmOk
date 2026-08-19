@@ -107,7 +107,13 @@ Recorded here so they are not silently decided by whoever writes the widget firs
 
 - **Multiple watched people per watcher.** The data model supports it; the list UI has not been
   designed.
-- **What the watcher sees on cold open after weeks away.** A history strip, or just today?
+- ~~**What the watcher sees on cold open after weeks away.** A history strip, or just today?~~
+  **Settled at the Phase 3 review: today only.** Not chosen on aesthetics — a fallback to "the
+  newest day we ever warned about" shipped, and produced *"No check-in from Mum yesterday."*
+  permanently on the 18th about a day she had checked in on, because a missed day leaves
+  `warningsShownFor` only by correction or revocation. Every string in the warning set says
+  *yesterday*, and only today's `D` is yesterday, so only today's `D` can be rendered honestly.
+  Recorded in `screens.md` under "The watcher list shows today only".
 - **The first day back after away.** Routine is most likely to break the day someone returns from a
   trip. No grace day is planned — the reminders do their job — but the copy could acknowledge it.
 - **Whether the watched person's screen should show anything about the watchers at all**, beyond

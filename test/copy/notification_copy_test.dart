@@ -30,6 +30,9 @@ void main() {
     AwayPeriod? away,
     DateTime? unverifiedSince,
     DayKey? lastConfirmedDay,
+    // Null means five days after `since` — inside the week, so the existing
+    // assertions keep exercising the weekday form.
+    DayKey? today,
   }) =>
       NotificationCopy.warningBody(
         outcome: outcome,
@@ -39,6 +42,7 @@ void main() {
         unverifiedSince: unverifiedSince,
         lastConfirmedDay: lastConfirmedDay,
         watcherZone: madrid,
+        today: today ?? day('2026-08-16'),
       );
 
   group('the two openings are a convention, not a coincidence', () {
@@ -149,6 +153,8 @@ void main() {
           ),
         NotificationCopy.correctionBody(
           watchedName: 'Mum',
+          day: day('2026-08-16'),
+          today: day('2026-08-17'),
           tappedAt: since,
           watcherZone: madrid,
         ),
@@ -240,11 +246,55 @@ void main() {
       expect(
         NotificationCopy.correctionBody(
           watchedName: 'Mum',
+          day: day('2026-08-16'),
+          today: day('2026-08-17'),
           tappedAt: null,
           watcherZone: madrid,
         ),
         'Correction: Mum did check in yesterday.',
       );
+    });
+
+    test('an OLDER corrected day is named, never called "yesterday"', () {
+      // **The reconciler emits a correction for every standing warning a read
+      // confirms**, not just yesterday's, and a day leaves `warningsShownFor`
+      // only by correction or revocation — so a genuinely missed day sits there
+      // indefinitely.
+      //
+      // Mum's phone is offline over a weekend and both taps sync on Monday. The
+      // watcher was warned about Saturday on Sunday and about Sunday on Monday.
+      // Monday's read confirms both, and two notifications go out at two ids.
+      // With "yesterday" hard-coded they carried identical text — the same
+      // sentence twice, one of them wrong about which day it covered, to a
+      // reader who cannot ask.
+      expect(
+        NotificationCopy.correctionBody(
+          watchedName: 'Mum',
+          day: day('2026-08-15'),
+          today: day('2026-08-17'),
+          tappedAt: null,
+          watcherZone: madrid,
+        ),
+        'Correction: Mum did check in on Saturday 15 August.',
+      );
+    });
+
+    test('two corrections in one pass do not read identically', () {
+      final saturday = NotificationCopy.correctionBody(
+        watchedName: 'Mum',
+        day: day('2026-08-15'),
+        today: day('2026-08-17'),
+        tappedAt: null,
+        watcherZone: madrid,
+      );
+      final yesterday = NotificationCopy.correctionBody(
+        watchedName: 'Mum',
+        day: day('2026-08-16'),
+        today: day('2026-08-17'),
+        tappedAt: null,
+        watcherZone: madrid,
+      );
+      expect(saturday, isNot(yesterday));
     });
 
     test('STAGED FOR PHASE 4 — with a real tap time, it says so', () {
@@ -262,6 +312,8 @@ void main() {
       expect(
         NotificationCopy.correctionBody(
           watchedName: 'Mum',
+          day: day('2026-08-16'),
+          today: day('2026-08-17'),
           tappedAt: at(madrid, 2026, 8, 16, 23, 40),
           watcherZone: madrid,
         ),

@@ -64,6 +64,7 @@ void main() {
     List<WatchedPersonState> people, {
     double textScale = 1,
     Size surface = const Size(400, 800),
+    NotificationDelivery warningDelivery = NotificationDelivery.redundant,
   }) async {
     tester.view.physicalSize = surface * tester.view.devicePixelRatio;
     addTearDown(tester.view.reset);
@@ -80,6 +81,10 @@ void main() {
                   people: people,
                   today: today,
                   watcherZone: TimeZones.location('Europe/Madrid'),
+                  // `redundant` by default: the list being on screen is what
+                  // produces it, and it is what every case here is except the
+                  // ones about the banner.
+                  warningDelivery: warningDelivery,
                 ),
               ),
             ),
@@ -290,6 +295,79 @@ void main() {
     });
   });
 
+  group('when this phone cannot warn at all', () {
+    testWidgets('it says so, and offers the action', (tester) async {
+      // **The screen is the only delivery there will ever be** in this state,
+      // and nothing said so. The reader saw the warning on the row, dealt with
+      // it, closed the app, and went on believing they would be told next time.
+      //
+      // §13 rates `POST_NOTIFICATIONS` revocation High because Android takes it
+      // from apps nobody opens — which is the watcher by design. The watched
+      // side has had this banner since Phase 2, where the cost is a missed
+      // nudge; here the cost is a family not being warned.
+      await pump(
+        tester,
+        [person(cache: WatcherCache(lastConfirmedDay: d))],
+        warningDelivery: NotificationDelivery.unavailable,
+      );
+
+      expect(find.text(WatcherCopy.warningsOff), findsOneWidget);
+      expect(find.text(WatcherCopy.warningsOffAction), findsOneWidget);
+    });
+
+    testWidgets('it does not tell the family member to ask a family member',
+        (tester) async {
+      // The dead-end wording belongs to the Tap screen, whose reader is 80.
+      // Here the reader IS the person everyone else would be sent to.
+      await pump(
+        tester,
+        [person()],
+        warningDelivery: NotificationDelivery.unavailable,
+      );
+      expect(find.textContaining('Ask a family member'), findsNothing);
+    });
+
+    testWidgets('the action meets the 48dp floor', (tester) async {
+      await pump(
+        tester,
+        [person()],
+        warningDelivery: NotificationDelivery.unavailable,
+      );
+      final size = tester.getSize(find.widgetWithText(
+          TextButton, WatcherCopy.warningsOffAction));
+      expect(size.height, greaterThanOrEqualTo(48));
+    });
+
+    testWidgets('nothing is shown when warnings work', (tester) async {
+      await pump(tester, [person()]);
+      expect(find.text(WatcherCopy.warningsOff), findsNothing);
+    });
+
+    testWidgets('redundant is not a fault — the reader is looking at it',
+        (tester) async {
+      // `redundant` means the list is on screen, which is the good case. A
+      // banner there would call the app broken for working as designed.
+      await pump(
+        tester,
+        [person()],
+        warningDelivery: NotificationDelivery.redundant,
+      );
+      expect(find.text(WatcherCopy.warningsOff), findsNothing);
+    });
+
+    testWidgets('the rows are still readable beneath it', (tester) async {
+      // The banner must not push the list out. It is the reason the reader
+      // needs the rows more than usual, not less.
+      await pump(
+        tester,
+        [person(cache: WatcherCache(lastConfirmedDay: d))],
+        warningDelivery: NotificationDelivery.unavailable,
+      );
+      expect(find.text('Mum'), findsOneWidget);
+      expect(find.text(WatcherCopy.everythingOk), findsOneWidget);
+    });
+  });
+
   group('the revoked row', () {
     WatchedPersonState revoked({WatcherCache? cache}) => person(
           status: LinkStatus.revoked,
@@ -351,7 +429,13 @@ void main() {
           isNot(Theme.of(context).colorScheme.error));
     });
 
-    testWidgets('still says when this phone last checked', (tester) async {
+    testWidgets('does NOT say when this phone last checked', (tester) async {
+      // Alone among the row states. That line distinguishes *working* from
+      // *stopped* for a force-stopped watcher whose rows all read "Everything
+      // OK" — but nothing is working here by design, and the row has already
+      // said so. What it would add is the suggestion that this phone still
+      // checks on her periodically, frozen on the same Tuesday forever, because
+      // a revoked link refuses every read and `lastReconcileAt` never advances.
       await pump(tester, [
         revoked(
           cache: WatcherCache(
@@ -360,7 +444,7 @@ void main() {
           ),
         ),
       ]);
-      expect(find.textContaining('This phone last checked'), findsOneWidget);
+      expect(find.textContaining('This phone last checked'), findsNothing);
     });
   });
 

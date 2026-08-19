@@ -91,6 +91,10 @@ abstract final class NotificationCopy {
     DateTime? unverifiedSince,
     DayKey? lastConfirmedDay,
     required tz.Location watcherZone,
+    /// Today in the **watcher's** zone. Needed so an `unverifiedSince` older
+    /// than a week is dated rather than left as a bare weekday the reader will
+    /// take for this week — see [_moment].
+    required DayKey today,
   }) =>
       switch (outcome) {
         WarningOutcome.silent => throw ArgumentError(
@@ -99,10 +103,10 @@ abstract final class NotificationCopy {
           ),
         WarningOutcome.warnOnline => 'No check-in from $watchedName yesterday.',
         WarningOutcome.warnOffline => 'No check-in received from $watchedName '
-            'yesterday — ${_offlineClause(unverifiedSince, watcherZone)}',
+            'yesterday — ${_offlineClause(unverifiedSince, watcherZone, today)}',
         WarningOutcome.warnUnverifiableAway =>
           'Can\'t check on $watchedName — '
-              '${_offlineClause(unverifiedSince, watcherZone)} '
+              '${_offlineClause(unverifiedSince, watcherZone, today)} '
               '${_awayClause(watchedName, away)}',
         WarningOutcome.warnAccessLost => _accessLostBody(
             watchedName: watchedName,
@@ -119,10 +123,14 @@ abstract final class NotificationCopy {
   /// "offline since". Rendering *"offline since null"* to a worried family is
   /// the failure the variants exist to prevent, which is why the null case is a
   /// different sentence rather than a formatting fallback.
-  static String _offlineClause(DateTime? since, tz.Location zone) =>
+  static String _offlineClause(
+    DateTime? since,
+    tz.Location zone,
+    DayKey today,
+  ) =>
       since == null
           ? 'your phone has not been able to check even once.'
-          : 'your phone has been offline since ${_moment(since, zone)}.';
+          : 'your phone has been offline since ${_moment(since, zone, today)}.';
 
   /// *"Mum was marked away until Saturday 22 August."*
   ///
@@ -187,23 +195,45 @@ abstract final class NotificationCopy {
   /// that is easiest to fake and worst to fake.
   ///
   /// Both variants are in `docs/ui-ux/screens.md`.
+  /// [day] is the day being retracted, and [today] is the reconcile's `D`.
+  ///
+  /// **"Yesterday" is only true for one of the days this can be called about.**
+  /// The reconciler emits a correction for *every* standing warning a read
+  /// confirms, and a day leaves `warningsShownFor` only by correction or
+  /// revocation — so a genuinely missed day sits there indefinitely. Mum's phone
+  /// offline over a weekend, both taps syncing on Monday: the watcher was warned
+  /// about Saturday and about Sunday, and Monday's read confirms both. Two
+  /// notifications, two ids, and — before this — identical text, one of them
+  /// factually wrong about which day it covered.
+  ///
+  /// A reader at 3am got the same sentence twice and could not tell which days
+  /// were now covered. That is the same fault the time clause was removed for:
+  /// a message whose whole purpose is to withdraw a false claim about a person,
+  /// making a new one to do it. The day is the one fact the device certainly
+  /// holds here — it already derives the notification id from it.
   static String correctionBody({
     required String watchedName,
+    required DayKey day,
+    required DayKey today,
     required DateTime? tappedAt,
     required tz.Location watcherZone,
-  }) =>
-      tappedAt == null
-          ? 'Correction: $watchedName did check in yesterday.'
-          : 'Correction: $watchedName did check in yesterday, '
-              'at ${_time(tappedAt, watcherZone)}.';
+  }) {
+    // "Yesterday" reads better and is what the approved string says, so it is
+    // kept for the one day it is true of.
+    final when = day == today.previous ? 'yesterday' : 'on ${_date(day)}';
+    return tappedAt == null
+        ? 'Correction: $watchedName did check in $when.'
+        : 'Correction: $watchedName did check in $when, '
+            'at ${_time(tappedAt, watcherZone)}.';
+  }
 
   /// *"Tuesday 10:14"*, for a surface outside this file.
   ///
   /// Shared with the watcher list for the same reason [dayLabel] is: two
   /// formatters is two things to keep true, and the reader compares the row and
   /// the notification about the same moment directly.
-  static String momentLabel(DateTime instant, tz.Location zone) =>
-      _moment(instant, zone);
+  static String momentLabel(DateTime instant, tz.Location zone, DayKey today) =>
+      _moment(instant, zone, today);
 
   /// *"Saturday 22 August"*, for a surface outside this file.
   ///
@@ -248,7 +278,7 @@ abstract final class NotificationCopy {
   /// misleading when the 10:14 in question was nine days ago — it reads as this
   /// morning, which understates the problem in exactly the direction this app
   /// must not.
-  static String _moment(DateTime instant, tz.Location zone) {
+  static String _moment(DateTime instant, tz.Location zone, DayKey today) {
     final local = tz.TZDateTime.from(instant, zone);
     const weekdays = [
       'Monday',
@@ -259,7 +289,25 @@ abstract final class NotificationCopy {
       'Saturday',
       'Sunday',
     ];
-    return '${weekdays[local.weekday - 1]} ${_time(instant, zone)}';
+    final weekday = weekdays[local.weekday - 1];
+
+    // **Beyond a week the weekday is ambiguous in the direction that
+    // understates.** "Tuesday 10:14" for an instant nine days ago reads as the
+    // most recent Tuesday — two days ago. Adding the weekday moved the
+    // ambiguity from one day to seven; it did not remove it, and this comment
+    // used to claim it had.
+    //
+    // It is not hypothetical on the built screen. A revoked link and a
+    // lost-access link both refuse every read forever, so `lastReconcileAt`
+    // never advances and the row would show the same "Tuesday 10:14" in week
+    // three and week twelve — about a phone that has checked nothing since.
+    final days = today.differenceInDays(DayKey.fromInstant(instant, zone));
+    if (days > 6) {
+      // `_date` already carries the weekday — "Saturday 15 August, 10:14".
+      return '${_date(DayKey.fromInstant(instant, zone))}, '
+          '${_time(instant, zone)}';
+    }
+    return '$weekday ${_time(instant, zone)}';
   }
 
   /// *"23:40"*, in the reader's own zone.

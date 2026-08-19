@@ -93,10 +93,32 @@ class WatcherState {
     required this.people,
     required this.today,
     required this.watcherZone,
+    required this.warningDelivery,
   });
 
   final List<WatchedPersonState> people;
   final DayKey today;
+
+  /// Whether a warning decided now would actually reach this reader.
+  ///
+  /// **On screen because when it is [NotificationDelivery.unavailable], the
+  /// screen is the only delivery there will ever be.** The row still shows the
+  /// warning — that is what it is true of, whether or not a notification
+  /// happened — but nothing told the reader that this is the last time they
+  /// will find out by looking. They deal with it, close the app, and go on
+  /// believing they will be warned next time.
+  ///
+  /// §13 rates `POST_NOTIFICATIONS` revocation High precisely because Android
+  /// takes it from apps nobody opens, which describes a watcher exactly. The
+  /// watched side has had a banner for this since Phase 2, where the cost is a
+  /// missed nudge; this side had nothing, where the cost is a family not being
+  /// warned at all.
+  final NotificationDelivery warningDelivery;
+
+  /// Whether to show the banner. `redundant` is not a fault — it means the
+  /// reader is looking at this screen, which is the good case.
+  bool get warningsSilenced =>
+      warningDelivery == NotificationDelivery.unavailable;
 
   /// **The watcher's own zone, not the watched person's.**
   ///
@@ -261,6 +283,7 @@ class WatcherReconcileService {
       people: people,
       today: DayKey.fromInstant(now, watcherZone),
       watcherZone: watcherZone,
+      warningDelivery: canDeliver.warning,
     );
   }
 
@@ -317,6 +340,12 @@ class WatcherReconcileService {
         day: correction.day,
         body: NotificationCopy.correctionBody(
           watchedName: link.watchedName,
+          // The day being retracted, and the day this reconcile is about. A
+          // correction is emitted for EVERY standing warning the read confirms,
+          // not only yesterday's, so the message has to name which one — see
+          // [NotificationCopy.correctionBody].
+          day: correction.day,
+          today: DayKey.fromInstant(now, watcherZone),
           // **Null, deliberately.** The approved string ends *"at 23:40"*, and
           // that is a claim about the moment SHE tapped. Phase 3's fake backend
           // carries no per-check-in timestamp, so the only instant available
@@ -359,6 +388,7 @@ class WatcherReconcileService {
         away: result.decision.away,
         unverifiedSince: result.decision.unverifiedSince,
         lastConfirmedDay: result.decision.lastConfirmedDay,
+        today: DayKey.fromInstant(now, watcherZone),
         watcherZone: watcherZone,
       );
       if (result.decision.outcome == WarningOutcome.warnAccessLost) {

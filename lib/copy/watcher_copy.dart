@@ -79,6 +79,52 @@ abstract final class WatcherCopy {
   static const String neverChecked =
       'This phone has not been able to check even once.';
 
+  // ------------------------------------------------------------ this screen
+
+  /// The initial load failed — the store could not be opened, or the first
+  /// reconcile threw.
+  ///
+  /// **Not `TapCopy.couldNotStart`**, which this screen borrowed. That string
+  /// ends *"Ask a family member for help."* and was written for an 80-year-old;
+  /// `screens.md` approves it for the Tap screen only. Here the reader **is**
+  /// the family member — the person who set the app up for everyone else — so
+  /// it is a dead end pointing at themselves.
+  ///
+  /// It was worst in the state this screen exists for: the *lost access*
+  /// notification promises *"Open the app to see what to do."*, the cold-start
+  /// tap lands here, and a throw from a malformed cache row turned that promise
+  /// into an instruction to ask oneself for help.
+  static const String couldNotCheck =
+      'This phone could not check on anyone. Try again, or open the app later.';
+
+  static const String retry = 'Try again';
+
+  // ------------------------------------------------- warnings switched off
+
+  /// The reader has muted *Missed check-ins*, or `POST_NOTIFICATIONS` has been
+  /// revoked from an app they never open.
+  ///
+  /// The twin of `TapCopy.notificationsOff`, on the side where the cost is
+  /// larger. There it is a missed nudge; here it is a family not being warned,
+  /// and §13 rates the revocation High precisely because Android takes the
+  /// permission from apps nobody opens — which is the watcher, by design.
+  ///
+  /// **Needed because the row alone cannot say it.** A muted watcher who opens
+  /// the app still sees the warning on the row, deals with it, closes the app,
+  /// and goes on believing they will be told next time. This is the sentence
+  /// that says otherwise, and it appears while they are looking — the one moment
+  /// the app can still reach them.
+  ///
+  /// *"anyone"*, not a name: the channel is off for every watched person, and
+  /// naming one would imply the others still work.
+  static const String warningsOff =
+      'This phone will not warn you about anyone.';
+
+  /// The banner's action, mirroring the Tap screen's. Android stops showing the
+  /// prompt after two refusals, at which point this is the honest dead end —
+  /// the same trade `TapCopy.notificationsOffAction` already makes.
+  static const String warningsOffAction = 'Turn warnings on';
+
   // ---------------------------------------------------------------- revoked
 
   /// The link has ended — `status` is no longer `accepted`.

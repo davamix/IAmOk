@@ -220,6 +220,8 @@ Phase 7's problem. What follows is the wording.
 |---|---|
 | Screen title | *"People you're looking after"* |
 | Nobody is watched | *"You're not looking after anyone yet. Ask a family member to help you add someone."* |
+| Warnings switched off | *"This phone will not warn you about anyone."* + **"Turn warnings on"** |
+| The load failed | *"This phone could not check on anyone. Try again, or open the app later."* + **"Try again"** |
 | No warning standing | *"Everything OK"* |
 | …with a check-in read | *"Your phone last saw a check-in on Saturday 15 August."* |
 | …with none ever read | *"Your phone has not seen a check-in yet."* |
@@ -242,6 +244,15 @@ string sets would be two things to keep true, reviewed separately, and the failu
 the notification disagreeing about the same day — a contradiction the reader cannot resolve. The
 cost is naming the person in a row that already names them, which is accepted.
 
+**The accepted cost includes some visible redundancy, recorded here so it is a decision rather than
+an artefact.** On an offline warning the row reads *"…your phone has been offline since Tuesday
+10:14."* directly above *"This phone last checked Tuesday 10:14."* — one instant, twice, with the
+device called *your phone* on one line and *this phone* on the next. On a never-reconciled row the
+two lines are verbatim identical. Both are the price of reusing bodies as row lines, and the trade
+is still right: two string sets drifting apart costs more than a repeated clause. Revisit when
+Phase 7 designs the multi-person layout, where the last-checked line probably belongs once per
+screen rather than once per row.
+
 **The last-checked line is on every row, healthy or not, and that is the point.** A watcher whose app
 was force-stopped goes deaf with every row still reading *"Everything OK"* — which is true of the
 last thing this phone managed to read, and says nothing about whether it has read anything since.
@@ -253,6 +264,55 @@ device's own effort, not about her and not about the data.
 **"Your phone last saw"**, never *"last checked in"* — the same rule ADR-0004 applies to the
 notification. The date is the newest check-in **this device managed to read**; during an access
 failure she may be tapping daily, and the shorter phrasing reads as a claim about her behaviour.
+
+**The error line is this screen's own, not the Tap screen's.** It borrowed `TapCopy.couldNotStart`,
+which ends *"Ask a family member for help."* — written for an 80-year-old, and approved above for
+the Tap screen only. Here the reader **is** the family member, the person who set the app up for
+everyone else, so it was a dead end pointing at themselves. Worst in the state this screen exists
+for: the *lost access* notification promises *"Open the app to see what to do."*, the cold-start tap
+lands here, and a throw from a malformed cache row turned that promise into an instruction to ask
+oneself.
+
+### The watcher list shows today only
+
+Settles `guidelines.md`'s open question. A row renders the warning for **today's `D`** or nothing —
+never the most recent day the app ever warned about.
+
+The first version fell back to the newest entry in `warningsShownFor`, and a day leaves that map
+only by a correction *for that exact day* or by revocation. So a genuinely missed 1 August produced
+*"No check-in from Mum yesterday."* on the 18th, permanently, over a green last-confirmed day — a
+false claim about a specific day, to a family, with no way out. It compounded: the outcome came from
+the old day while the interpolated values came from the current reconcile, so a stored *offline*
+message rendered *"your phone has not been able to check even once"* on a phone that had reconciled
+seconds earlier.
+
+Every string in the warning set says *yesterday*. Only today's `D` is yesterday.
+
+### When this phone cannot warn at all
+
+`POST_NOTIFICATIONS` revoked, or *Missed check-ins* switched off. §13 rates this **High** because
+Android takes the permission from apps nobody opens — which describes a watcher by design.
+
+| | |
+|---|---|
+| Banner | *"This phone will not warn you about anyone."* |
+| Action | **"Turn warnings on"** |
+
+**The rows still show the warning.** What is true about her does not change because a notification
+could not be posted, so the row renders the same four-way-distinguished sentence it always would.
+The row derives that from the reconcile's **decision**, not from the record of what was delivered —
+reading the delivery ledger made a muted phone show *"Everything OK"* about a day the reconcile had
+decided to warn on.
+
+**The banner exists because the row alone cannot say the rest.** A muted watcher reads the warning,
+deals with it, closes the app, and goes on believing they will be told next time. They will not be.
+This is the watcher-side twin of the Tap screen's `_NotificationsOffBanner`, and it appears while
+they are looking — the one moment the app can still reach them, since every other route is the one
+that is switched off.
+
+*"anyone"*, not a name: the channel is off for every watched person, and naming one would imply the
+others still work. It is **not** shown for `redundant`, which means the reader is looking at this
+screen and is the good case.
 
 ### The lost-access row
 
@@ -281,7 +341,13 @@ no warning will ever fire, and the row said the opposite in two words.
 |---|---|
 | Label | *"You are no longer looking after Mum."* |
 | Consequence | *"You will not be warned if Mum misses a day."* — the same sentence as the lost-access row |
-| Every row, always | *"This phone last checked Tuesday 10:14."* |
+
+**No "this phone last checked" line here, alone among the row states.** That line exists to
+distinguish *working* from *stopped* for a force-stopped watcher whose rows all still read
+"Everything OK". Nothing is working on a revoked link by design, and the first sentence has already
+said so — what the line adds is the suggestion that this phone still checks on her periodically and
+last managed it on Tuesday. A revoked link refuses every read forever, so `lastReconcileAt` never
+advances and it would say the same Tuesday in week twelve.
 
 **It outranks everything, including the lost-access row.** §10 step 1 makes a non-accepted link the
 first branch of the whole decision, and the ordering is the same argument: once the link has ended
@@ -347,6 +413,7 @@ The full set. Everything the app says out loud is here.
 | …and an away period is cached for the day | Watcher | *"Can't check on Mum — I Am Ok has lost access to the check-ins. Open the app to see what to do. Mum was marked away until Saturday 22 August."* |
 | Late check-in after a warning was shown | Watcher | *"Correction: Mum did check in yesterday, at 23:40."* Replaces the warning by id. |
 | …and the read carries no tap time | Watcher | *"Correction: Mum did check in yesterday."* Same id, same replacement. |
+| …and the day corrected is **not** yesterday | Watcher | *"Correction: Mum did check in on Saturday 15 August."* (with the time clause when Phase 4 supplies one) |
 | Away set by a watcher | All other watchers, and the watched person | *"Ana marked Mum away until Sat 22 Aug."* |
 | Away set by the watched person | All watchers | *"Mum is away until Sat 22 Aug."* |
 | Away cancelled | Everyone except whoever cancelled | *"Mum's away period was cancelled — daily check-ins resume today."* |
@@ -354,6 +421,21 @@ The full set. Everything the app says out loud is here.
 
 Away transitions happen a handful of times a year, so these can be ordinary notifications rather
 than silent ones — alarm fatigue is not a risk at that frequency.
+
+> **A correction names the day unless the day is yesterday.** The reconcile emits one for *every*
+> standing warning a read confirms, not only yesterday's, and a missed day stays in
+> `warningsShownFor` indefinitely. A phone offline over a weekend syncs both taps on Monday: the
+> watcher was warned about Saturday and about Sunday, and Monday's read confirms both. Two
+> notifications, two ids — and with *"yesterday"* hard-coded, identical text, one of them wrong
+> about which day it covered. A reader at 3am got the same sentence twice and could not tell what
+> was now covered.
+
+> **Instants older than a week are dated, not left as a weekday.** *"Tuesday 10:14"* for something
+> nine days ago reads as the most recent Tuesday. Adding the weekday moved the ambiguity from one
+> day to seven; beyond that the full date is used — *"Saturday 15 August, 10:14"*. This is not
+> cosmetic on a revoked or lost-access row, where every read is refused forever, `lastReconcileAt`
+> never advances, and the same weekday would otherwise stand into week twelve while reading as this
+> week. It understates staleness, which is the one direction this app must not.
 
 > **The correction's time clause is hers, or it is absent.** *"at 23:40"* is `deviceTappedAt` — the
 > moment she tapped, on her phone — and nothing else may be rendered there. Phase 3's read carries

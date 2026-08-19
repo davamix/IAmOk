@@ -45,9 +45,20 @@ Cost here is genuinely low: §10 rates a spurious reminder as costing nothing, a
 correct wording on the correct day. **The reason it is an ADR rather than a bug fix is what Phase 3
 does next.** The same code path is about to carry a logic-bearing warning alarm belonging to a
 watcher, where §10 rates a false fire as costing "everything", and Phase 4 adds a third caller in a
-third isolate. Two concurrent watcher reconciles would also both advance
-[ADR-0004](0004-refused-is-not-unreachable.md)'s access-lost cadence for the same milestone — day 0
-consumed twice, so day 1 never fires.
+third isolate.
+
+> **What this ADR does *not* cover, stated because an earlier draft implied it did.** The Context
+> above once argued that two concurrent watcher reconciles would both advance
+> [ADR-0004](0004-refused-is-not-unreachable.md)'s access-lost cadence for the same milestone.
+> Decision 4 gates **alarm changes** on the lease and nothing else: a run that cannot take it still
+> reads, still decides, and still speaks — deliberately, because silence is the failure this side
+> cannot detect in itself. So the cadence is *not* serialised by this mechanism, and never was.
+>
+> What actually protects it is that the cadence is keyed on `accessLostNotifiedOn`, a value each run
+> re-reads and compares against the day it is deciding — so a second run for the same day finds the
+> milestone already served and owes nothing. That is idempotence, not exclusion, and it holds whether
+> or not this lease exists. Naming the wrong mechanism as the guard is how the right one gets removed
+> as redundant.
 
 ## Decision
 

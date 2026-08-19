@@ -221,6 +221,8 @@ Phase 7's problem. What follows is the wording.
 | Screen title | *"People you're looking after"* |
 | Nobody is watched | *"You're not looking after anyone yet. Ask a family member to help you add someone."* |
 | Warnings switched off | *"This phone will not warn you about anyone."* + **"Turn warnings on"** |
+| Nobody is watched | *"You're not looking after anyone."* — **no "yet"**, see below |
+| Spoken when a tapped notification opens a row | *"Showing Mum."* |
 | The load failed | *"This phone could not check on anyone. Try again, or open the app later."* + **"Try again"** |
 | No warning standing | *"Everything OK"* |
 | …with a check-in read | *"Your phone last saw a check-in on Saturday 15 August."* |
@@ -238,6 +240,56 @@ screen's audience line uses, so the words that asked the question at setup answe
 pairing flow assumes a family member sets up both phones, so *"ask a family member"* is the real
 next step rather than a polite dead end. It is styled as ordinary text, never as a warning — an
 empty list is not an alarm.
+
+**No *"yet"*, on either screen.** Two reviewers struck it from the Tap screen's twin at the Phase 2
+gate and it reappeared here. *"Yet"* asserts **not started**, which is false in the other state this
+same line covers — the last link was revoked, so something was set up and is not any more. One line
+has to be true in both, which is the whole reason it is deliberately one line.
+
+**Pull-to-refresh works on the empty list too.** It is the one screen where a reader most wants to
+try again — *"I was just added, is it working yet?"* — and it was the one screen that could not,
+because the empty state returned before the refresh wrapper existed.
+
+### Times, dates and the device's clock
+
+| Instant | Renders as |
+|---|---|
+| Today | *"22:10"* — the time alone |
+| Within the last week | *"Tuesday 10:14"* |
+| Older than a week | *"Saturday 15 August, 10:14"* |
+| On a 12-hour device | *"10:10 pm"*, *"12:05 am"*, *"12:05 pm"* |
+
+**The weekday earns its place only once there is another day it could be.** Naming it for something
+four hours ago pushes the reader to work out that *"Tuesday 10:14"* is in fact this morning.
+
+**12h/24h follows the device**, per the accessibility floor, rather than being hard-coded to the
+owner's locale. The screen reads `MediaQuery.alwaysUse24HourFormat` live; the alarm isolate has no
+widget tree, so the UI caches the setting to `LocalStore` on every resume — the same arrangement
+[ADR-0002](../architecture/decisions/0002-clock-split.md) uses for the timezone.
+
+### Colour, and what is never coloured
+
+**The "this phone last checked" line is never error-coloured, on any row.** Painting the whole
+unhealthy row `error` swept it up with the warning and collapsed the very distinction it exists to
+make: the warning is a claim about **her**, this is a fact about **this device's own effort**. In red
+beneath a warning it reads as part of the alarm.
+
+**The contrast floor is asserted against the shipped palette**, in both modes, by
+`test/presentation/contrast_test.dart`. The default Material scheme from this app's seed missed AAA
+in light mode on all three surfaces `guidelines.md` names — the warning (6.16), a warning on a
+highlighted row (5.01), and the tap target (6.46). The themes now raise contrast until every pair
+clears it.
+
+### The row a tapped notification opens
+
+Tinted, **scrolled into view**, and **announced**. Colour may never be the only signal, and the row
+the notification is about can be below the fold — which is exactly when the highlight is worth
+having.
+
+The announcement is *"Showing Mum."* rather than a move of the screen reader's cursor, because
+Flutter cannot place the cursor on an arbitrary widget. It answers the question the tap actually
+asks — did this land on the person the notification was about — and the row is then on screen for
+the next swipe to read in full.
 
 **A standing warning reuses the notification's sentence rather than a shorter list variant.** Two
 string sets would be two things to keep true, reviewed separately, and the failure is the row and

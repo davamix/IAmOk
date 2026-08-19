@@ -338,6 +338,80 @@ Same POCO F3, Android 13 / API 33, HyperOS `OS1.0`, stock power settings.
 > case a user would not see this. The mechanism — that a plain resume does not refresh the value — is
 > what was measured, and it holds either way.
 
+### The overnight Doze run — armed 2026-08-19 23:14, to fire 2026-08-20 05:00
+
+Set up so the evidence survives without a live connection, and collected with
+`pwsh -File tools/doze-collect.ps1` in the morning.
+
+| | |
+|---|---|
+| Build | debug (`dd4dd03` + the docs commit), the one carrying the harness |
+| Warning time | **05:00 Madrid**, set by writing `links.warning_local_time` directly and letting the app's own reconcile arm the window |
+| Armed | 12 warning alarms, first pair **2026-08-20 05:00:00**, confirmed against `dumpsys alarm` |
+| Owed? | `warnings_shown` holds **2026-08-18 only**. At 05:00 on the 20th the last completed Madrid day is the **19th**, which is unconsumed — so a warning is genuinely owed |
+| Expected | *"No check-in from Mum yesterday."* and the same for Granddad, on the `warnings` channel |
+| Baseline | `last_reconcile_at` = 2026-08-19 23:11:50 on both links; tray cleared of ours |
+| Device | 24-hour, Europe/Madrid, night mode off, **not** on the Doze whitelist, stock power settings |
+
+**05:00 rather than the natural 10:00**, because the POCO is the owner's daily phone and 10:00 is
+after they would have picked it up — the run has to land while the device is genuinely untouched.
+
+**Three independent channels**, because they fail differently: `warnings_shown` is only written when
+something was *delivered*, `last_reconcile_at` is only stamped when the read *succeeded*, and the
+tray can be cleared by the reader or by the OEM. All three moving is unambiguous; some moving is the
+interesting case, which is why the script prints them separately rather than reducing them to a
+pass/fail.
+
+**Setting the warning time needed a direct store write.** `run-as` can read the app's private
+directory but cannot write into it through a redirect, cannot use a heredoc (no writable temp), and
+cannot read `/sdcard` under scoped storage. What works is streaming the bytes into the app's own
+shell: `"cd …/databases
+exec base64 -d > i_am_ok.db
+<base64>" | adb shell run-as <pkg> sh`. Worth
+recording — the harness cannot express an arbitrary warning time, and `adb input tap` on the harness
+proved too unreliable to drive a multi-step setup.
+
+### FINDING — under **forced** Doze the alarm was delivered and nothing ran
+
+Measured 2026-08-19 22:56 while setting the overnight run up, with
+`dumpsys battery unplug` + `dumpsys deviceidle force-idle`, screen off, app backgrounded, device
+confirmed in deep `IDLE` throughout. A warning alarm was armed for 22:56 with the decision state
+reset so a warning was owed.
+
+**AlarmManager delivered it on time.** Doze did not defer it, and the alarm carried the right flags —
+`flags=0x5` (FLAG_ALLOW_WHILE_IDLE), `exactAllowReason=policy_permission`, and its `device_idle`
+policy was not holding it back. From logcat:
+
+```
+22:56:00.011 SmartPower.io.github.davamix.i_am_ok: idle->background(94016ms) R(alarm start) adj=700
+22:56:00.067 AlarmManager: mPendingIntent -> PendingIntentRecord{… io.github.davamix.i_am_ok broadcastIntent}
+22:56:00.067 AlarmManager: mPendingIntent -> PendingIntentRecord{… io.github.davamix.i_am_ok broadcastIntent}
+22:56:03.014 SmartPower.io.github.davamix.i_am_ok: background->idle(3002ms) R(alarm start) adj=700
+22:56:08.018 ProcessMemoryCleaner: Compact memory: io.github.davamix.i_am_ok … state=hibernation … isKilled=false
+```
+
+**And then nothing.** No notification, no `warnings_shown` row, no `last_reconcile_at` update, and no
+Flutter or Dart line in logcat at all — against the same build which, forty minutes earlier and *not*
+in Doze, woke from an `am kill`ed process and posted correctly twice. The app was given about three
+seconds in `background` and put back to `idle`, then compacted into HyperOS's `hibernation` state.
+
+**What this does and does not establish.**
+
+- It is **forced** Doze, not a real overnight idle. `force-idle` is the standard simulation and it is
+  not the same thing; HyperOS's SmartPower may behave differently after a genuine night.
+- It is **one clean observation**. A second run was attempted and could not be set up, because the
+  harness stopped responding to `adb input tap` — a tooling failure, not evidence either way.
+- It does not distinguish *"the isolate never started"* from *"it started and was killed before it
+  could write"*. The absence of any Flutter log line leans towards the first, but the plugin's
+  `FlutterBackgroundExecutor` does log when it starts, and nothing was captured either way after the
+  buffer had been cleared.
+- What it does establish is that **the broadcast arriving is not the same as the warning arriving**,
+  on this device, in this state. The Phase 3 evidence above tests the first; only this tests the
+  second.
+
+If the overnight run reproduces it, this is the trigger condition ARCHITECTURE.md §14 names for
+un-deferring §9's scheduled server-side function, and ADR-0007 is the record of what that costs.
+
 - [ ] **Device timezone change while backgrounded** — not run. `cmd time_zone_detector
       suggest_manual_time_zone` needs `SUGGEST_MANUAL_TIME_AND_ZONE`, which `adb` does not hold, so
       this needs a human changing the zone in Settings. Worth doing with the Doze run: change the

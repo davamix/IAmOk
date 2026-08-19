@@ -346,6 +346,28 @@ void main() {
       expect(find.text(TapCopy.notificationsOffAction), findsOneWidget);
     });
 
+    testWidgets('and the action is legible against the banner it sits on',
+        (tester) async {
+      // A bare `TextButton` takes its label colour from `colorScheme.primary`,
+      // measured against `surface` — not against the `errorContainer` behind it.
+      // That pair is **2.33:1 in light and 2.31:1 in dark**, against a floor of
+      // 4.5, and it got worse rather than better when `contrastLevel` was raised
+      // to fix the light palette's AAA misses: `errorContainer` darkens with the
+      // level, `primary` does not move.
+      //
+      // This is the one control that turns reminders back on, for a reader who
+      // is 80, inside the banner that exists because they are off.
+      await pump(tester, state(notificationsEnabled: false));
+
+      final scheme = AppTheme.light.colorScheme;
+      final button = tester.widget<TextButton>(find.widgetWithText(
+          TextButton, TapCopy.notificationsOffAction));
+      expect(
+        button.style?.foregroundColor?.resolve({}),
+        scheme.onErrorContainer,
+      );
+    });
+
     testWidgets('nothing is shown while notifications work', (tester) async {
       await pump(tester, state());
       expect(find.text(TapCopy.notificationsOff), findsNothing);

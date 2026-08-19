@@ -143,16 +143,36 @@ abstract final class WatcherCopy {
   /// The row exists because the alternative was worse: a link left out of the
   /// list is invisible, and with one link that made the screen say *"You're not
   /// looking after anyone."* about someone the reader is still looking after.
+  /// **Not *"something went wrong"*.** `guidelines.md`'s Floors table bans that
+  /// phrase by name — *"Say what happened and what to do"* — and this line
+  /// shipped it, on the screen the *lost access* notification promises will
+  /// tell the reader what to do. `TapCopy.couldNotStart` quotes the same rule
+  /// back two files away, which is how it survived review: the rule was known
+  /// and applied everywhere except here. `copy_floors_test.dart` now asserts it
+  /// against the source, because a rule everyone agrees with is exactly the kind
+  /// that gets broken quietly.
+  ///
+  /// *"Could not finish checking"* says what actually happened — the check
+  /// started and did not complete — and *"just now"* bounds it, so a reader does
+  /// not take it for a permanent state.
   static String couldNotCheckOn(String watchedName) =>
-      'Can\'t check on $watchedName — something went wrong on this phone.';
+      'Can\'t check on $watchedName — this phone could not finish checking '
+      'just now.';
 
   /// Deliberately not *"you will not be warned"*: the alarm may well still be
   /// armed and the next fire may succeed, so that would overstate what is
   /// known. It names a next human on the second attempt, the same shape as
   /// [accessLostRemedy]'s dead-end case.
+  ///
+  /// **And no longer *"It will try again."*** That was a promise about the
+  /// future the device cannot keep on the path where it matters most: among the
+  /// throws the per-link guard catches is `alarms.apply`, and a link whose
+  /// window was never armed has nothing scheduled to retry with. Nothing then
+  /// tries again until somebody opens the app — while this line told the reader
+  /// to wait. The row carries a [retry] control instead, which is a thing the
+  /// reader can actually do rather than a claim about what the phone will do.
   static const String couldNotCheckRemedy =
-      'It will try again. If this is still here tomorrow, ask whoever set up '
-      'the app.';
+      'If this is still here tomorrow, ask whoever set up the app.';
 
   // ---------------------------------------------------------------- revoked
 

@@ -83,6 +83,39 @@ void main() {
             greaterThanOrEqualTo(4.5));
       });
 
+      test('and so does the BUTTON inside it — the control, not just the words',
+          () {
+        // **The pair that was failing.** Both banners used a bare `TextButton`,
+        // whose label falls back to `colorScheme.primary` — a colour measured
+        // against `surface`, not against the `errorContainer` painted behind it.
+        // Measured: **2.33:1 light, 2.31:1 dark**, against a 4.5 floor.
+        //
+        // Raising `contrastLevel` made it worse, not better: `errorContainer`
+        // darkens as the level rises and `primary` does not move, so the fix for
+        // the light palette's AAA misses pushed this pair further down. Nothing
+        // caught it because this pair was asserted in neither mode.
+        //
+        // It is the control that turns notifications back on, inside the banner
+        // that exists because they are off.
+        expect(ratio(scheme.onErrorContainer, scheme.errorContainer),
+            greaterThanOrEqualTo(4.5));
+        expect(
+          ratio(scheme.primary, scheme.errorContainer),
+          lessThan(4.5),
+          reason: 'if this ever passes, the default TextButton foreground would '
+              'be safe and this whole test can go — until then, both banners '
+              'must set foregroundColor explicitly',
+        );
+      });
+
+      test('a button on the ordinary surface meets AA', () {
+        // The failed row's *Try again*, and the whole-screen retry. These sit on
+        // `surface`, where `primary` is the pair the scheme is built to satisfy
+        // — asserted so the row's new control is not the next unmeasured one.
+        expect(ratio(scheme.primary, scheme.surface),
+            greaterThanOrEqualTo(4.5));
+      });
+
       test('the highlighted row keeps its text readable', () {
         // A tapped notification tints the row `surfaceContainerHighest`, and
         // the text on it is unchanged — so the tint must not eat the contrast

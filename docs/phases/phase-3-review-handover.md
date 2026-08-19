@@ -1,6 +1,6 @@
 # Phase 3 review — handover
 
-**Written:** 2026-08-19 · **Head:** the testing re-review commit · **755 tests**, `flutter analyze`
+**Written:** 2026-08-19 · **Head:** the UI/UX re-review commit · **770 tests**, `flutter analyze`
 clean, `flutter build apk --debug` succeeds.
 
 This document exists because the Phase 3 gate review ran long enough to span sessions. It records
@@ -21,6 +21,10 @@ that fixed `uses24Hour`'s two sources left the setting written once at launch in
 `try`, its only test-level coverage absent, and two docstrings broken — one still arguing for the read
 it had just deleted.
 
+The UI/UX round then found that the *previous* fix to the same screen had shipped the one error phrase
+`guidelines.md` bans by name, and that raising the contrast level to fix the light palette had pushed
+a different pair — the button inside the warnings-off banner — from about 5:1 down to **2.33:1**.
+
 That pattern is the reason the remaining reviewers should run before the Doze night rather than after,
 and the reason each round now re-reads the previous round's diff first.
 
@@ -39,7 +43,8 @@ and the reason each round now re-reads the previous round's diff first.
 | `c690b1b` | Tier 4 — the light palette missed this app's own contrast floor |
 | `ee0beed` | Tier 5 — ADR-0007, and an ADR naming the wrong mechanism as its own guard |
 | `bbe68d5` | The **architecture** re-review of Tiers 3-5 |
-| *this one* | The **testing** re-review at the gate |
+| `7311a33` | The **testing** re-review at the gate |
+| *this one* | The **UI/UX** re-review at the gate |
 
 ---
 
@@ -47,9 +52,9 @@ and the reason each round now re-reads the previous round's diff first.
 
 | Reviewer | Last run | Outcome |
 |---|---|---|
-| **testing** | **at the gate, over `bbe68d5`** | All findings fixed — see the round below. |
-| **architecture** | at `bbe68d5` | All findings fixed. **Has not seen `bbe68d5` itself.** |
-| **uiux** | at `c347315` | All findings fixed. Has not seen the five commits since. |
+| **uiux** | **at the gate, over `7311a33`** | All findings fixed — see the round below. |
+| **testing** | at the gate, over `bbe68d5` | All findings fixed. Has not seen the UI/UX commit. |
+| **architecture** | at `bbe68d5` | All findings fixed. **Has not seen `bbe68d5` itself**, nor the two gate commits since. |
 | **security** | never, this round | Has seen none of it |
 | **infrastructure** | never, this round | Has seen none of it |
 
@@ -57,6 +62,12 @@ and the reason each round now re-reads the previous round's diff first.
 
 **Never run reviewers in parallel, and ask before running any.** Two parallel launches exhausted the
 session limit. The working pattern is: run one, report, fix, ask before the next.
+
+**And verify a finding before acting on it.** Both gate rounds so far produced at least one finding
+whose severity moved once it was checked against the code: the UI/UX round estimated a contrast
+failure at "roughly 3:1, treat as an estimate" and it measured **2.33:1, in both modes**; it also
+filed the missing away row as a shipping defect when no user can reach that state until Phase 6.
+Measuring took two minutes in each case.
 
 ---
 
@@ -165,6 +176,58 @@ restored.
 
 ---
 
+## The gate round — UI/UX over `7311a33`
+
+Two findings worth holding the gate for, both in material the reviewer had not seen, and both on
+surfaces it had itself approved a round earlier.
+
+**The watcher list shipped *"something went wrong"*.** `guidelines.md`'s Floors table bans that exact
+phrase — *"Say what happened and what to do"* — and `WatcherCopy.couldNotCheckOn` contained it
+verbatim, on the row a family member reaches by tapping the *lost access* notification, whose entire
+justification (ADR-0004) is that it is actionable. Two other files quote the ban back in their own
+comments, so the rule was known and applied everywhere except the one place a family would read it.
+
+That is what a source-level test is for, and there now is one: `test/copy/copy_floors_test.dart`
+reads `lib/copy/` as text and asserts the four bans that can be checked mechanically — the phrase,
+exclamation marks, emoji, and numeric dates. Mutation-checked: reintroducing the string fails it.
+
+**The button inside both warnings-off banners was illegible, and the previous round made it worse.**
+A bare `TextButton` takes its label colour from `colorScheme.primary`, which is measured against
+`surface` — not against the `errorContainer` painted behind it. The reviewer estimated ~3:1 and
+flagged the number as an estimate; measured, it is **2.33:1 in light and 2.31:1 in dark**, against a
+4.5 floor. `errorContainer` darkens as `contrastLevel` rises while `primary` does not move, so
+`c690b1b` — the commit that raised the level to fix the light palette's AAA misses — pushed this pair
+down. It is the one control that turns notifications back on, inside the banner that exists because
+they are off. Both banners now set `foregroundColor` explicitly, asserted as a ratio in
+`contrast_test.dart` and as wiring in both screens' widget tests.
+
+Also fixed: *"It will try again."* was a promise the device cannot keep — `alarms.apply` is among the
+throws the per-link guard catches, so a link whose window was never armed has nothing scheduled to
+retry with, and the row told the reader to wait. The row carries a **"Try again"** control instead,
+which also closes an accessibility floor breach (pull-to-refresh was the only route to retrying, and
+a drag is the gesture a screen-reader user is least able to perform). The button sits *outside* the
+row's `Semantics`/`ExcludeSemantics` pair, or it would be invisible to exactly the reader it was
+added for — asserted with `matchesSemantics`. `screens.md` had **two contradictory approved strings**
+for "Nobody is watched" and the shipped one matched neither; it also claimed the watcher list reads
+`MediaQuery` live, which `bbe68d5` had made false. The single-digit 12-hour form (*"9:14 am"*, no
+leading zero) was produced by the code and pinned in neither the tests nor `screens.md`. The
+`isEmpty` early return still hid the warnings-off banner on an empty list. `NotificationCopy._time`'s
+docstring still argued for the hard-coded 24-hour clock it no longer had.
+
+### One finding whose severity moved on inspection
+
+The reviewer filed the **missing away row** as a Medium shipping defect: a verified away period falls
+through to *"Everything OK"*, while `screens.md` approves *"Away until Sat 22 Aug — set by Ana"*.
+
+The behaviour is real, but no user can reach it. The Tap screen's *"I'm away"* action is
+`onPressed: null` until Phase 6 and there is no backend to carry a period, so the state exists only
+behind a debug-harness control. Building the row now would also produce an **unattributed** away
+state — `AwayPeriod` has no `setBy`/`setByName` until Phase 6 — which the same guidelines forbid.
+So it is recorded as a decision in `screens.md` and the phase summary rather than built, and it lands
+in Phase 6 with the attribution that makes it honest.
+
+---
+
 ## Known-open, carried deliberately
 
 Nothing here is a false claim; all are honest gaps.
@@ -192,11 +255,10 @@ Nothing here is a false claim; all are honest gaps.
    1. ~~**testing**~~ — **done at the gate.** Verdict: coverage adequate for Phase 3. Its two
       sign-off blockers (the unasserted 12-hour row, the resume guard only a device could reach) are
       fixed, along with seven lesser findings.
-   2. **uiux** — **next.** Five commits of new copy since it last ran: `couldNotCheckOn`,
-      `couldNotCheckRemedy`, `warningsOff`, `showingPerson`, `couldNotCheck`, the "yet" removal, the
-      dated `_moment` forms, the 12-hour variants — and now the 12-hour row assertions, which pin the
-      exact rendered strings it will want to check against `screens.md`.
-   3. **security** — has seen none of this round. New material: the payload membership check, the
+   2. ~~**uiux**~~ — **done at the gate.** Ten findings, all fixed. The two that mattered were a
+      banned error phrase shipping on the watcher list, and an illegible button in both warnings-off
+      banners that the previous round had made worse.
+   3. **security** — **next.** Has seen none of this round. New material: the payload membership check, the
       untrusted-hint documentation on `NotificationRouter.tappedLink`, three new `LocalStore`
       settings, and `AppServices.watches`.
    4. **infrastructure** — has seen none of this round. New material: `onDowngrade`, the v1
@@ -217,16 +279,17 @@ Nothing here is a false claim; all are honest gaps.
 > `docs/phases/phase-3-review-handover.md` first — it records what the five reviewers have found so
 > far, what was fixed, and what is still owed. Then follow the reading order in `docs/README.md`.
 >
-> Head is the testing re-review commit. 755 tests pass, `flutter analyze` is clean, and
+> Head is the UI/UX re-review commit. 770 tests pass, `flutter analyze` is clean, and
 > `flutter build apk --debug` succeeds. Three of the five reviewers have run and been acted on —
-> testing most recently, at the gate itself; **uiux, security, infrastructure and a short architecture
-> re-pass over `bbe68d5` are still owed**, and the overnight Doze device test is unstarted.
+> testing and UI/UX most recently, both at the gate itself; **security, infrastructure and a short
+> architecture re-pass over the three gate commits are still owed**, and the overnight Doze device
+> test is unstarted.
 >
-> Start with the **uiux** reviewer. Run reviewers **one at a time** — never in parallel, that has
+> Start with the **security** reviewer. Run reviewers **one at a time** — never in parallel, that has
 > twice exhausted the session limit — and after each one finishes, stop, report what it found, and
 > ask me before running the next.
 >
-> Two things to carry with you. First, four of the last five review rounds found a defect introduced
+> Two things to carry with you. First, five of the last six review rounds found a defect introduced
 > by the previous round's fix, so read your own recent changes as harshly as anything else. Second,
 > this is the watcher side, where a false claim to a family is the worst bug the app can have —
 > prefer stopping to ask over guessing, and if you think a finding is wrong, say so before acting on

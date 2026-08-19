@@ -54,9 +54,11 @@ The only screen the watched person needs.
 | Tapped today | Target **disabled for the rest of the local day**. The target itself changes to a tick and **"Tapped"**, and the line beneath reads *"You already tapped today, at 09:14."* Re-enables at local midnight. |
 | Away | *"You're away until Saturday 22. Your family isn't expecting a check-in."* Tapping is still **allowed** — harmless, reassuring, and it writes a normal check-in watchers see as usual. |
 
-The Away control is present but visibly secondary, and not adjacent to the tap target. While an
-away period is active it reads *"I'm not away"*. It is inert until Phase 6, and present now so the
-layout it has to live in is settled while the screen is still simple.
+The Away control is present but visibly secondary, and not adjacent to the tap target. It reads
+**"I'm away"**, and while an away period is active **"I'm not away"**. It is inert until Phase 6
+(`onPressed: null`), and present now so the layout it has to live in is settled while the screen is
+still simple. Only the active-state label was quoted here before, which left the label a reader
+actually sees today outside the approved set.
 
 ### The tapped state changes the target, not only its colour
 
@@ -201,8 +203,22 @@ One row per watched person. Per row: the person's name, current status, and the 
 |---|---|
 | Checked in today | Last check-in time |
 | Unresolved warning | The warning, unresolved |
-| Away | *"Away until Sat 22 Aug — set by Ana"* — in the app, never as a notification |
+| Away | *"Away until Sat 22 Aug — set by Ana"* — in the app, never as a notification. **Phase 6, not Phase 3** — see below |
 | Stale / offline | Last successful update, honestly dated |
+| The link ended | *"Your link with Mum has ended."* + what that costs |
+| This phase could not check the link at all | A fault about **us**, naming the person, with a control — see the Phase 3 copy below |
+
+**The away row is deliberately absent in Phase 3, and that is a decision rather than an omission.**
+No user can set an away period yet: the Tap screen's *"I'm away"* action is present, visibly
+secondary and `onPressed: null` until Phase 6, and there is no backend to carry one. The state is
+reachable only through the debug harness, in debug builds.
+
+Building the row now would also break a rule this document sets: **every surface showing an away
+period names who set it**, and `AwayPeriod` carries no `setBy`/`setByName` until Phase 6. An
+unattributed *"Away until Sat 22 Aug"* is exactly the away state the guidelines forbid. So the row
+lands in Phase 6 together with the attribution that makes it honest — at which point
+`WatcherScreen._status()` gains a branch above *"Everything OK"*, which is where a verified away
+period currently falls.
 
 **Cold open shows current state, not the most recent event ever.** An unresolved warning if one
 stands; otherwise "Everything OK" with the last check-in time. A warning from three weeks ago
@@ -219,9 +235,10 @@ Phase 7's problem. What follows is the wording.
 | When | Text |
 |---|---|
 | Screen title | *"People you're looking after"* |
-| Nobody is watched | *"You're not looking after anyone yet. Ask a family member to help you add someone."* |
+| Nobody is watched | *"You're not looking after anyone. Ask a family member to help you add someone."* — **no "yet"**, see below |
 | Warnings switched off | *"This phone will not warn you about anyone."* + **"Turn warnings on"** |
-| Nobody is watched | *"You're not looking after anyone."* — **no "yet"**, see below |
+| A link this pass could not check | *"Can't check on Mum — this phone could not finish checking just now."* |
+| …and what to do about it | *"If this is still here tomorrow, ask whoever set up the app."* + **"Try again"** |
 | Spoken when a tapped notification opens a row | *"Showing Mum."* |
 | The load failed | *"This phone could not check on anyone. Try again, or open the app later."* + **"Try again"** |
 | No warning standing | *"Everything OK"* |
@@ -250,6 +267,38 @@ has to be true in both, which is the whole reason it is deliberately one line.
 try again — *"I was just added, is it working yet?"* — and it was the one screen that could not,
 because the empty state returned before the refresh wrapper existed.
 
+**The warnings-off banner shows above the empty state as well as above the list.** The same early
+return hid it there. It is vacuous with no links — there is nobody to warn about — but the empty
+state is exactly when someone is being added, and finding out then that this phone cannot warn is
+worth more than finding out after the first miss.
+
+#### The row for a link this pass could not check at all
+
+A link the reconcile threw on is **shown**, not omitted. Omitting it is invisible, and with one link
+— which is all of Phase 3 — a short list *is* an empty list, so the screen said *"You're not looking
+after anyone."* about someone the reader is very much still looking after.
+
+It is shaped like the lost-access row, because it is the same kind of thing: **a fault about us**,
+naming the person, with an honest next step. Three rules govern its wording.
+
+- **Never a claim about her.** The app does not know whether she checked in, only that it could not
+  find out. *"No check-in from Mum"* is unsupportable here.
+- **Never *"you will not be warned"***, which the lost-access row does say. The alarm may still be
+  armed and the next fire may succeed, so that would overstate what is known.
+- **Never *"something went wrong"***, which the Floors table bans by name and this row shipped
+  verbatim until the Phase 3 gate. *"Could not finish checking"* says what happened; *"just now"*
+  stops it reading as permanent.
+
+It carries **no *"this phone last checked"* line** and no status, for the reason it exists: the cache
+read is among the things that may have thrown, so there is no value here the row can vouch for.
+
+It also carries **no promise about the future.** The remedy line said *"It will try again."* — and on
+a link whose alarm window was never armed, nothing does until somebody opens the app. It offers the
+**"Try again"** control instead, which is a thing the reader can do rather than a claim about what
+the phone will do. That control also satisfies the floor forbidding a drag as the only route to an
+action: pull-to-refresh was the only way to retry, and it is the gesture a screen-reader user is
+least able to perform, on a row whose entire content is a fault.
+
 ### Times, dates and the device's clock
 
 | Instant | Renders as |
@@ -257,15 +306,29 @@ because the empty state returned before the refresh wrapper existed.
 | Today | *"22:10"* — the time alone |
 | Within the last week | *"Tuesday 10:14"* |
 | Older than a week | *"Saturday 15 August, 10:14"* |
-| On a 12-hour device | *"10:10 pm"*, *"12:05 am"*, *"12:05 pm"* |
+| On a 12-hour device | *"9:14 am"*, *"10:10 pm"*, *"12:05 am"*, *"12:05 pm"* |
 
 **The weekday earns its place only once there is another day it could be.** Naming it for something
 four hours ago pushes the reader to work out that *"Tuesday 10:14"* is in fact this morning.
 
+**No leading zero on a 12-hour hour** — *"9:14 am"*, never *"09:14 am"* — while the 24-hour form
+does pad: *"09:14"*. The two differ deliberately, and every example here had a two-digit hour until
+the Phase 3 gate, so the difference was recorded nowhere and asserted nowhere.
+
 **12h/24h follows the device**, per the accessibility floor, rather than being hard-coded to the
-owner's locale. The screen reads `MediaQuery.alwaysUse24HourFormat` live; the alarm isolate has no
-widget tree, so the UI caches the setting to `LocalStore` on every resume — the same arrangement
-[ADR-0002](../architecture/decisions/0002-clock-split.md) uses for the timezone.
+owner's locale. It applies app-wide — every notification, this list, and the Tap screen's *"You
+already tapped today, at 9:14 am."* — and not only to this screen.
+
+`ClockService` reads it from `platformDispatcher.alwaysUse24HourFormat`, which needs no
+`BuildContext`, and caches it to `LocalStore` on launch and on every resume — the same arrangement
+[ADR-0002](../architecture/decisions/0002-clock-split.md) uses for the timezone, and for the same
+reason: the alarm isolate that posts most of these notifications has no widget tree to ask.
+
+**This list renders from that one cached value, not from `MediaQuery`.** It has a `BuildContext` and
+could read the setting live — and did, which gave one fact two sources: the row and the notification
+produced by the *same reconcile* could disagree about the same instant, which is precisely the
+comparison a reader makes. The Tap screen still reads `MediaQuery` live, because nothing there is
+paired with a notification rendering the same instant; that asymmetry is recorded in its own code.
 
 ### Colour, and what is never coloured
 

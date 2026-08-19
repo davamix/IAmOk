@@ -75,6 +75,8 @@ void main() {
     // Names of links this pass could not reconcile at all.
     List<String> unreconciled = const [],
     bool uses24Hour = true,
+    // Pull-to-refresh, and the failed row's *Try again*.
+    Future<void> Function()? onRefresh,
   }) async {
     tester.view.physicalSize = surface * tester.view.devicePixelRatio;
     addTearDown(tester.view.reset);
@@ -90,6 +92,7 @@ void main() {
                 .copyWith(textScaler: TextScaler.linear(textScale)),
             child: Scaffold(
               body: WatcherBody(
+                onRefresh: onRefresh,
                 state: WatcherState(
                   people: people,
                   today: today,
@@ -447,6 +450,36 @@ void main() {
       expect(size.height, greaterThanOrEqualTo(48));
     });
 
+    testWidgets('and its label is legible against the banner it sits on',
+        (tester) async {
+      // A bare `TextButton` takes its foreground from `colorScheme.primary`,
+      // which is measured against `surface` — not against the `errorContainer`
+      // painted behind it. That pair measures **2.33:1 in light, 2.31:1 in
+      // dark**, where the floor is 4.5, and raising `contrastLevel` for the
+      // light palette's AAA misses pushed it further down rather than up.
+      //
+      // `contrast_test.dart` holds the ratio; this holds the wiring, because
+      // the ratio is only reached if the widget actually asks for this colour.
+      await pump(
+        tester,
+        [person()],
+        warningDelivery: NotificationDelivery.unavailable,
+      );
+
+      final scheme = AppTheme.light.colorScheme;
+      final button = tester.widget<TextButton>(find.widgetWithText(
+          TextButton, WatcherCopy.warningsOffAction));
+      expect(
+        button.style?.foregroundColor?.resolve({}),
+        scheme.onErrorContainer,
+        reason: 'the pair the body text beside it already uses',
+      );
+      expect(
+        button.style?.foregroundColor?.resolve({}),
+        isNot(scheme.primary),
+      );
+    });
+
     testWidgets('nothing is shown when warnings work', (tester) async {
       await pump(tester, [person()]);
       expect(find.text(WatcherCopy.warningsOff), findsNothing);
@@ -539,6 +572,77 @@ void main() {
 
       expect(find.text(WatcherCopy.warningsOff), findsOneWidget);
       expect(find.text(WatcherCopy.couldNotCheckOn('Mum')), findsOneWidget);
+    });
+
+    testWidgets('never says "something went wrong"', (tester) async {
+      // `guidelines.md`'s Floors table bans the phrase by name, and this row
+      // shipped it verbatim — on the screen the *lost access* notification
+      // promises will say what to do. Asserted as a property of the rendered
+      // row rather than of the constant, so it also catches the phrase arriving
+      // from any other string this row shows.
+      await pump(tester, const [], unreconciled: ['Mum']);
+      expect(find.textContaining('something went wrong'), findsNothing);
+    });
+
+    testWidgets('offers a control, not only a pull-to-refresh drag',
+        (tester) async {
+      // `guidelines.md`: no drag as the ONLY route to an action — and a drag is
+      // what TalkBack is least able to perform, on a row whose entire content is
+      // a fault. The whole-screen failure has had a button since it was written;
+      // this row had nothing.
+      var retried = 0;
+      await pump(
+        tester,
+        const [],
+        unreconciled: ['Mum'],
+        onRefresh: () async => retried++,
+      );
+
+      await tester.tap(find.text(WatcherCopy.retry));
+      await tester.pump();
+      expect(retried, 1);
+    });
+
+    testWidgets('and that control is reachable by a screen reader',
+        (tester) async {
+      // The row's text is collapsed into ONE utterance by a
+      // `Semantics`/`ExcludeSemantics` pair — correct for text, fatal for a
+      // control, which is why the button sits outside that pair. Inside it, the
+      // button would be invisible to exactly the reader it was added for.
+      final handle = tester.ensureSemantics();
+      await pump(
+        tester,
+        const [],
+        unreconciled: ['Mum'],
+        onRefresh: () async {},
+      );
+
+      expect(
+        tester.getSemantics(find.text(WatcherCopy.retry)),
+        matchesSemantics(
+          label: WatcherCopy.retry,
+          isButton: true,
+          isEnabled: true,
+          isFocusable: true,
+          hasEnabledState: true,
+          hasTapAction: true,
+          hasFocusAction: true,
+        ),
+      );
+      handle.dispose();
+    });
+
+    testWidgets('the row still speaks as one utterance', (tester) async {
+      // The button moving outside the wrapper must not have split the text.
+      final handle = tester.ensureSemantics();
+      await pump(tester, const [], unreconciled: ['Mum']);
+
+      expect(
+        find.bySemanticsLabel(RegExp(
+            r'Mum\..*could not finish checking.*ask whoever set up the app')),
+        findsOneWidget,
+      );
+      handle.dispose();
     });
   });
 

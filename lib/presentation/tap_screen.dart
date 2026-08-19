@@ -221,6 +221,17 @@ class TapBody extends ConsumerWidget {
     // localised at all and one consistent set of words matters more than one
     // correctly-localised outlier. Revisit together with the rest when
     // translation lands.
+    // **`MediaQuery` here, `LocalStore` on the watcher side — and that is a
+    // decision, not an oversight.** The watcher row and the notification posted
+    // by the same reconcile render the *same instant*, so a reader compares them
+    // directly and they must come from one source. Nothing on this screen is
+    // paired with a notification that way: the reminders carry no time. So this
+    // side reads the live setting, which is strictly fresher than the cache.
+    //
+    // The residual is small and worth naming: if the `LocalStore` write fails at
+    // launch, this screen follows the device while a warning notification
+    // follows the stale cache. Both are internally honest; they simply differ,
+    // on two surfaces a reader has no reason to compare.
     return NotificationCopy.timeLabel(
       at,
       zone ?? TimeZones.utc,
@@ -462,7 +473,22 @@ class _NotificationsOffBanner extends ConsumerWidget {
           TextButton(
             onPressed: () =>
                 ref.read(watchedStateProvider.notifier).requestNotifications(),
-            style: TextButton.styleFrom(minimumSize: const Size(88, 48)),
+            style: TextButton.styleFrom(
+              minimumSize: const Size(88, 48),
+              // **`onErrorContainer`, not the default `primary`.** A bare
+              // `TextButton` inside this banner took its label colour from the
+              // scheme's primary, which is measured against `surface` and not
+              // against the `errorContainer` it is actually painted on: 2.33:1
+              // in light and 2.31:1 in dark, where the floor is 4.5. Raising
+              // `contrastLevel` made it worse rather than better, because
+              // `errorContainer` darkens with the level and `primary` does not.
+              //
+              // This is the control that turns notifications back on, inside the
+              // banner that exists because they are off — the one button on the
+              // screen that must not be hard to read. The body text beside it
+              // already uses this pair, and it is asserted.
+              foregroundColor: theme.colorScheme.onErrorContainer,
+            ),
             child: const Text(TapCopy.notificationsOffAction),
           ),
         ],

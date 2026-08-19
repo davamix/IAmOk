@@ -349,14 +349,19 @@ abstract final class NotificationCopy {
     return '$weekday ${_time(instant, zone, uses24Hour)}';
   }
 
-  /// *"23:40"*, in the reader's own zone.
+  /// *"23:40"*, or *"9:14 am"*, in the reader's own zone.
   ///
-  /// 24-hour because that is the owner's locale and the approved strings are
-  /// written that way. `docs/ui-ux/guidelines.md` says to render the device's
-  /// own 12h/24h setting rather than hard-coding either; doing that needs a
-  /// `BuildContext`, which a notification posted from a bare isolate does not
-  /// have. Recorded as a deviation in the Phase 3 summary rather than silently
-  /// resolved the easy way.
+  /// **Follows the device's own 12h/24h setting**, which is what
+  /// `docs/ui-ux/guidelines.md` asks for. This docstring argued the opposite
+  /// until the Phase 3 gate — that 24-hour was hard-coded because reading the
+  /// setting needs a `BuildContext` a bare isolate does not have — and it went
+  /// on saying so after [uses24Hour] was added three lines below it, pointing at
+  /// a "deviation" in the Phase 3 summary that is now recorded as closed.
+  ///
+  /// The rationale was wrong as well as stale: `platformDispatcher
+  /// .alwaysUse24HourFormat` needs no context at all, so `ClockService` reads it
+  /// and caches it to `LocalStore` beside the device zone, and every surface —
+  /// notification, watcher row, Tap screen — renders from that one value.
   static String _time(DateTime instant, tz.Location zone, bool uses24Hour) {
     final local = tz.TZDateTime.from(instant, zone);
     final m = local.minute.toString().padLeft(2, '0');

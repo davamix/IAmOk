@@ -322,6 +322,24 @@ void main() {
       );
     });
 
+    test('a single-digit hour has no leading zero', () {
+      // `9:14 am`, never `09:14 am` — the shape a reader of this locale expects,
+      // and the one decision in `_time` that none of the pinned examples reached:
+      // every case here and in `screens.md` had a two-digit hour, so the branch
+      // was unasserted in both places at once.
+      expect(
+        body(WarningOutcome.warnOffline,
+            unverifiedSince: at(madrid, 2026, 8, 16, 9, 14), uses24Hour: false),
+        contains('offline since 9:14 am.'),
+      );
+      expect(
+        body(WarningOutcome.warnOffline,
+            unverifiedSince: at(madrid, 2026, 8, 16, 9, 14)),
+        contains('offline since 09:14.'),
+        reason: 'the 24-hour form DOES pad — the two differ deliberately',
+      );
+    });
+
     test('midnight and noon are 12, not 0', () {
       // The arithmetic every 12-hour clock gets wrong once.
       expect(

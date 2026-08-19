@@ -135,6 +135,14 @@ class _Failed extends StatelessWidget {
               const SizedBox(height: 16),
               FilledButton(
                 onPressed: onRetry,
+                // Explicit, like every other button in the app. The theme's
+                // `MaterialTapTargetSize.padded` already gives it a 48dp touch
+                // area, so this was never a floor breach — but it was the only
+                // control relying on that default, and a floor that holds by
+                // accident is one nobody notices losing.
+                style: FilledButton.styleFrom(
+                  minimumSize: const Size(88, 48),
+                ),
                 child: const Text(WatcherCopy.retry),
               ),
             ],
@@ -295,18 +303,29 @@ class _WatcherBodyState extends State<WatcherBody> {
 
   @override
   Widget build(BuildContext context) {
-    if (widget.state.isEmpty) return _Empty(onRefresh: widget.onRefresh);
     return Column(
       children: [
         // Above the list, because when it is showing it is the most important
         // thing on the screen: the rows describe what is true, this says the
         // reader will not be told about it again.
+        //
+        // **Above the empty state too.** The `isEmpty` early return used to sit
+        // over this, so the banner could not appear on a screen with no rows.
+        // The architecture round fixed the half of that which made a failed link
+        // read as "nobody"; the early return itself survived. It is vacuous
+        // today — with no links there is nobody to warn about — but the empty
+        // state is exactly the moment someone is being added ("I was just added,
+        // is it working yet?"), and the reader finding out then that this phone
+        // cannot warn is worth more than finding out after the first miss.
         if (widget.state.warningsSilenced)
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
             child: _WarningsOffBanner(onTurnOn: widget.onTurnOnWarnings),
           ),
-        Expanded(
+        if (widget.state.isEmpty)
+          Expanded(child: _Empty(onRefresh: widget.onRefresh))
+        else
+          Expanded(
           child: RefreshIndicator(
             onRefresh: () async => widget.onRefresh?.call(),
             child: ListView.separated(
@@ -336,6 +355,7 @@ class _WatcherBodyState extends State<WatcherBody> {
                   return _FailedRow(
                     link: widget.state.unreconciled[i -
                         widget.state.people.length],
+                    onRetry: widget.onRefresh,
                   );
                 }
                 final person = widget.state.people[i];
@@ -397,9 +417,17 @@ class _WarningsOffBanner extends StatelessWidget {
           ),
           TextButton(
             onPressed: onTurnOn == null ? null : () => onTurnOn!(),
-            // The 48dp floor, which applies to everything that is not the Tap
-            // screen's primary target.
-            style: TextButton.styleFrom(minimumSize: const Size(88, 48)),
+            style: TextButton.styleFrom(
+              // The 48dp floor, which applies to everything that is not the Tap
+              // screen's primary target.
+              minimumSize: const Size(88, 48),
+              // `onErrorContainer` rather than the default `primary`, which is
+              // measured against `surface` and not against the `errorContainer`
+              // painted behind it — 2.33:1 in light, 2.31:1 in dark, against a
+              // 4.5 floor. See the Tap screen's twin for the full reasoning;
+              // both banners had it and both are asserted now.
+              foregroundColor: theme.colorScheme.onErrorContainer,
+            ),
             child: const Text(WatcherCopy.warningsOffAction),
           ),
         ],
@@ -419,9 +447,18 @@ class _WarningsOffBanner extends StatelessWidget {
 /// carries no status: the cache read is one of the things that may have thrown,
 /// so there is no value here the row can vouch for.
 class _FailedRow extends StatelessWidget {
-  const _FailedRow({required this.link});
+  const _FailedRow({required this.link, this.onRetry});
 
   final Link link;
+
+  /// Retries the reconcile. **A button, because pull-to-refresh was the only
+  /// route** and `guidelines.md`'s accessibility floor forbids a drag as the
+  /// only way to reach an action — it is also the gesture TalkBack is least
+  /// able to perform, on the row whose whole content is a fault.
+  ///
+  /// The whole-screen `_Failed` has had this control since it was written; the
+  /// per-row failure, which is the far more common one, had nothing.
+  final Future<void> Function()? onRetry;
 
   @override
   Widget build(BuildContext context) {
@@ -431,7 +468,7 @@ class _FailedRow extends StatelessWidget {
       WatcherCopy.couldNotCheckRemedy,
     ];
 
-    return Padding(
+    final content = Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       child: Semantics(
         label: WatcherCopy.rowLabel(link.watchedName, lines.join(' ')),
@@ -455,6 +492,26 @@ class _FailedRow extends StatelessWidget {
           ),
         ),
       ),
+    );
+
+    // **Outside the `Semantics`/`ExcludeSemantics` pair above, deliberately.**
+    // That pair collapses the row's text into one utterance, which is right for
+    // text and fatal for a control: a button inside `ExcludeSemantics` is
+    // invisible to the screen reader it was added for. It gets its own node.
+    if (onRetry == null) return content;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        content,
+        Padding(
+          padding: const EdgeInsets.only(left: 8, bottom: 4),
+          child: TextButton(
+            onPressed: () => onRetry!(),
+            style: TextButton.styleFrom(minimumSize: const Size(88, 48)),
+            child: const Text(WatcherCopy.retry),
+          ),
+        ),
+      ],
     );
   }
 }

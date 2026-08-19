@@ -8,7 +8,7 @@ Phase 3 built the edge around a decision that already existed. `WarningPolicy` a
 isolate to wake them, somewhere to persist what they concluded, the words to say it in, and a
 surface to explain it on.
 
-**755 tests**, up from 547. `flutter analyze` clean. `flutter build apk --debug` succeeds.
+**770 tests**, up from 547. `flutter analyze` clean. `flutter build apk --debug` succeeds.
 
 > **This phase is NOT signed off.** **Three of the five reviewers have run** — architecture and
 > testing (each twice, testing most recently at the gate itself) and UI/UX; **security and
@@ -572,6 +572,15 @@ exist on 2026-08-17: the repair ran only from a post-frame callback, so it cover
 background-and-return. Its decision is now a unit-tested predicate (`IAmOkApp.repairOnResume`); what
 needs a device is the wiring, and it is on the matrix as its own row rather than folded into the
 launch row above it.
+
+**No away row on the watcher list, and that is a decision.** `screens.md` approves
+*"Away until Sat 22 Aug — set by Ana"*, and a verified away period currently falls through to
+*"Everything OK"* instead. It stays that way until Phase 6, for two reasons that both have to be
+fixed at once: no user can set an away period in Phase 3 — the Tap screen's *"I'm away"* action is
+`onPressed: null` and there is no backend — so the state is reachable only from the debug harness;
+and `AwayPeriod` carries no `setBy`/`setByName` until Phase 6, so a row built now would be an
+**unattributed** away state, which `guidelines.md` forbids outright. Recorded in `screens.md` rather
+than left to be rediscovered.
 
 **The watcher list layout is deliberately plain.** `screens.md` marks the multi-person layout as
 Phase 7 and undesigned; what is settled is the row *content*, which is what this renders.

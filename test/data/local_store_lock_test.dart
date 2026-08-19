@@ -461,6 +461,89 @@ void main() {
         isTrue,
       );
     });
+
+    /// **v2 → v3, which is the path a real device actually took.**
+    ///
+    /// The POCO F3 ran `00b9b99` — schema v2 — before `ff0e785` bumped to v3, so
+    /// this migration has already executed on the owner's phone with nothing
+    /// pinning it. From v1 the `DROP TABLE IF EXISTS reconcile_lock` is a no-op;
+    /// from **v2 it discards a real table**, because v2 keyed the lock
+    /// `id INTEGER PRIMARY KEY CHECK (id = 0)` — a single global row — and v3
+    /// re-keys it by scope so the watched and watcher sides cannot block each
+    /// other. One branch, two genuinely different paths, and only one was
+    /// covered.
+    ///
+    /// The lock table losing its row is explicitly acceptable — it holds nothing
+    /// but ephemeral leases. What must survive is everything else.
+    Future<String> seedV2() async {
+      final path = await seedV1();
+      final v2 = await databaseFactory.openDatabase(
+        path,
+        options: OpenDatabaseOptions(
+          version: 2,
+          onCreate: (_, _) async {},
+        ),
+      );
+      // v2's shape, written out and frozen for the same reason v1's is.
+      await v2.execute('''
+        CREATE TABLE reconcile_lock (
+          id         INTEGER PRIMARY KEY CHECK (id = 0),
+          owner      TEXT NOT NULL,
+          expires_at INTEGER NOT NULL
+        )''');
+      await v2.insert('reconcile_lock', {
+        'id': 0,
+        'owner': 'ui:1:0',
+        'expires_at': t0.millisecondsSinceEpoch,
+      });
+      await v2.close();
+      return path;
+    }
+
+    test('v2 keeps every table that matters', () async {
+      final upgraded = await LocalStore.open(path: await seedV2());
+      addTearDown(upgraded.close);
+
+      final dump = await upgraded.dump();
+      for (final table in [
+        'settings',
+        'links',
+        'check_ins',
+        'watcher_cache',
+        'warnings_shown',
+        'pending_alarms',
+        'self_away',
+      ]) {
+        expect(dump[table], hasLength(1), reason: '$table lost its row');
+      }
+      expect(
+        (await upgraded.watcherCache('mum_ana')).warningsShownFor,
+        {DayKey(2026, 8, 14): WarningOutcome.warnOnline},
+        reason: 'the row whose loss re-fires a warning at a family',
+      );
+    });
+
+    test('v2 gets the scope-keyed lock, and both scopes work', () async {
+      // The re-key is the whole content of this migration. v2 could hold one
+      // lock for the entire app; v3 must let the watched and watcher sides hold
+      // one each, which is what stopped one side going unarmed on every launch.
+      final upgraded = await LocalStore.open(path: await seedV2());
+      addTearDown(upgraded.close);
+
+      const lease = Duration(seconds: 30);
+      expect(
+        await upgraded.acquireReconcileLock(
+            scope: 'watched', owner: 'ui', now: t0, lease: lease),
+        isTrue,
+      );
+      expect(
+        await upgraded.acquireReconcileLock(
+            scope: 'watcher', owner: 'ui', now: t0, lease: lease),
+        isTrue,
+        reason: 'a v2 store carried one global lock row; if the table were not '
+            'replaced, the second scope would collide with the first',
+      );
+    });
   });
 
   test('a store written by a NEWER build opens, and keeps its rows', () async {

@@ -175,9 +175,20 @@ one: a stated bound (days older than the oldest day any reconcile can still deci
 #### Nothing leaves the device in Phase 3 — and that expires in Phase 4
 
 Verified at the gate rather than assumed: no `print`/`debugPrint`/`dart:developer`, no analytics or
-crash reporter, no `dart:io`, `http` or socket anywhere in `lib/` — and the **release manifest
-declares no `INTERNET` permission**, which exists only in the debug and profile manifests. A release
-build physically cannot transmit.
+crash reporter, no `dart:io`, `http` or socket anywhere in `lib/` — and the **release build declares
+no `INTERNET` permission**. A release build physically cannot transmit.
+
+That last one is checked against the **merged** release manifest, not just the source, because the
+way a permission actually arrives here is from a transitive AAR — `flutter_local_notifications`
+merged `VIBRATE` in uninvited during Phase 2. Built at the Phase 3 gate on 2026-08-19,
+`manifest-merger-release-report.txt` names no `INTERNET` contributor and the merged manifest carries
+exactly six: `POST_NOTIFICATIONS`, `RECEIVE_BOOT_COMPLETED`, `USE_EXACT_ALARM`,
+`SCHEDULE_EXACT_ALARM`, `VIBRATE`, `WAKE_LOCK`.
+
+`test/android_manifest_test.dart` holds the half a test can reach — the source manifests and that
+closed set — and says in its own docstring that it cannot see a transitive AAR. The merge check is a
+command in [../infrastructure/deploy-notes.md](../infrastructure/deploy-notes.md), owed whenever a
+plugin is added.
 
 That last line is load-bearing and Phase 4 removes it: adding Firebase adds `INTERNET`. From then on
 "nothing leaves the device" has to be re-derived from the code rather than inherited from this

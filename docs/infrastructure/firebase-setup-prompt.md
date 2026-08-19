@@ -37,9 +37,15 @@ $json = ($out -join "`n").Substring((($out -join "`n")).IndexOf('{'))
 # assert oauth_client count >= 1 BEFORE overwriting, then write
 ```
 
-**Exit code 9 is not failure.** Every `firebase apps:*` command prints `√ success` and then crashes
+**Exit code 9 is not failure.** Firebase CLI commands on Windows print `√ success` and then crash
 with `Assertion failed: !(handle->flags & UV_HANDLE_CLOSING), src\win\async.c`. The work has already
 completed. Verify with a `:list` or by reading the file — never by the exit code.
+
+This said "every `apps:*` command" until 2026-08-19, when the Phase 3 gate measured it and found both
+halves wrong: the crash is **intermittent** — `apps:list` crashed, exited 0, then crashed again in
+one shell session — and **not confined to `apps:*`**, since `projects:list` crashes as well. The
+practical rule is unchanged and now applies to every Firebase command: read the output, never the
+exit code.
 
 **OAuth clients take a minute or two to propagate** after enabling the Google provider. An empty
 `oauth_client: []` immediately after saving is expected, not a misconfiguration.
@@ -54,8 +60,26 @@ Values in it were verified on 2026-08-15 from this machine:
 |---|---|
 | Project ID `i-am-ok-c74ca`, number `744276314021` | `firebase projects:list` |
 | No apps registered yet | `firebase apps:list` — "No apps found" |
-| Firestore not created, Resource Location `[Not specified]` | `firestore:databases:list` returned API-disabled |
-| Debug SHA-1 / SHA-256 | `keytool -list -v` on `~/.android/debug.keystore` |
+| Firestore not created | `firestore:databases:list` returned API-disabled |
+| Debug SHA-1 / SHA-256 | `keytool` on `~/.android/debug.keystore` — **not on `PATH`**, see below |
+
+> **The Resource Location clause was dropped from the first row on 2026-08-19.** It read
+> *"Resource Location `[Not specified]`"* as evidence Firestore did not exist yet. Re-running
+> `firebase projects:list` at the Phase 3 gate — with Firestore live in `europe-west1` — shows that
+> column **still reads `[Not specified]`**. It is the GCP default resource location (App Engine and
+> the default bucket), not Firestore's, so it never changed and could not have distinguished either
+> state. This document's standing rests on "verified from the CLI", and that row was not.
+
+> **`keytool` is not on `PATH` on this machine**, and neither are `java` or `adb` — confirmed again
+> at the Phase 3 gate. It lives in the Android Studio JBR. This matters at **Phase 8**, when the same
+> command has to read the *release* fingerprints for Firebase registration:
+>
+> ```powershell
+> & "D:\Android\Android Studio\jbr\bin\keytool.exe" -list -v -alias androiddebugkey `
+>   -keystore ~/.android/debug.keystore -storepass android -keypass android
+> ```
+>
+> The `~` is fine — PowerShell 7 expands it.
 
 **Two things to verify yourself rather than trust the assistant with:** Firestore must be
 **Native mode**, and its location must be **europe-west1**. Both are permanent — a wrong choice

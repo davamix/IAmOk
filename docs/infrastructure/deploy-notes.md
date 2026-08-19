@@ -44,12 +44,24 @@ firebase apps:android:sha:list <appId> --project i-am-ok-c74ca
 it has **no location column**, so it cannot confirm the one setting that is permanent. Verified
 2026-08-15: `Location │ europe-west1`, `Type │ FIRESTORE_NATIVE`, created 2026-08-15T15:32:35Z.
 
-> **On Windows, `firebase apps:*` prints `√ success` and then exits 9** with a libuv assertion in
-> `src\win\async.c`. The work has already completed. **Read stdout — it is printed before the
-> crash — and never judge by the exit code.** Note the `:list` commands are themselves `apps:*` and
-> crash the same way, so "verify with a `:list`" means *read its output*, not *check that it
-> succeeded*. Likewise `apps:sdkconfig --out <path>` has crashed **before writing** and silently
-> left the previous file in place. Capture stdout, assert on the content, then write.
+> **On Windows, Firebase CLI commands print `√ success` and then crash** with a libuv assertion in
+> `src\win\async.c`, exiting 9 (or `-1073740791` — the same fault seen through a different shell).
+> The work has already completed. **Read stdout — it is printed before the crash — and never judge
+> by the exit code.** So "verify with a `:list`" means *read its output*, not *check that it
+> succeeded*.
+>
+> **Two corrections, measured at the Phase 3 gate on 2026-08-19**, because this paragraph said
+> "every `apps:*` command" and both halves of that were wrong:
+>
+> - **It is intermittent.** `firebase apps:list --project i-am-ok-c74ca`, run three times in one
+>   shell session, crashed / exited 0 / crashed. A single clean run is not evidence the trap is gone.
+> - **It is not confined to `apps:*`.** `projects:list` crashes too, and `database:instances:list`
+>   crashed for one reviewer and exited 0 twice for the next person. Treat *every* Firebase CLI
+>   command this way — which matters most in Phase 4, where the commands that count (`deploy`,
+>   `functions:list`) are not `apps:*` at all.
+>
+> Likewise `apps:sdkconfig --out <path>` has crashed **before writing** and silently left the
+> previous file in place. Capture stdout, assert on the content, then write.
 
 ## What gets deployed, and from where
 
@@ -120,3 +132,24 @@ fingerprints registered in Firebase (required for Google Sign-In to work on a re
 a decision on Play App Signing all land in **Phase 8**. The keystore and its passwords live in
 `.local/` and a password manager — never the repo. See
 [../security/secrets-policy.md](../security/secrets-policy.md).
+
+### Check the merged release permissions whenever a plugin is added
+
+```powershell
+flutter build apk --release
+Select-String -Path build\app\outputs\logs\manifest-merger-release-report.txt -Pattern INTERNET
+```
+
+Expect **no output**. `docs/security/threat-model.md` states that a release build cannot transmit,
+and that claim rests entirely on `INTERNET` being absent from the merged release manifest.
+
+**A test cannot answer this.** `test/android_manifest_test.dart` holds the half that lives in this
+repo — the source manifests, and a closed set of the permissions `main` declares — but a permission
+can arrive from a **transitive AAR**, where the diff is in someone else's dependency and not in any
+file here. That is not hypothetical: `flutter_local_notifications` merged `VIBRATE` in uninvited
+during Phase 2 and it had to be declared after the fact. So the merged report is the only real
+answer, and it needs a release build, which is why it is a command here rather than a test.
+
+Phase 4 removes the claim rather than the check — `firebase_core` pulls in `play-services-basement`,
+which declares `INTERNET`. When that lands, the threat model's statement has to be re-derived from
+the code rather than inherited, and `android_manifest_test.dart` says so in its own docstring.

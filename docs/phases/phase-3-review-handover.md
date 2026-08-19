@@ -1,13 +1,14 @@
 # Phase 3 review — handover
 
-**Written:** 2026-08-19 · **Head:** the security re-review commit · **771 tests**, `flutter analyze`
-clean, `flutter build apk --debug` succeeds.
+**Written:** 2026-08-19 · **Head:** the infrastructure re-review commit · **776 tests**, `flutter
+analyze` clean, `flutter build apk --debug` and `--release` both succeed.
 
 This document exists because the Phase 3 gate review ran long enough to span sessions. It records
 what the reviewers found, what was fixed, what is still owed, and how to pick it up.
 
-**Phase 3 is NOT signed off.** Three of five reviewers have run and been acted on; two have not run
-at all, and the overnight Doze device criterion is unstarted.
+**Phase 3 is NOT signed off.** **All five reviewers have now run at the gate and every finding is
+fixed** — but a short **architecture re-pass** is owed over the four gate commits it has not seen,
+and the overnight Doze device criterion is unstarted.
 
 ---
 
@@ -45,7 +46,8 @@ and the reason each round now re-reads the previous round's diff first.
 | `bbe68d5` | The **architecture** re-review of Tiers 3-5 |
 | `7311a33` | The **testing** re-review at the gate |
 | `769448c` | The **UI/UX** re-review at the gate |
-| *this one* | The **security** review — its first run this round |
+| `e2e084d` | The **security** review — its first run this round |
+| *this one* | The **infrastructure** review — its first run this round |
 
 ---
 
@@ -53,11 +55,11 @@ and the reason each round now re-reads the previous round's diff first.
 
 | Reviewer | Last run | Outcome |
 |---|---|---|
-| **security** | **at the gate, over `769448c`** | No exploitable finding. Three items, all acted on — see the round below. |
-| **uiux** | at the gate, over `7311a33` | All findings fixed. Has not seen the security commit. |
-| **testing** | at the gate, over `bbe68d5` | All findings fixed. Has not seen the two commits since. |
-| **architecture** | at `bbe68d5` | All findings fixed. **Has not seen `bbe68d5` itself**, nor the three gate commits since. |
-| **infrastructure** | never, this round | Has seen none of it |
+| **infrastructure** | **at the gate, over `e2e084d`** | Nothing irreversible wrong. Nine findings, all acted on — see the round below. |
+| **security** | at the gate, over `769448c` | No exploitable finding; three items acted on. |
+| **uiux** | at the gate, over `7311a33` | All findings fixed. Has not seen the two commits since. |
+| **testing** | at the gate, over `bbe68d5` | All findings fixed. Has not seen the three commits since. |
+| **architecture** | at `bbe68d5` | All findings fixed. **Has not seen `bbe68d5` itself**, nor the four gate commits since. **The one pass still owed.** |
 
 ### Standing rule
 
@@ -292,6 +294,91 @@ repo, inside a closure on a widget that is never returned. Nothing measures the 
 
 ---
 
+## The gate round — infrastructure over `e2e084d`
+
+**Nothing irreversible is wrong.** Firestore region and mode, the applicationId, and the App Check
+state (not registered, so not enforced) are all correct, and the reviewer verified them from the CLI
+rather than from the record: `europe-west1`, `FIRESTORE_NATIVE`, creation timestamp matching to the
+microsecond, the app id, both debug SHAs byte for byte, and — more than the record claimed — RTDB
+confirmed off. Nine findings, all acted on.
+
+**The three Android SDK levels were not pinned.** `compileSdk`, `minSdk` and `targetSdk` all read
+`flutter.*Version`, so `flutter upgrade` could move them with a **zero-line diff in this repo**. The
+values were right; the guarantee did not exist. Two of the three are load-bearing: `minSdk = 24` is
+cited by the desugaring block, by `LocalStore.upsertLink`'s avoidance of UPSERT syntax, and by the
+device matrix's "the watched person's phone is likely to be old" — and a comment three lines away
+stated it as a fact the code did not hold. `targetSdk = 36` is what the POCO F3 measured exact alarms
+and `POST_NOTIFICATIONS` against, both platform-gated on it. All three pinned, with the reason on
+each.
+
+**The migration tripwire could not tell "you forgot" from "you didn't."** `if (to > 3) throw` used a
+literal derived from nothing: bumping `schemaVersion` to 4 *and* writing the v4 step would still have
+thrown on every device holding an older store. Replaced with a per-version ladder whose `default` arm
+cannot drift.
+
+**And `onDowngrade`'s reasoning missed the case it creates.** It blanket-accepts a newer file and
+rewrites the version down — leaving the newer schema in place. So v3 → v4 → roll back → re-install v4
+replays the v4 step against a table that already has its change, and a bare `ALTER TABLE … ADD
+COLUMN` throws `duplicate column name`. `openDatabase` throws with it, and `LocalStore.open()` is
+unguarded in both `main.dart` and the alarm entry point — the app cannot open its store at all, and
+the only repair is a reinstall, which destroys `warnings_shown`: the exact loss the block is written
+to prevent, by a route it did not consider. v3's step is idempotent already, which is luck rather
+than design. Idempotence is now a stated rule with the crash spelled out.
+
+**v2 → v3 is the path the owner's own phone actually took, and it was the untested one.** The POCO F3
+ran `00b9b99` (v2) before `ff0e785` bumped to v3. From v1 the `DROP TABLE IF EXISTS reconcile_lock`
+is a no-op; from v2 it discards a real table, because v2 keyed the lock `id INTEGER PRIMARY KEY CHECK
+(id = 0)` and v3 re-keys it by scope. One branch, two genuinely different paths, one pinned. A v2
+fixture now covers it — and the fixture was probed to confirm it really produces a v2 database with
+the old lock shape, since a migration fixture whose "before" is not the old version asserts nothing.
+
+**`PLAN.md` ordered the client before the rules.** Step 2 wired client writes; step 3 deployed
+`firestore.rules`. Firestore was created in production (locked) mode, so a client built at step 2 gets
+`permission-denied` — which ADR-0004 maps to **refused**, driving the access-lost notification and its
+0/1/3/7/14-day cadence. Following the plan as written produces this app's own worst failure class from
+a developer's laptop. Rules now deploy first, with the reason recorded inline.
+
+### The `apps:*` exit-9 constraint was wrong in both halves
+
+`CLAUDE.md`, `deploy-notes.md`, `firebase-setup-prompt.md` and the infrastructure skill all said
+*every* `firebase apps:*` command prints `√ success` then exits 9. Re-measured at this gate:
+
+- **It is intermittent.** `firebase apps:list --project i-am-ok-c74ca`, three runs in one shell
+  session: crashed, **exited 0**, crashed. One clean run is not evidence the trap is gone.
+- **It is not confined to `apps:*`.** `projects:list` crashes. `database:instances:list` crashed for
+  the reviewer and exited 0 twice for me.
+
+The operational advice — read the output, never the exit code — was always right and is unchanged.
+All four places now say *every* Firebase command and name the intermittence, which matters most in
+Phase 4 where `deploy` and `functions:list` are the commands that count.
+
+### Two documentation claims that could not have been evidence
+
+`firebase-setup-prompt.md` cited *"Resource Location `[Not specified]`"* from `projects:list` as proof
+Firestore did not yet exist. Running it today, with Firestore live in `europe-west1`, that column
+**still reads `[Not specified]`** — it is the GCP default resource location, not Firestore's, and
+could not have distinguished either state. Dropped, with the reason kept.
+
+The same file cited `keytool -list -v` for the debug SHAs. `keytool`, `java` and `adb` are **not on
+`PATH`** on this machine. It matters at Phase 8, when the same command must read the *release*
+fingerprints — the working form (Android Studio's JBR) is now recorded, and was run to confirm it
+produces the fingerprints already registered.
+
+### The one thing the reviewer could not check, now settled
+
+It could not verify the **merged release manifest** — that needs `flutter build apk --release`, which
+writes files, and the review is read-only. It reasoned carefully from the debug merger report instead,
+and explicitly flagged that report as stale-dated before relying on it.
+
+Built at the gate. **`INTERNET` is absent from the merged release manifest**, and the merged
+permission set is exactly the six the app reasons about. That matters because `threat-model.md` now
+leans on it. It also had **no guard at all**, which is how `VIBRATE` once arrived uninvited from
+`flutter_local_notifications`: `test/android_manifest_test.dart` now holds the half a test can reach —
+source manifests plus that closed set — and says in its own docstring that it cannot see a transitive
+AAR. The merge check is a command in `deploy-notes.md`, owed whenever a plugin is added.
+
+---
+
 ## Known-open, carried deliberately
 
 Nothing here is a false claim; all are honest gaps.
@@ -324,10 +411,15 @@ Nothing here is a false claim; all are honest gaps.
       banners that the previous round had made worse.
    3. ~~**security**~~ — **done at the gate.** No exploitable finding; the secrets guard is intact
       in both directions. Three items acted on, and two proposed fixes deliberately not applied.
-   4. **infrastructure** — **next.** Has seen none of this round. New material: `onDowngrade`, the
-      v1 migration fixture, `AppTheme`, `contrastLevel` (now public), and three new sample paths in
-      `tools/check-secrets-ignored.ps1`.
-   5. **architecture** — a short pass over `bbe68d5`, which it has not seen.
+   4. ~~**infrastructure**~~ — **done at the gate.** Nothing irreversible wrong; nine findings
+      acted on, including three unpinned Android SDK levels and a constraint line that was wrong in
+      both halves.
+   5. **architecture** — **the one pass still owed.** A short re-read over the four gate commits
+      (`7311a33`, `769448c`, `e2e084d`, and this one) plus `bbe68d5`, which it has never seen. The
+      material with the most architectural weight: `IAmOkApp.repairOnResume` hoisted out of the
+      widget, `AppServices.resolveWatchedLink` returning a `Link` instead of a bool,
+      `_cacheDeviceFacts` writing two device facts on resume, and the `LocalStore` migration
+      ladder.
 2. **Fix what they find**, committing per reviewer as before.
 3. **Then the overnight Doze run** on the build you intend to keep. It is the last unobserved Phase 3
    device criterion.
@@ -342,16 +434,17 @@ Nothing here is a false claim; all are honest gaps.
 > `docs/phases/phase-3-review-handover.md` first — it records what the five reviewers have found so
 > far, what was fixed, and what is still owed. Then follow the reading order in `docs/README.md`.
 >
-> Head is the security re-review commit. 771 tests pass, `flutter analyze` is clean, and
-> `flutter build apk --debug` succeeds. Four of the five reviewers have run and been acted on —
-> testing, UI/UX and security at the gate itself; **infrastructure and a short architecture re-pass
-> over the four gate commits are still owed**, and the overnight Doze device test is unstarted.
+> Head is the infrastructure re-review commit. 776 tests pass, `flutter analyze` is clean, and both
+> `flutter build apk --debug` and `--release` succeed. **All five reviewers have now run at the gate
+> and every finding is fixed.** What is still owed: a **short architecture re-pass** over the four
+> gate commits plus `bbe68d5`, which that reviewer has never seen — and then the **overnight Doze
+> run**, the last unobserved Phase 3 device criterion.
 >
-> Start with the **infrastructure** reviewer. Run reviewers **one at a time** — never in parallel, that has
+> Start with the **architecture** reviewer. Run reviewers **one at a time** — never in parallel, that has
 > twice exhausted the session limit — and after each one finishes, stop, report what it found, and
 > ask me before running the next.
 >
-> Two things to carry with you. First, five of the last six review rounds found a defect introduced
+> Two things to carry with you. First, six of the last nine review rounds found a defect introduced
 > by the previous round's fix, so read your own recent changes as harshly as anything else. Second,
 > this is the watcher side, where a false claim to a family is the worst bug the app can have —
 > prefer stopping to ask over guessing, and if you think a finding is wrong, say so before acting on

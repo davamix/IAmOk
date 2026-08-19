@@ -187,14 +187,29 @@ What remains:
 
 1. Wire `firebase_core` + `google_sign_in` against the existing config, using the **Web** client ID
    as `serverClientId`. Release SHA fingerprints get added at Phase 8, when the keystore exists.
-2. `users/{uid}` + token subcollection; check-in write with `deviceTappedAt` + `receivedAt`.
+2. **`firestore.rules` + emulator-based rules tests, and deploy them — before any client write
+   exists.**
+
+   ```powershell
+   firebase deploy --only firestore:rules --project i-am-ok-c74ca
+   ```
+
+   > **Reordered at the Phase 3 gate.** This was step 3, after the client writes below, and
+   > `deploy-notes.md` has always said rules deploy first. Here the generic reason — "the client
+   > fails in a way that looks like a client bug" — badly understates it. Firestore was created in
+   > **production (locked) mode**, so a client built against undeployed rules gets
+   > `permission-denied`; [ADR-0004](architecture/decisions/0004-refused-is-not-unreachable.md) maps
+   > that to **refused**, which drives the access-lost notification and its 0/1/3/7/14-day cadence.
+   > Following the old order produces the exact class of false claim to a family that this app exists
+   > to avoid, from a developer's own laptop.
+
+3. `users/{uid}` + token subcollection; check-in write with `deviceTappedAt` + `receivedAt`.
    **The watcher's reconcile read must use `Source.server`, or check
    `metadata.isFromCache`** — offline persistence is on by default and `get()` does *not* throw when
    offline, it serves the local cache. Treating that as a successful read stamps `lastReconcileAt`
    and silently disables ADR-0001's staleness bound on every reconcile. Map `permission-denied` /
    `unauthenticated` to **refused** and `unavailable` / `deadline-exceeded` to **unreachable**
    ([ADR-0004](architecture/decisions/0004-refused-is-not-unreachable.md)).
-3. `firestore.rules` + emulator-based rules tests
 4. `onCheckInCreated` Function, `europe-west1`, data-only FCM fan-out
 5. FCM wiring in both the UI and background isolates
 6. **App Check** (Play Integrity), **monitoring mode only** — enforcing before the client sends

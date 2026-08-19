@@ -8,10 +8,11 @@ Phase 3 built the edge around a decision that already existed. `WarningPolicy` a
 isolate to wake them, somewhere to persist what they concluded, the words to say it in, and a
 surface to explain it on.
 
-**771 tests**, up from 547. `flutter analyze` clean. `flutter build apk --debug` succeeds.
+**776 tests**, up from 547. `flutter analyze` clean. `flutter build apk --debug` succeeds.
 
-> **This phase is NOT signed off.** **Four of the five reviewers have run** — architecture and
-> testing (each twice), UI/UX, and security; **infrastructure has not run at all this round.** The live status is
+> **This phase is NOT signed off.** **All five reviewers have now run at the gate**, and every
+> finding is fixed. A short **architecture re-pass** over the four gate commits is the one review
+> still owed. The live status is
 > [phase-3-review-handover.md](phase-3-review-handover.md), which is authoritative over this
 > paragraph; what is still owed is listed there and at the end of this document.
 >

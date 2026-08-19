@@ -69,20 +69,57 @@ class LocalStore {
           await db.execute(statement);
         }
       },
+      // Additive only, and deliberately not a drop-and-recreate: an installed
+      // app that loses this store loses `warningsShownFor`, and every standing
+      // warning fires again the next morning.
+      //
+      // **A ladder, one step per version, and every step must be idempotent.**
+      //
+      // The ladder replaces a set of `if (from < n)` branches plus a
+      // `if (to > 3) throw` tripwire. The tripwire's `3` was a literal derived
+      // from nothing: bumping `schemaVersion` to 4 *and* writing the v4 step
+      // would still have thrown on every device holding an older store, blaming
+      // a missing migration that had just been written. It could not tell "you
+      // forgot" from "you didn't". The `default` arm below cannot drift, because
+      // it is reached only by a version with no case.
+      //
+      // **Idempotence is a rule, not a coincidence**, and this is the case the
+      // old comment missed. [onDowngrade] accepts a newer file and rewrites its
+      // version down — leaving the newer schema in place. So:
+      //
+      //   v3 → install v4 (adds a column) → roll back to v3 → the column stays,
+      //   the version says 3 → re-install v4 → the v4 step runs again.
+      //
+      // A bare `ALTER TABLE … ADD COLUMN` there throws `duplicate column name`,
+      // `openDatabase` throws with it, and `LocalStore.open()` is unguarded in
+      // both `main.dart` and the alarm entry point. The app then cannot open its
+      // store at all and the only repair is a reinstall — which destroys
+      // `warnings_shown` and `pending_warnings`, the exact loss this whole block
+      // is written to prevent, arriving by a route the block did not consider.
+      //
+      // v3's step is idempotent already (`DROP TABLE IF EXISTS` then create),
+      // which is why the hazard is latent rather than live. That was luck. Any
+      // future step must check before it alters:
+      //
+      //   final cols = await db.rawQuery('PRAGMA table_info(links)');
+      //   if (!cols.any((c) => c['name'] == 'server_uid')) { … }
       onUpgrade: (db, from, to) async {
-        // Additive only, and deliberately not a drop-and-recreate: an installed
-        // app that loses this store loses `warningsShownFor`, and every standing
-        // warning fires again the next morning.
-        // `reconcile_lock` is the one table that may be dropped rather than
-        // migrated: it holds nothing but ephemeral leases, and the worst a lost
-        // row can do is let one reconcile run that would otherwise have waited.
-        // Every other table here is the opposite — losing `warnings_shown`
-        // fires every standing warning again the next morning.
-        if (from < 3) {
-          await db.execute('DROP TABLE IF EXISTS reconcile_lock');
-          await db.execute(_reconcileLockTable);
+        for (var v = from + 1; v <= to; v++) {
+          switch (v) {
+            // v2 and v3 both land on the current `reconcile_lock`. From v1 the
+            // drop is a no-op; from v2 it discards a real table — and it is the
+            // one table that may be dropped rather than migrated, because it
+            // holds nothing but ephemeral leases and the worst a lost row can do
+            // is let one reconcile run that would otherwise have waited. Every
+            // other table here is the opposite.
+            case 2:
+            case 3:
+              await db.execute('DROP TABLE IF EXISTS reconcile_lock');
+              await db.execute(_reconcileLockTable);
+            default:
+              throw StateError('no migration to v$v');
+          }
         }
-        if (to > 3) throw StateError('no migration from v$from to v$to');
       },
       // A store written by a NEWER build than the one now running — a Play
       // staged-rollout halt, or a debug build installed over a release one.
@@ -107,6 +144,12 @@ class LocalStore {
       // it. **A future migration that drops or renames a column breaks that and
       // must revisit this** — at which point the honest move is a version floor
       // here rather than a blanket accept.
+      //
+      // **The second consequence, which this comment used to miss.** Accepting
+      // the file leaves the *newer* schema on disk under an older version
+      // number, so the next upgrade replays a step against a table that already
+      // has its change. That is why [onUpgrade]'s steps must each be idempotent
+      // — the reasoning is there, with the crash it produces.
       onDowngrade: (db, from, to) async {},
     );
     return LocalStore._(db);

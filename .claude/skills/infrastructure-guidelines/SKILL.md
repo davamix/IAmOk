@@ -22,11 +22,16 @@ implicit project is a habit that eventually deploys to the wrong one.
 
 ## Two Windows traps — both already cost time here
 
-**1. `firebase apps:*` exits 9 on success.** Every one of them prints `√ success` and then crashes
-with `Assertion failed: !(handle->flags & UV_HANDLE_CLOSING), src\win\async.c`. The work has already
+**1. Firebase CLI commands exit 9 on success.** They print `√ success` and then crash with
+`Assertion failed: !(handle->flags & UV_HANDLE_CLOSING), src\win\async.c`. The work has already
 completed. **Never treat the exit code as the result — read stdout, which is printed before the
-crash.** The `:list` commands are themselves `apps:*` and crash identically, so "verify with a
-`:list`" means read its output, not check that it succeeded.
+crash.** So "verify with a `:list`" means read its output, not check that it succeeded.
+
+This named `apps:*` and called the crash universal until 2026-08-19, when the Phase 3 gate measured
+it. Both halves were wrong. It is **intermittent** — `apps:list` crashed, exited 0, then crashed
+again in one shell session, so a single clean run proves nothing — and it reaches commands outside
+`apps:*`, including `projects:list`. Apply it to every Firebase command, which is what matters in
+Phase 4 where `deploy` and `functions:list` are the ones that count.
 
 **2. `apps:sdkconfig --out <path>` can crash before writing** and silently leave the *previous*
 file in place. On 2026-08-15 that produced a confident, wrong conclusion — that the Google OAuth

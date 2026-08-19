@@ -124,6 +124,17 @@ class AppServices {
   /// clock format too, leaving a 12-hour device on the 24-hour default for the
   /// whole session.
   ///
+  /// ## And the two facts refresh differently — measured on the POCO F3
+  ///
+  /// The **zone** is a live plugin call, so calling this on resume genuinely
+  /// re-reads it. The **clock format** is `platformDispatcher
+  /// .alwaysUse24HourFormat`, which Flutter refreshes only when Android delivers
+  /// a configuration change: two successive background→resume cycles wrote the
+  /// stale value in both directions, while a cold start and a config-change
+  /// resume wrote the correct one. So this method is not the single source of
+  /// freshness it reads as — see `LocalStore.uses24HourClock` for the
+  /// measurement and what it does and does not cost.
+  ///
   /// ## Never allowed to fail its caller
   ///
   /// A lookup that throws leaves whatever is already cached and lets

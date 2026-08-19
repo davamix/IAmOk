@@ -269,14 +269,80 @@ in [phase-3-summary.md](../phases/phase-3-summary.md).
       right person's row highlighted and the cause-specific remediation showing.
 - [x] **A force-stop erases standing notifications as well as alarms** — 4 → 0. The unread warning
       goes with them, and `accessLostNotifiedOn` still records it as delivered.
-- [ ] **A *resume* repairs the watcher side, not only a launch** — force-stop, open the app,
-      background it, bring it back, and confirm the watcher alarms are armed and `last_reconcile_at`
-      moved. **Postdates the 2026-08-17 run**: the resume path was added afterwards, because the
-      repair ran only from a post-frame callback and a background-and-return is a resume rather than
-      a launch. The row above it covers the **launch** only, and the two are different code paths.
-      The predicate is now unit-tested (`IAmOkApp.repairOnResume`, in
-      `test/app_lifecycle_test.dart`); what needs a device is the wiring — that the observer is
-      registered and that the reconcile it triggers really re-arms. Owed with the overnight Doze run.
+- [x] **A *resume* repairs the watcher side, not only a launch**, 2026-08-19 — `last_reconcile_at`
+      advanced on both links across a plain background→resume with the process left alive, twice,
+      which is the observer firing and the reconcile running. The **launch** half was re-measured on
+      the post-gate build the same evening: force-stop took the platform to **0 warnings / 0
+      reminders**, reopening restored **12 / 18**, and the store's `pending_alarms` agreed exactly.
+      Not yet observed: alarms disappearing *while the app is alive* and being restored by a resume
+      alone — the harness's "Cancel every alarm" could not be driven through `adb input tap`.
+
+> **Counting pending alarms from `dumpsys alarm` needs the right lines.** Grepping the receiver name
+> matches the **App Alarm history** section — entries with `reason=data_cleared` / `alarm_cancelled`
+> — and not what is armed. A first pass at this run reported "18 reminders armed" from history lines
+> on an app that had none. Pending alarms are the `RTC_WAKEUP #n: Alarm{… <package>}` lines, whose
+> **following** line carries `tag=*walarm*:<package>/<receiver>`; count those. Same lesson as the
+> truncated-pipe trap already recorded here: the measurement needs checking before the result does.
+
+**Phase 3 — post-gate device pass, 2026-08-19**, on the six commits that closed the reviewer round.
+Same POCO F3, Android 13 / API 33, HyperOS `OS1.0`, stock power settings.
+
+- [x] **A fresh install arms the window at the device's wall times** — 18 reminders at 12:00 / 18:00
+      / 21:00 **Europe/Madrid**, not UTC, with `device_timezone` cached before the first reconcile.
+      The regression guard for the "19 alarms at UTC" defect, re-measured after `cacheDeviceFacts`
+      moved in `main()`.
+- [x] **The alarm isolate wakes on the post-gate build and picks the right message**, twice, from a
+      process killed with `am kill`: *"No check-in from Mum yesterday."* (`warnOnline`) and *"No
+      check-in received from Mum yesterday — your phone has not been able to check even once."*
+      (`warnOffline`, never-reconciled variant), both on the `warnings` channel.
+- [x] **A 12-hour device gets 12-hour times on the watcher row** — *"This phone last checked 10:34
+      pm."* with the device set to 12-hour: no leading zero, lowercase suffix, time-only because the
+      instant is today. The cached single source reaching the screen.
+- [ ] **A 12-hour time inside an isolate-posted notification.** Not reached: the two harness controls
+      that arm a real warning either force the backend to `succeeded` (no time in the message) or
+      reset `lastReconcileAt` to null (the "not able to check even once" variant, also no time). Both
+      are correct app behaviour. A harness control that leaves `lastReconcileAt` set while clearing
+      only `warnedDays` would close it.
+- [x] **Tapping a warning notification opens the watcher list**, with both rows rendering as one
+      TalkBack utterance each — *"Mum. No check-in from Mum yesterday. This phone last checked 10:34
+      pm."* That is `AppServices.resolveWatchedLink` routing on the new signature.
+- [x] **The release build runs, and the debug harness is absent from it** — the "Debug harness"
+      button present in the debug build does not appear. Reachability is nil by construction; this is
+      that, observed.
+- [x] **The release APK carries the pinned SDK levels and no `INTERNET`** — `aapt2 dump badging`:
+      `compileSdkVersion='36'`, `minSdkVersion:'24'`, `targetSdkVersion:'36'`, and exactly six
+      permissions (POST_NOTIFICATIONS, RECEIVE_BOOT_COMPLETED, USE_EXACT_ALARM, SCHEDULE_EXACT_ALARM
+      `maxSdkVersion='32'`, VIBRATE, WAKE_LOCK) plus androidx's
+      `DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION`. Stronger evidence than the merger report, since it
+      is the shipped artifact. Alarms armed 12 / 18 under the release build too.
+- [ ] **The cached 12/24-hour setting does not follow a plain resume** — see the finding below. Left
+      unchecked because it is a real, if cosmetic, gap rather than a passing result.
+
+> **FINDING — the clock format follows a cold start or a configuration change, not a resume.**
+> With the device switched between 12- and 24-hour while the app was backgrounded, two successive
+> background→resume cycles wrote the **stale** value, in **both** directions. A cold start wrote the
+> correct one; so did a resume that followed a forced configuration change (dark mode). Flutter
+> refreshes `platformDispatcher.alwaysUse24HourFormat` only on a configuration change, so
+> `cacheDeviceFacts` re-writes the same stale value on resume.
+>
+> The **write** happens on resume; the **value** does not move. The zone half is unaffected —
+> `flutter_timezone` is a live plugin call — though that was not measured, because setting the device
+> zone needs a permission `adb` does not have.
+>
+> Consequence is cosmetic and never a false claim about a person, which is why it is recorded rather
+> than urgently fixed. Documented in `LocalStore.uses24HourClock`; the live fix is a platform channel
+> to `DateFormat.is24HourFormat`, which belongs with Phase 7.
+>
+> **Caveat on the method:** the setting was changed with `adb shell settings put system time_12_24`.
+> A real toggle in the Settings UI might deliver a configuration change as a side effect, in which
+> case a user would not see this. The mechanism — that a plain resume does not refresh the value — is
+> what was measured, and it holds either way.
+
+- [ ] **Device timezone change while backgrounded** — not run. `cmd time_zone_detector
+      suggest_manual_time_zone` needs `SUGGEST_MANUAL_TIME_AND_ZONE`, which `adb` does not hold, so
+      this needs a human changing the zone in Settings. Worth doing with the Doze run: change the
+      zone, resume, and confirm `device_timezone` updated **and** the alarms re-armed at the new wall
+      time.
 
 **Phase 4 — end to end.** PLAN.md's exit criterion is *"a tap on one physical phone quietly updates
 a second physical phone"*, and only one physical phone exists today. Either a second handset is

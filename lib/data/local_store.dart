@@ -397,15 +397,45 @@ class LocalStore {
   ///
   /// **So it is cached here, exactly as the device's timezone is** (ADR-0002
   /// decision 2), and for the same reason: what a background isolate needs is on
-  /// disk. `ClockService` supplies it, and the UI writes it in `main()` and again
-  /// on every resume, because a reader can change it in Android settings while
-  /// the app is backgrounded — the same round trip the zone beside it makes.
+  /// disk. `ClockService` supplies it, and the UI writes it in `main()` and on
+  /// every resume — the same round trip the zone beside it makes.
   ///
-  /// It was written in `main()` only, which made the sentence above false in two
-  /// ways worth keeping a note of: a reader who changed the setting kept the old
-  /// format for the life of the process, and the write shared a `try` with the
-  /// zone's plugin call, so a `flutter_timezone` hiccup at launch left a 12-hour
-  /// device on the 24-hour default for the whole session.
+  /// ## What "on every resume" does and does not buy — measured 2026-08-19
+  ///
+  /// The **write** happens on every resume. The **value** it writes does not
+  /// necessarily change, and this is the part that was claimed wrongly here
+  /// until it was tested on the POCO F3:
+  ///
+  /// > ~~because a reader can change it in Android settings while the app is
+  /// > backgrounded~~
+  ///
+  /// `platformDispatcher.alwaysUse24HourFormat` is refreshed only when Android
+  /// delivers a **configuration change** to the activity. Measured: with the
+  /// device switched between 12- and 24-hour while the app was backgrounded, two
+  /// successive background→resume cycles wrote the **stale** value, in both
+  /// directions; a cold start wrote the correct one, and so did a resume that
+  /// followed a forced configuration change (dark mode). So the cache tracks the
+  /// device as of the last **cold start or configuration change**, not the last
+  /// resume.
+  ///
+  /// The consequence is cosmetic — times render in the format the device used at
+  /// process start until the next config change — and it is *not* a false claim
+  /// about a person, which is why it is recorded rather than urgently fixed. The
+  /// real fix is a platform channel to `DateFormat.is24HourFormat(context)`,
+  /// which is live; that belongs with Phase 7's UI work, not with a phase that is
+  /// closing. The resume write stays: it costs nothing and is correct whenever
+  /// the platform value has in fact moved.
+  ///
+  /// **The zone half is not affected.** `ClockService.deviceTimezone()` calls
+  /// `flutter_timezone`, a live plugin call into Android, so its resume refresh
+  /// is real. Not measured — setting the device zone needs a system permission
+  /// `adb` does not have — but it is a different mechanism from the one that
+  /// failed here.
+  ///
+  /// It was also written in `main()` only at one point, which cost two further
+  /// things worth keeping a note of: the write shared a `try` with the zone's
+  /// plugin call, so a `flutter_timezone` hiccup at launch left a 12-hour device
+  /// on the 24-hour default for the whole session.
   ///
   /// Defaults to true before the UI has ever run — the approved strings are
   /// 24-hour, so an uncached device renders what `screens.md` shows rather than

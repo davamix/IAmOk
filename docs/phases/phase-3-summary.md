@@ -559,6 +559,12 @@ row read it from there — **one source, so the two cannot disagree about the sa
 here struck through rather than deleted, because the reason it was believed impossible is worth
 keeping.
 
+Verified on the POCO F3 on 2026-08-19: with the device set to 12-hour, the watcher row rendered
+*"This phone last checked 10:34 pm."* — the cached value reaching the screen, in the approved
+12-hour shape. The same pass found the limit of it: the cache follows the device as of the last cold
+start or **configuration change**, not the last resume, because that is when Flutter refreshes the
+underlying value. Recorded in `LocalStore.uses24HourClock`.
+
 **Both remaining device criteria have since been observed**, and the records are above: the
 unattended warning at its natural `warningLocalTime`, and the cold-start tap on the *lost access*
 notification. This paragraph listed them as outstanding after they had been driven, which is the

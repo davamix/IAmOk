@@ -126,6 +126,13 @@ Consequences that shape the design:
   which is why it has no ADR of its own. `AppServices.cacheDeviceFacts` is the single implementation,
   and the plural is the point: a third will follow the same route.
 
+  **They do not refresh alike, which was measured rather than assumed.** The zone is a live plugin
+  call, so re-reading it on resume works. The clock format is
+  `platformDispatcher.alwaysUse24HourFormat`, which Flutter refreshes only on a **configuration
+  change** — so the cached format tracks the device as of the last cold start or config change, not
+  the last resume (POCO F3, 2026-08-19). Cosmetic, recorded in `LocalStore.uses24HourClock`, and a
+  live fix needs a platform channel that belongs with Phase 7.
+
 ---
 
 ## 5. Client architecture

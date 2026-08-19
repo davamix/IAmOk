@@ -324,6 +324,14 @@ already tapped today, at 9:14 am."* — and not only to this screen.
 [ADR-0002](../architecture/decisions/0002-clock-split.md) uses for the timezone, and for the same
 reason: the alarm isolate that posts most of these notifications has no widget tree to ask.
 
+**It follows the device as of the last cold start or configuration change, not the last resume.**
+Measured on the POCO F3 on 2026-08-19: Flutter refreshes `alwaysUse24HourFormat` only when Android
+delivers a configuration change, so switching the device between 12- and 24-hour while the app is
+backgrounded does *not* take effect on the next resume — two cycles wrote the stale value in both
+directions — while a cold start, or a resume after any config change (dark mode, rotation, locale),
+picks it up. The consequence is cosmetic and a live fix needs a platform channel to
+`DateFormat.is24HourFormat`, which belongs with Phase 7.
+
 **This list renders from that one cached value, not from `MediaQuery`.** It has a `BuildContext` and
 could read the setting live — and did, which gave one fact two sources: the row and the notification
 produced by the *same reconcile* could disagree about the same instant, which is precisely the

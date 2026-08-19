@@ -40,6 +40,26 @@ class NotificationRouter {
   /// A `ValueNotifier` rather than a stream so a late listener still sees a tap
   /// that arrived during startup — the cold-start case, where the payload is
   /// captured before any widget exists to be listening.
+  ///
+  /// ## **This is an untrusted hint. It is never an identifier.**
+  ///
+  /// The value is whatever string arrived on a notification payload, and a
+  /// payload is not proof of anything. Today it can only have been written by
+  /// this app, but the Android notification a tap comes from is outside the
+  /// app's control at the moment it is tapped, and `getNotificationAppLaunchDetails`
+  /// hands back whatever the launching intent carried.
+  ///
+  /// So nothing may **dereference** it. It is safe today only because
+  /// `watcher_screen.dart` matches it against the links this user actually
+  /// watches and ignores anything it does not recognise, and because
+  /// `main.dart` refuses to open the list for an unknown one. Both of those are
+  /// load-bearing rather than defensive tidiness.
+  ///
+  /// The rule for Phase 5 onward, when pairing makes link ids meaningful and
+  /// Firestore reads are keyed on them: **resolve it against the user's own
+  /// links first, and use the resolved `Link`.** Passing this string into a
+  /// query, a document path, or a security-rule-bearing call would let a
+  /// crafted notification name a link its reader has no right to.
   final ValueNotifier<String?> tappedLink = ValueNotifier<String?>(null);
 
   /// Called by `flutter_local_notifications` when the app is already running.

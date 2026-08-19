@@ -46,6 +46,10 @@ void main() {
     WatcherCache cache = const WatcherCache.empty(),
     WarningOutcome outcome = WarningOutcome.silent,
     LinkStatus status = LinkStatus.accepted,
+    // The instant the offline-shaped messages interpolate. Null models a
+    // decision made against a successful read, which is what makes a stored
+    // offline outcome unrenderable.
+    DateTime? unverifiedSince,
   }) =>
       WatchedPersonState(
         link: linkTo(uid, name, status: status),
@@ -53,6 +57,7 @@ void main() {
         decision: WarningDecision(
           outcome: outcome,
           day: d,
+          unverifiedSince: unverifiedSince,
           silenceReason: outcome == WarningOutcome.silent
               ? SilenceReason.checkInRecorded
               : null,
@@ -283,6 +288,52 @@ void main() {
       ]);
 
       expect(find.textContaining('No check-in received from Mum yesterday'),
+          findsOneWidget);
+    });
+
+    testWidgets('a stored OFFLINE warning is not rendered against a verified '
+        'decision', (tester) async {
+      // The 10:00 alarm could not reach the server, posted `warnOffline`, and
+      // recorded it. The reader muted *Missed check-ins*. A later reconcile
+      // succeeded online, decided `warnOnline`, and correctly did not update the
+      // ledger because nothing could be delivered.
+      //
+      // Rendering the stored outcome against the new decision's values produced
+      // "your phone has not been able to check even once" directly above "This
+      // phone last checked Tuesday 10:14" — two adjacent lines contradicting
+      // each other, one of them false about the device.
+      await pump(tester, [
+        person(
+          cache: WatcherCache(
+            warningsShownFor: {d: WarningOutcome.warnOffline},
+            lastReconcileAt: DateTime.utc(2026, 8, 17, 8, 14),
+          ),
+          // Verified now: no `unverifiedSince` for the offline clause to use.
+          outcome: WarningOutcome.warnOnline,
+        ),
+      ], warningDelivery: NotificationDelivery.unavailable);
+
+      expect(find.textContaining('has not been able to check even once'),
+          findsNothing);
+      expect(find.text('No check-in from Mum yesterday.'), findsOneWidget);
+    });
+
+    testWidgets('but a stored offline warning still stands while still offline',
+        (tester) async {
+      // The other half: when the decision DOES carry an instant, the stored
+      // outcome is renderable and is what is showing in the tray.
+      await pump(tester, [
+        person(
+          cache: WatcherCache(
+            warningsShownFor: {d: WarningOutcome.warnOffline},
+            lastReconcileAt: DateTime.utc(2026, 8, 17, 8, 14),
+          ),
+          outcome: WarningOutcome.warnOffline,
+          unverifiedSince: DateTime.utc(2026, 8, 17, 8, 14),
+        ),
+      ]);
+
+      expect(find.textContaining('your phone has been offline since'),
           findsOneWidget);
     });
 

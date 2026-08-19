@@ -82,9 +82,39 @@ class WatchedPersonState {
   /// answers when the ledger is empty. A silent decision still yields null, so
   /// *"Everything OK"* survives for the days it is true of, and `warnAccessLost`
   /// never reaches here because the lost-access row outranks it.
-  WarningOutcome? get standingWarning =>
-      cache.warningsShownFor[decision.day] ??
-      (decision.isWarning ? decision.outcome : null);
+  /// ## The ledger may only supply an outcome the current values can carry
+  ///
+  /// The **outcome** comes from the ledger while the row interpolates the
+  /// **current decision's** values — `unverifiedSince`, `away`,
+  /// `lastConfirmedDay`. That is the same compounding described above, surviving
+  /// for the wrong-*values* case after the wrong-*day* case was closed.
+  ///
+  /// The path: the 10:00 alarm cannot reach the server, posts `warnOffline` and
+  /// records it. The reader mutes *Missed check-ins*. A later reconcile succeeds
+  /// online, decides `warnOnline`, and correctly does not update the ledger
+  /// because nothing could be delivered. The row then renders `warnOffline` with
+  /// a verified decision's null `unverifiedSince`:
+  ///
+  /// > No check-in received from Mum yesterday — your phone has not been able to
+  /// > check even once.
+  /// > This phone last checked Tuesday 10:14.
+  ///
+  /// Two adjacent lines contradicting each other, one of them false about the
+  /// device.
+  ///
+  /// So an offline-shaped stored outcome gives way to the decision when the
+  /// decision has no instant to render. The ledger's job is to preserve a
+  /// *superseding* outcome, not to supply one the row cannot state honestly.
+  WarningOutcome? get standingWarning {
+    final stored = cache.warningsShownFor[decision.day];
+    if (stored == null) return decision.isWarning ? decision.outcome : null;
+    final needsInstant = stored == WarningOutcome.warnOffline ||
+        stored == WarningOutcome.warnUnverifiableAway;
+    if (needsInstant && decision.unverifiedSince == null) {
+      return decision.isWarning ? decision.outcome : null;
+    }
+    return stored;
+  }
 }
 
 /// Everything the watcher's screen needs, as of one reconcile.

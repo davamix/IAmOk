@@ -121,7 +121,8 @@ class IAmOkApp extends ConsumerStatefulWidget {
   ConsumerState<IAmOkApp> createState() => _IAmOkAppState();
 }
 
-class _IAmOkAppState extends ConsumerState<IAmOkApp> {
+class _IAmOkAppState extends ConsumerState<IAmOkApp>
+    with WidgetsBindingObserver {
   /// Lets a notification tap navigate without a `BuildContext` from a widget
   /// that may not be mounted yet.
   ///
@@ -131,15 +132,60 @@ class _IAmOkAppState extends ConsumerState<IAmOkApp> {
   /// cold start is the *normal* arrival rather than the edge case.
   final _navigator = GlobalKey<NavigatorState>();
 
+  /// Whether the watcher list is currently on top.
+  ///
+  /// Tracked because it decides which reconcile runs on resume, and the two
+  /// differ in the one parameter that can lose a warning silently — see
+  /// [didChangeAppLifecycleState]. The push below is the only route to that
+  /// screen in Phase 3, so this stays true; Phase 5 routes on role and will
+  /// need a real answer rather than a remembered one.
+  bool _watcherListShowing = false;
+
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     NotificationRouter.instance.tappedLink.addListener(_openWatcherList);
     // After the first frame, so a payload captured before runApp is honoured.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _openWatcherList();
       _reconcileBothSides();
     });
+  }
+
+  /// **A resume is a real reconcile on both sides, not only on the one showing.**
+  ///
+  /// `_reconcileBothSides` ran from a post-frame callback and nowhere else, so
+  /// it covered the cold start and nothing after it. A watcher who backgrounds
+  /// the app and comes back — which is most of how a phone is used — reconciled
+  /// only the watched side, because that is the side whose provider rebuilds.
+  ///
+  /// That matters most in the state it was added for. A force-stop cancels every
+  /// alarm and tells the app nothing; opening the app repairs it. But "opening"
+  /// after a background-and-return is a *resume*, not a launch, and the repair
+  /// did not run there. Android also revokes permissions from apps nobody opens
+  /// (§13), and a resume is exactly when that must be re-observed.
+  ///
+  /// **It defers to the list when the list is showing**, rather than running
+  /// alongside it. Two concurrent watcher reconciles are refused by the lease
+  /// (ADR-0006), but which one wins decides `NotificationDelivery`, and the two
+  /// answers are not symmetric: passing `false` while the list shows posts a
+  /// notification the reader can already see — noise. Passing `true` while it
+  /// does not consumes the day and shows nobody anything — a lost warning, and
+  /// the defect measured on the POCO F3. So the screen's own observer handles
+  /// its case, and this handles every other.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) return;
+    if (_watcherListShowing) return;
+    _reconcileBothSides();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    NotificationRouter.instance.tappedLink.removeListener(_openWatcherList);
+    super.dispose();
   }
 
   /// Reconciles the **watcher** side on app open, whatever screen is showing.
@@ -199,11 +245,6 @@ class _IAmOkAppState extends ConsumerState<IAmOkApp> {
     );
   }
 
-  @override
-  void dispose() {
-    NotificationRouter.instance.tappedLink.removeListener(_openWatcherList);
-    super.dispose();
-  }
 
   /// Opens the watcher list, which is where every notification this app posts to
   /// a *watcher* is explained.
@@ -212,14 +253,48 @@ class _IAmOkAppState extends ConsumerState<IAmOkApp> {
   /// correction, lost access — are about one watched person, and the list row is
   /// what carries the current truth about them. Sending a correction somewhere
   /// different from the warning it replaced would be its own small confusion.
+  ///
+  /// **The payload is checked against this user's own links before it opens
+  /// anything.** `tappedLink` is an untrusted hint — whatever string arrived on
+  /// a notification — and this pushed a screen for any non-null value. The
+  /// screen itself validates before highlighting a row, so a stranger's link id
+  /// could not surface another person's data; what it *could* do is open the
+  /// watcher list on a phone that watches nobody, from a notification the app
+  /// never posted. Small today, and exactly the check that must already exist
+  /// before Phase 5 makes link ids meaningful and keys Firestore reads on them.
   void _openWatcherList() {
-    if (NotificationRouter.instance.tappedLink.value == null) return;
+    final tapped = NotificationRouter.instance.tappedLink.value;
+    if (tapped == null) return;
     final navigator = _navigator.currentState;
     if (navigator == null) return;
+    unawaited(_openIfWatched(tapped, navigator));
+  }
+
+  Future<void> _openIfWatched(String linkId, NavigatorState navigator) async {
+    final services = ref.read(appServicesProvider);
+    final links = await services.store.linksWatchedBy(services.selfUid);
+    if (!links.any((link) => link.id == linkId)) {
+      // Not this user's business. Consumed so a rebuild does not retry it —
+      // and deliberately NOT navigated anywhere, because there is nothing to
+      // show and no screen that could explain it honestly.
+      NotificationRouter.instance.consume();
+      return;
+    }
+    if (!mounted) return;
+    _pushWatcherList(navigator);
+  }
+
+  void _pushWatcherList(NavigatorState navigator) {
     // Phase 5 routes on role; until then the watched screen is home and this is
     // pushed on top, so Back returns where the reader came from.
-    navigator.push(
-      MaterialPageRoute<void>(builder: (_) => const WatcherScreen()),
+    // The flag is set around the push rather than inferred from the navigator,
+    // because `didChangeAppLifecycleState` needs the answer synchronously and
+    // this is the only route to that screen in Phase 3.
+    _watcherListShowing = true;
+    unawaited(
+      navigator
+          .push(MaterialPageRoute<void>(builder: (_) => const WatcherScreen()))
+          .then((_) => _watcherListShowing = false),
     );
   }
 

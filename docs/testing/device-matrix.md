@@ -249,10 +249,39 @@ in [phase-3-summary.md](../phases/phase-3-summary.md).
       phase's worst one too: the app-open reconcile was consuming the day as `redundant` and posting
       nothing. Notification ids were byte-identical across processes and a reinstall, which is
       `AlarmIds`' stability shown on hardware.
-- [ ] Suppressed when a check-in is cached · suppressed when away covers the day · replaced by a
-      correction · a different and honest message when unreachable — covered by tests and reachable
-      from the harness, but **not yet driven end-to-end on the device**. The `warnOnline` path now
-      has been; the other three have not.
+- [x] **All five of PLAN.md's Phase 3 exit criteria, driven end-to-end on the device**, 2026-08-20
+      15:33–15:55, one build, one session, one process (pid 19814). Each fire is the **alarm isolate**
+      deciding, not a UI reconcile. The earlier wording here was muddled — it listed four items and
+      then said "the other three" — so all five are restated with their evidence:
+
+      | # | Criterion | Fired | Evidence |
+      |---|---|---|---|
+      | 1 | Fires when it should | 15:33:00, 15:47:00 | *"No check-in from Mum yesterday."* + Granddad, `warnings_shown` = `warnOnline` |
+      | 2 | Suppressed when a check-in is cached | 15:39:00 | **no** notification, `warnings_shown` empty, `last_confirmed_day=2026-08-19` |
+      | 3 | Suppressed when away covers the day | 15:43:00 | **no** notification, `away=2026-08-17..2026-08-23` cached, `last_confirmed_day=None` |
+      | 4 | Replaced by a correction | 15:50:16 | *"Correction: Mum did check in yesterday."* at **id 779565329** — the same id the warning held |
+      | 5 | Different and honest when unreachable | 15:55:00 | *"…your phone has not been able to check even once."*, `warnings_shown` = `warnOffline` |
+
+      **The suppressions carry a positive fingerprint, which is better than the plan expected.** A
+      silence writes no notification and no ledger row, so the intent was to prove it only by
+      contrast against the `warnOnline` control six minutes earlier. In fact the isolate's *cache
+      write* distinguishes the two causes: case 2 records `last_confirmed_day`, case 3 records the
+      away period and leaves `last_confirmed_day` null. So each silence is evidenced as the right
+      silence, not merely as silence — without adding anything to the path that decides whether to
+      alarm a family.
+
+      **Criterion 4 also demonstrates §10's "reconcile every link, not the one armed for".** The
+      alarm was armed for `links.first` only (Mum), and **both** people were corrected.
+
+      **Criterion 5 confirms ADR-0001's rule in passing:** `last_reconcile_at` stayed **null** across
+      the fire, because a read that *fails* is not an answer and may not refresh the cache.
+
+      Method: no new harness code. `Arm the natural warning 3 minutes out` clears decision state and
+      arms; the `Backend holds …` controls only touch the simulated backend, so they can be applied
+      *after* it. Criterion 4 used `Arm a REAL warning alarm, 2 minutes out`, which arms through
+      `warningAlarms.apply` with no reconcile and so disturbs neither backend nor standing warning.
+      Every step was verified by reading the store, and the tray was confirmed empty of ours before
+      each suppression run so that "no notification" meant something.
 - [x] **The warning alarm survives a reboot**, 2026-08-18 — 35 armed, rebooted, and the **identical
       35 instants** back at uptime 100 s (0 at 39 s, 59 s and 79 s, so poll for minutes). Restored by
       the plugin's `RebootBroadcastReceiver` from its own record: `last_reconcile_at` was unchanged

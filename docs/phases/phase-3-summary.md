@@ -1,7 +1,28 @@
 # Phase 3 — Watcher side · summary
 
-**Date:** 2026-08-17 · **Status:** Implementation complete; device pass recorded below · **Next:**
-the reviewer agents, then the owner's review
+**Date:** 2026-08-17 · **Updated:** 2026-08-20 · **Status:** Implemented, reviewed at the gate, and
+all five exit criteria observed on hardware. **Not signed off yet** · **Next:** the owner's review
+
+> **This document is accurate about what it covers, and it does not cover the last three days.**
+> Everything below was written before the gate review finished. For the current state read
+> [phase-3-review-handover.md](phase-3-review-handover.md) first; the short version of what happened
+> after this was written:
+>
+> - **All five reviewers ran at the gate**, every finding fixed, one commit per reviewer.
+> - **All five of PLAN.md's exit criteria were driven end-to-end on the device**, 2026-08-20
+>   15:33–15:55 — not merely asserted in tests. Evidence in
+>   [../testing/device-matrix.md](../testing/device-matrix.md).
+> - **The warning is late when the watcher's phone is in deep Doze.** Five runs established that
+>   AlarmManager delivers on time and `android_alarm_manager_plus`'s JobScheduler hop is what Doze
+>   holds; the reminder path, which posts straight from its receiver, is punctual in the same Doze.
+>   Accepted for now in
+>   [ADR-0008](../architecture/decisions/0008-the-warning-is-late-in-doze-and-the-app-says-so.md),
+>   which also reworded ARCHITECTURE.md §14's trigger condition because it was false as written.
+> - **A defect: the alarm isolate was closing the UI's shared database connection**, killing the UI's
+>   store for the life of the process. Fixed, with two source-level guards, and
+>   `rollbackActiveTransactionOnOpen` pinned so debug and release behave alike. ADR-0006 amended:
+>   the isolates share **one** connection on Android, not one each.
+> - Test count is now **783**.
 
 Phase 3 built the edge around a decision that already existed. `WarningPolicy` and
 `WatcherReconciler` were finished and exhaustively tested in Phase 1; what was missing was an

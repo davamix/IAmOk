@@ -75,11 +75,27 @@ $mustBeIgnored = @(
     # Environment
     '.env'
     '.env.local'
+    # Node dependency trees — the rules tests, and from Phase 4 the Functions.
+    # Not secret, just large and regenerable; asserted here because a rule with
+    # no assertion is a rule nobody notices losing. Verified with
+    # `git check-ignore -v --no-index` to hit `**/node_modules/` and nothing
+    # earlier.
+    'rules-tests/node_modules/x'
+    'functions/node_modules/x'
 )
 
 # Committed on purpose. See docs/security/secrets-policy.md §2.
+#
+# The Firebase config files joined this list in Phase 4. They are not secret —
+# the rules in particular are public by design, since a ruleset that is only safe
+# while unread is not safe — and all three are at risk from exactly the
+# well-meaning `*.json` rule the second half of this script exists to catch. A
+# repo without them does not deploy.
 $mustBeTrackable = @(
     'android/app/google-services.json'
+    'firebase.json'
+    'firestore.rules'
+    'firestore.indexes.json'
 )
 
 $failures = @()

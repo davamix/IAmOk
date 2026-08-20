@@ -54,6 +54,10 @@ app.*.map.json
 # Widget Preview related
 .widget_preview/
 
+# Node — the rules tests (rules-tests/) and, from Phase 4, the Cloud Functions
+# (functions/). Nothing secret, just large and regenerable from package.json.
+**/node_modules/
+
 # ── Secrets ───────────────────────────────────────────────────────────────────
 # Rationale for every line here: docs/security/secrets-policy.md
 # Verify with: pwsh -File tools/check-secrets-ignored.ps1

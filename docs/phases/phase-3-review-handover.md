@@ -511,11 +511,18 @@ permission adb does not have — it needs a human in Settings).
 > warnings at `when=11:28:47`, against an armed second of **11:25:00**. That is run 2's 3h31m
 > reproduced in miniature and under control.
 >
-> **One caution before the ADR.** What is proven blocked is the **`JobIntentService` hop inside
-> `android_alarm_manager_plus`**, not "Dart at alarm time". `flutter_local_notifications` posts from
-> its receiver with no job hop, so the reminder path may well survive deep Doze — **untested**. Until
-> someone runs that, *"local delivery cannot work in Doze"* is a stronger claim than the evidence
-> supports, and an ADR that rests on it would rest on an unmeasured premise.
+> **And the follow-up was run — 12:00 the same day, same device, same forced deep Doze.** The
+> `flutter_local_notifications` reminder, whose alarm is **indistinguishable** from the warning's in
+> `dumpsys alarm` (`RTC_WAKEUP`, `flags=0x5`, `exactAllowReason=policy_permission`, the same 10-second
+> allowlist) and which differs **only** in that its receiver calls `notify()` instead of
+> `enqueueWork()`, arrived at **`when=12:00:00`** — on the second, with `get deep` still `IDLE` at
+> 12:00:58 and no live JobScheduler entry for the package at all.
+>
+> **So Doze does not block local delivery on this handset. The `JobIntentService` hop does.** §14's
+> trigger condition — *"whether alarms … actually survive"* — is **not met as worded**: the alarms
+> survive, and so does a notification posted from a receiver. The ADR has three options, not one, and
+> the cheapest of them is now live rather than ruled out. Details and the option list are in
+> `docs/testing/device-matrix.md`.
 
 ### The three runs that could not settle it, kept for the record
 
@@ -674,15 +681,16 @@ Nothing here is a false claim; all are honest gaps.
 2. ~~**The device pass.**~~ **Done** — seven checks in `d497859`, plus three Doze runs.
 3. ~~**Settle the Doze question.**~~ **Done 2026-08-20** — deep Doze blocks it with a warm process;
    the gate is JobScheduler's `readyNotDozing`. Evidence in `docs/testing/device-matrix.md`.
-4. **Run the one cheap experiment the ADR's premise depends on** — arm forced Doze a few minutes
-   before one of the 12:00 / 18:00 / 21:00 reminders and see whether `flutter_local_notifications`
-   delivers on time with no job hop. It costs about ten minutes with the phone connected and it
-   decides whether the answer is "go server-side" or "fix the delivery hop". **Do this before writing
-   the ADR**, not after.
-5. **Then decide about §9's scheduled function**, in an ADR. The decision is the owner's; the
-   evidence is now sufficient to make it, and the options are wider than the ADR was going to
-   assume — server-side function, a client-side delivery path that skips the job hop, or accepting
-   the deferral and saying so in §13's health panel.
+4. ~~**Run the experiment the ADR's premise depends on.**~~ **Done 2026-08-20 12:00** — the
+   reminder path, whose alarm is identical and whose receiver skips the job hop, delivered at
+   `when=12:00:00` inside the same deep Doze. Doze is not the blocker; the hop is.
+5. **Decide about §9's scheduled function, in an ADR — owner's call.** The evidence is now
+   sufficient and the options are three, not one: deliver from the receiver as the reminders already
+   do (cheapest, and **the one remaining unmeasured step** is whether a Flutter background engine can
+   start inside the 10-second allowlist, or whether it needs a foreground service under the
+   exact-alarm exemption); or §9's server-side Function at ADR-0007's cost; or accept the deferral and
+   surface it in §13's health panel. **§14's trigger condition should be reworded either way** — it
+   says "whether alarms survive", and they do.
 6. **Decide what to do about `database_closed`** — the alarm isolate closing the UI's connection. It
    is unfixed, it is not a Doze problem, and it lands on the isolate boundary in §4. This one is a
    code defect rather than a decision, but the repair has several shapes and should be chosen
@@ -690,7 +698,7 @@ Nothing here is a false claim; all are honest gaps.
 7. **Then rewrite `docs/phases/phase-3-summary.md`** to record the settled state, and sign off the
    gate. It does not yet carry either of this session's two findings.
 
-### Device state as left on 2026-08-20 11:34
+### Device state as left on 2026-08-20 12:02
 
 Measured, not computed — `dumpsys alarm` parsed with the receiver-tag rule, store read with
 `run-as … cat` into a file and `PRAGMA integrity_check` run on it.
@@ -711,9 +719,11 @@ Measured, not computed — `dumpsys alarm` parsed with the receiver-tag rule, st
   hand-built run must do it itself.
 - `last_reconcile_at` = **11:28:47** on both links.
 - Simulated backend: `succeeded`, no check-in days → outcome `warnOnline`.
-- **12 warning alarms and 21 reminders armed.** Next warning **2026-08-21 11:25**; next reminder
-  **2026-08-20 12:00** — that reminder is the free opportunity for the untested job-hop experiment in
-  *Next steps* item 4.
+- **12 warning alarms and 20 reminders armed.** Next warning **2026-08-21 11:25**; next reminder
+  **2026-08-20 18:00**. The 12:00 reminder was consumed by the job-hop experiment.
+- Tray holds four of ours: three warnings at `when=11:28:47` (channel `warnings`, from the Doze
+  release) and one reminder at `when=12:00:00` (channel `reminders`). Left in place deliberately —
+  they are the evidence.
 - Device restored: `battery reset`, `deviceidle unforce`, deep and light both `ACTIVE`, 24-hour clock,
   Europe/Madrid, app **not** on the Doze whitelist.
 - `tools/doze-collect.ps1` gathers overnight evidence. Its `$baselineReconcileAt` and `$armedFor`
@@ -737,14 +747,16 @@ Measured, not computed — `dumpsys alarm` parsed with the receiver-tag rule, st
 >
 > **Two things are open, and the first one gates the second.**
 >
-> 1. **One cheap experiment, ~10 minutes with the phone connected.** What is proven blocked is that
->    plugin's job hop, *not* "Dart at alarm time" — `flutter_local_notifications` posts straight from
->    its receiver with no job hop. Arm forced Doze a few minutes before the 12:00 / 18:00 / 21:00
->    reminder and see whether it lands on time. Run this **before** anyone writes the ADR, because an
->    ADR written now would rest on the unmeasured premise that nothing local can run in Doze.
-> 2. **Then the ADR on §9's scheduled server-side function** — the owner's decision, not a quiet
->    edit. The options are wider than "go server-side": a delivery path that skips the job hop, or
->    accepting the deferral and surfacing it in §13's health panel.
+> 1. **The ADR on §9's scheduled server-side function — the owner's decision, not a quiet edit.**
+>    The premise has been measured rather than assumed: the reminder path, whose alarm is identical
+>    and whose receiver skips the job hop, delivered at `when=12:00:00` inside the same deep Doze. So
+>    **Doze is not the blocker; the hop is**, and there are three options — deliver from the receiver,
+>    §9's Function, or accept and surface the deferral. §14's trigger condition ("whether alarms …
+>    survive") needs rewording either way, because they do.
+> 2. **One step remains unmeasured** and it is the one that would make option 1 cheap: whether a
+>    Flutter background engine can be started from the receiver inside the 10-second temporary
+>    allowlist, or whether that needs a foreground service under the exact-alarm exemption. Nobody has
+>    tested it. Do not assume either way.
 >
 > **Separately, there is an unfixed defect that is not about Doze at all.** After a warning alarm
 > fires while the app process is alive, the alarm isolate closes the UI's sqflite connection —

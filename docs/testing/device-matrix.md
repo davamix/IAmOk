@@ -477,18 +477,73 @@ So the path itself works; only Doze breaks it.
   blocked is specifically the **`JobIntentService` hop inside `android_alarm_manager_plus`**, not
   "Dart at alarm time". Worth weighing before the ADR is written — see the open question below.
 
-#### The open question the ADR needs first — NOT measured
+#### ANSWERED — the reminder path delivers ON TIME in the same deep Doze
 
-`flutter_local_notifications`' `ScheduledNotificationReceiver.onReceive` posts its notification
-**directly** (`notificationManager.notify(...)`, source read at 22.3.0) with **no job hop**. That
-suggests the reminder path may survive deep Doze where the warning path does not — and if so, the
-block is a property of *how this plugin hands off*, not of Doze forbidding all alarm-time work.
+**Measured 2026-08-20 12:00, thirty minutes after the run above, on the same device in the same
+forced deep Doze.** This was the open question, and it is now closed: **Doze does not block local
+delivery on this handset. The `JobIntentService` hop does.**
 
-**This has not been tested and must not be assumed.** The warning path cannot simply copy it: a
-reminder posts a pre-rendered notification, while a warning has to run Dart to read the store and
-decide. The cheap experiment is to arm forced Doze a few minutes before one of the 12:00 / 18:00 /
-21:00 reminders and see whether it posts on time. Until that is run, "local delivery cannot work in
-Doze" is a **stronger claim than the evidence supports**.
+`flutter_local_notifications` schedules its reminders through AlarmManager exactly as
+`android_alarm_manager_plus` does, and the two alarms are **indistinguishable** in `dumpsys alarm`:
+
+```
+tag=*walarm*:…/flutterlocalnotifications.ScheduledNotificationReceiver     <- reminder
+tag=*walarm*:…/androidalarmmanager.AlarmBroadcastReceiver                  <- warning
+both: type=RTC_WAKEUP  flags=0x5  exactAllowReason=policy_permission
+      idle-options=Bundle[{… temporaryAppAllowlistDuration=10000, …}]
+```
+
+The **only** difference is what the receiver does with the broadcast:
+`ScheduledNotificationReceiver.onReceive` calls `notificationManager.notify(...)` **directly**
+(source read at 22.3.0); `AlarmBroadcastReceiver.onReceive` calls `enqueueWork` and hands it to
+JobScheduler.
+
+| | Warning, 11:25 | Reminder, 12:00 |
+|---|---|---|
+| Device | deep `IDLE`, forced | deep `IDLE`, forced — **still `IDLE` at 12:00:58** |
+| Process | pid 6349, warm | pid 6349, **same process** |
+| Alarm | `RTC_WAKEUP flags=0x5`, 10 s allowlist | **identical** |
+| Delivery hop | receiver → `JobIntentService` → JobScheduler | receiver → `notify()`, **no job** |
+| Broadcast | 11:25:00.039 — on time | 12:00:00.114 — on time |
+| **Delivered** | **11:28:47** — only once Doze ended | **`when=12:00:00`** — on the second |
+
+From logcat, the whole reminder path inside deep Doze:
+
+```
+12:00:00.008  SmartPower…i_am_ok: idle->background R(alarm start) adj=700
+12:00:00.114  AlarmManager: mPendingIntent -> PendingIntentRecord{… i_am_ok broadcastIntent}
+12:00:00.445  Launcher.ApplicationsMessage: update io.github.davamix.i_am_ok/ to 3
+12:00:00.450  notification sound
+```
+
+`when=12:00:00` on channel `reminders`, body *"Remember to tap I'm OK today."* — the notification's
+`when` is set by the plugin to `System.currentTimeMillis()` at post time, so it is the post time and
+not a scheduled value. And `dumpsys jobscheduler` taken at 12:00:58 has **no live `JOB #` entry for
+this package at all** — only history rows for the 11:15 and 11:28 runs. There was no job to defer.
+
+#### What this means for the ADR — the trigger condition is not met as worded
+
+ARCHITECTURE.md §14 names the trigger for un-deferring §9's scheduled Function as *"whether **alarms
+and data-only FCM** actually survive on Xiaomi / Samsung / Huawei with stock power settings."*
+
+**On this handset, alarms survive.** They are delivered at the armed second in deep Doze, every time,
+in all five runs. A notification posted from the receiver reaches the user at the armed second in
+deep Doze. What does not survive is one plugin's decision to hop through JobScheduler — which is a
+property of `android_alarm_manager_plus`, not of Android's power management and not of this design.
+
+So the options are wider than "go server-side", and the ADR should weigh at least these three:
+
+1. **Deliver from the receiver, the way the reminders already do.** The warning needs Dart to run —
+   it reads the store and decides — so this is not a copy-paste of the reminder path. What is
+   *untested* is whether a Flutter background engine can be started from the receiver inside the
+   10-second temporary allowlist, or whether a foreground service started under the exact-alarm
+   exemption is needed. **Do not assume either way; it has not been measured.**
+2. **§9's scheduled server-side Function**, at the cost ADR-0007 records.
+3. **Accept the deferral and say so**, surfacing it in §13's health panel rather than promising a
+   time the platform will not honour.
+
+What is now settled is that option 1 is a *live* option rather than the dead end the previous
+session's evidence implied. That is the reason this experiment was worth thirty minutes.
 
 ### RESULT — the overnight Doze run, 2026-08-20: the broadcast was on time, the isolate was 3h31m late
 

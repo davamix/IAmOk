@@ -435,7 +435,7 @@ comment names the trap this repo just measured:
   `android_alarm_manager_plus` calls androidx's `enqueueWork`, which offers no such option. Measured
   above: our receiver *is* allowlisted for the full ten seconds when it runs.
 
-### FINDING, unfixed — the alarm isolate closes the UI's database
+### FIXED 2026-08-20 — the alarm isolate closed the UI's database
 
 **Found 2026-08-20 11:17 on the POCO F3, while setting the Doze experiment up.** After a warning
 alarm fires *while the app process is alive*, every subsequent UI store operation throws:
@@ -485,10 +485,25 @@ shared connection — the `reconcile_lock` design is written on top of the "own 
 that has just been falsified. The alarm isolate's *own* work completes correctly before it closes,
 so **delivery of the warning itself is unaffected**; the damage is to the UI afterwards.
 
-**Deliberately not fixed here.** The repair is a design decision — do not close a shared
-single-instance connection, or open with `singleInstance: false`, or reference-count — and it lands
-on the isolate boundary ARCHITECTURE.md §4 defines. It belongs with the owner and an architecture
-pass, not a quiet edit at a phase gate.
+**FIXED, and verified on the device the same day.** The repair is the one `sqflite`'s own
+documentation prescribes: the background isolate simply does not close a connection it shares.
+`warningAlarmCallback`'s `finally { close(); }` is gone, `LocalStore.close()` now has no caller in
+`lib/` and says why, and `domain_purity_test.dart` fails if a background entry point calls it —
+verified to fail by reintroducing the call, not assumed.
+
+**A second hazard was found in the same code and pinned.** `rollbackActiveTransactionOnOpen`
+defaults to **true in debug and false in release**, and when true, opening the store from one isolate
+**rolls back a transaction active in another**. The alarm isolate opens on every fire while the UI
+writes through `_db.transaction`, so a debug build could silently roll back an in-flight UI write and
+no release build would — meaning every device measurement this project has taken was of something
+that does not ship. `LocalStore.open()` now pins it to `false`, which is what `sqflite` recommends
+for an app that explicitly creates multiple isolates, and a second guard asserts it.
+
+**Device proof, 2026-08-20 15:33.** Rebuilt, reinstalled, armed a natural warning, backgrounded, let
+the alarm fire in the live process (pid 19814 throughout — `last_reconcile_at` 15:33:00,
+`warnings_shown` written), then reopened the harness and ran **Dump LocalStore**: full JSON. That is
+the identical sequence that produced `DatabaseException(database_closed 1)` twice earlier the same
+day. 783 tests pass, `flutter analyze` clean.
 
 ### SETTLED — deep Doze blocks it with a WARM process, and the block is JobScheduler
 

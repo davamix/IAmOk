@@ -42,62 +42,78 @@ import 'watcher_reconcile_service.dart';
 /// leave the *next* fire able to try again. Nothing is cached in memory that a
 /// crash could corrupt, because nothing is cached in memory at all.
 ///
-/// **`open()` is inside the `try`, and that is not cosmetic.** It was outside,
-/// which meant a throw from it — a corrupt file, a schema downgrade, a disk with
-/// nothing left on it — escaped before the `finally` existed, leaving the
-/// connection that had been half-established unclosed. The next fire then met a
-/// locked database it could not explain, and the failure compounded rather than
-/// retried. Nothing is rethrown away: the `finally` runs and the error still
-/// propagates, so Phase 8's crash reporting will see it.
+/// ## This isolate MUST NOT close the store — measured 2026-08-20
+///
+/// It used to, in a `finally`, and the reasoning was plausible and wrong:
+/// *"leaving a connection open across that is how a later isolate meets a locked
+/// database it cannot explain."* On Android there is **no second connection to
+/// leave open**. `android_alarm_manager_plus` runs this isolate in the app's own
+/// process, and `sqflite`'s Android plugin keeps a **static**
+/// `_singleInstancesByPath`, so `LocalStore.open()` here is handed back the
+/// **same `databaseId` the UI is holding**. Closing it closed the UI's store,
+/// and every UI call then threw `DatabaseException(database_closed 1)` for the
+/// life of the process.
+///
+/// `sqflite`'s own documentation says exactly this
+/// (`sqflite_common/lib/sqlite_api.dart`):
+///
+/// > If `singleInstance` is true when using multiple isolates, make sure no
+/// > background isolate closes the database, since that might close the database
+/// > for all isolates.
+///
+/// So there is nothing to release. The instance is process-scoped and `sqflite`
+/// owns its lifetime; `journal_mode=delete` means even an unclean process kill
+/// leaves a rollback journal SQLite recovers on the next open. **Phase 4's FCM
+/// isolate is a third engine in this same process and inherits this rule** — see
+/// [LocalStore.open]. Guarded by `domain_purity_test.dart`.
+///
+/// **There is no `try`/`finally` here any more, and its absence is deliberate.**
+/// The whole reason one existed was to close the store. With nothing to release,
+/// a bare `try` would only catch and rethrow. A throw from `open()` — a corrupt
+/// file, a schema downgrade, a disk with nothing left on it — propagates as it
+/// always did, so Phase 8's crash reporting will see it, and the *next* fire
+/// still gets a clean attempt because nothing is cached in memory at all.
 @pragma('vm:entry-point')
 Future<void> warningAlarmCallback(int id) async {
-  LocalStore? store;
-  try {
-    store = await LocalStore.open();
-    // Each isolate creates its own plugin instance and its own channels.
-    // `onTap` is deliberately not wired: a background isolate that posts a
-    // notification does not route taps — the UI isolate does, on next launch.
-    final notifications = await NotificationService.initialize();
+  final store = await LocalStore.open();
+  // Each isolate creates its own plugin instance and its own channels.
+  // `onTap` is deliberately not wired: a background isolate that posts a
+  // notification does not route taps — the UI isolate does, on next launch.
+  final notifications = await NotificationService.initialize();
 
-    // The clock offset comes off disk so this isolate agrees with the UI about
-    // what day it is. A forced date in the harness that the alarm did not share
-    // would test nothing.
+  // The clock offset comes off disk so this isolate agrees with the UI about
+  // what day it is. A forced date in the harness that the alarm did not share
+  // would test nothing.
+  //
+  // **Gated on `kDebugMode`, exactly as `main()` gates the same read.** That
+  // gate exists so "zero offset in every release build" is enforced by the
+  // code rather than resting on the only writer being compiled out — anything
+  // that could put a row under `debug_clock_offset_ms` would otherwise shift
+  // this app's entire notion of now. Phase 3 originally left the read ungated
+  // on the one path that decides whether to tell a family something is wrong,
+  // which is the worst possible place to have missed it.
+  final clock = SystemClock(
+    offset: kDebugMode ? await store.clockOffset() : Duration.zero,
+  );
+
+  final service = WatcherReconcileService(
+    store: store,
+    clock: clock,
+    reader: SimulatedCheckInReader(store),
+    notifications: notifications,
+    alarms: AndroidWarningAlarmScheduler(
+      warningAlarmCallback,
+      notifications.canScheduleExact,
+    ),
+    // False by definition: this isolate exists only because the OS woke it,
+    // so there is no screen showing anything to anyone.
     //
-    // **Gated on `kDebugMode`, exactly as `main()` gates the same read.** That
-    // gate exists so "zero offset in every release build" is enforced by the
-    // code rather than resting on the only writer being compiled out — anything
-    // that could put a row under `debug_clock_offset_ms` would otherwise shift
-    // this app's entire notion of now. Phase 3 originally left the read ungated
-    // on the one path that decides whether to tell a family something is wrong,
-    // which is the worst possible place to have missed it.
-    final clock = SystemClock(
-      offset: kDebugMode ? await store.clockOffset() : Duration.zero,
-    );
+    // The rest of the derivation is shared with the UI root rather than
+    // copied — see [NotificationService.watcherDelivery]. This copy is the one
+    // nobody can watch running, and it drifted from its twin once already.
+    delivery: () => notifications.watcherDelivery(appInForeground: false),
+    lockOwner: 'alarm',
+  );
 
-    final service = WatcherReconcileService(
-      store: store,
-      clock: clock,
-      reader: SimulatedCheckInReader(store),
-      notifications: notifications,
-      alarms: AndroidWarningAlarmScheduler(
-        warningAlarmCallback,
-        notifications.canScheduleExact,
-      ),
-      // False by definition: this isolate exists only because the OS woke it,
-      // so there is no screen showing anything to anyone.
-      //
-      // The rest of the derivation is shared with the UI root rather than
-      // copied — see [NotificationService.watcherDelivery]. This copy is the one
-      // nobody can watch running, and it drifted from its twin once already.
-      delivery: () => notifications.watcherDelivery(appInForeground: false),
-      lockOwner: 'alarm',
-    );
-
-    await service.reconcile(selfUid: LocalStore.defaultSelfUid);
-  } finally {
-    // Closed explicitly. The isolate is about to be torn down, but leaving a
-    // connection open across that is how a later isolate meets a locked
-    // database it cannot explain. Null-safe because `open()` itself can throw.
-    await store?.close();
-  }
+  await service.reconcile(selfUid: LocalStore.defaultSelfUid);
 }

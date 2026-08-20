@@ -1,8 +1,22 @@
 # ADR-0006 — `reconcile()` is serialised by a lease in the store
 
-**Date:** 2026-08-17 · **Status:** Accepted
+**Date:** 2026-08-17 · **Status:** Accepted · **Amended 2026-08-20** — see *The topology this rests
+on is not what it says*, below.
 **Phase:** 3 (found verifying a Phase 2 fix on hardware; implemented in Phase 3)
 **Affects:** [ARCHITECTURE.md](../ARCHITECTURE.md) §3, §4, §6, §10
+
+> **Amendment, 2026-08-20 — the decision stands; the mechanism underneath it is not the one described
+> here.** This ADR and its test reason about **two connections to one file**, with
+> `BEGIN EXCLUSIVE` doing cross-connection locking. Measured on the POCO F3: on Android the isolates
+> run in **one process** and `sqflite` hands them **one shared native connection**
+> (`SqflitePlugin`'s static `_singleInstancesByPath`). So the exclusion this ADR buys is real, but it
+> is produced differently — each isolate has its own Dart-side transaction lock over the same native
+> connection, so a second `BEGIN EXCLUSIVE` fails as a nested transaction and
+> `acquireReconcileLock` returns `false` through its `on DatabaseException` arm. Same outcome,
+> different route, and **`test/data/local_store_lock_test.dart` therefore models a shape the device
+> never has** — it opens two `sqflite_common_ffi` connections. The device check this ADR owes is
+> still owed; it is tracked in `docs/testing/device-matrix.md`. Nothing here is known to be wrong
+> about *what* the lease achieves — only about *why*.
 
 ## Context
 

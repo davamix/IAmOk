@@ -8,9 +8,16 @@ import '../domain/domain.dart';
 ///
 /// SQLite rather than `SharedPreferences`, and that is not a preference (§4).
 /// The three isolates share no memory, so everything a background entry point
-/// needs must be on disk with real cross-isolate locking. `SharedPreferences`
-/// caches in memory per isolate and needs `reload()` gymnastics that fail
-/// quietly — and quietly is the one way this app must not fail.
+/// needs must be on disk, with concurrent access that is actually serialised.
+/// `SharedPreferences` caches in memory per isolate and needs `reload()`
+/// gymnastics that fail quietly — and quietly is the one way this app must not
+/// fail.
+///
+/// **"Cross-isolate locking" is the right outcome but was the wrong mechanism,**
+/// and [open] now carries the measurement: on Android these isolates share **one
+/// native connection**, so writes are serialised by `sqflite`'s single worker
+/// thread rather than by SQLite locking between separate connections. Read [open]
+/// before assuming anything else about what two isolates do to this file.
 ///
 /// Every accessor here converts at the boundary, so nothing above ever handles
 /// a raw row. The encodings are deliberate:
@@ -52,13 +59,67 @@ class LocalStore {
 
   /// Opens (and creates or migrates) the store.
   ///
-  /// Called by **each** isolate that needs it — UI, alarm, and later FCM. They
-  /// each hold their own connection to the same file; SQLite does the locking.
+  /// Called by **each** isolate that needs it — UI, alarm, and later FCM.
+  ///
+  /// ## They share ONE connection, and it must never be closed by a background
+  /// isolate — measured on the POCO F3, 2026-08-20
+  ///
+  /// This used to say *"they each hold their own connection to the same file;
+  /// SQLite does the locking"*. That is **false on Android**, and it cost a
+  /// defect. The background isolates run in the app's **own process**
+  /// (`android_alarm_manager_plus`'s `AlarmService` has no
+  /// `android:process=":remote"`), and `sqflite`'s Android plugin keeps a
+  /// **static** `_singleInstancesByPath`. So the second and third callers here
+  /// are handed back **the same `databaseId` the first one opened** — one native
+  /// connection, not three.
+  ///
+  /// Two consequences, and both are load-bearing:
+  ///
+  /// 1. **Nothing may `close()` this from a background isolate.** Closing it
+  ///    closes it for everyone; the alarm isolate did, and every UI call then
+  ///    threw `DatabaseException(database_closed 1)` for the life of the
+  ///    process. `sqflite`'s own docs say so:
+  ///
+  ///    > If `singleInstance` is true when using multiple isolates, make sure no
+  ///    > background isolate closes the database, since that might close the
+  ///    > database for all isolates.
+  ///
+  ///    Guarded by `domain_purity_test.dart`, because the test suite runs one
+  ///    isolate on `sqflite_common_ffi` and structurally cannot catch it.
+  ///
+  /// 2. **Concurrent writes are serialised by `sqflite`'s single native
+  ///    connection and worker thread**, not by SQLite file locking between
+  ///    connections. The outcome the design wanted still holds — see
+  ///    [acquireReconcileLock] and ADR-0006 — but by a different mechanism than
+  ///    those documents originally described.
   static Future<LocalStore> open({String? path}) async {
     final resolved = path ?? '${await getDatabasesPath()}/$defaultDatabaseName';
-    final db = await openDatabase(
-      resolved,
+    // Built as [OpenDatabaseOptions] rather than passed as loose arguments
+    // because the convenience form of `openDatabase` does not expose
+    // `rollbackActiveTransactionOnOpen` at all — and its own doc warns that
+    // "if options is provided, all other parameters are ignored", so the two
+    // styles must not be mixed.
+    final options = OpenDatabaseOptions(
       version: schemaVersion,
+      // **Pinned, because its default differs between debug and release** —
+      // `true` in debug, `false` in release — and this app's evidence is
+      // gathered from debug builds on a device.
+      //
+      // When true, opening the store from another isolate **rolls back any
+      // transaction active in a different one**. This isolate boundary has two
+      // writers using `_db.transaction` (`saveWatcherCache` and
+      // [acquireReconcileLock]), and the alarm isolate opens the store on every
+      // fire — so in a debug build an alarm could silently roll back an
+      // in-flight UI write, and no release build would ever do the same. A
+      // measurement that cannot mean the same thing in both builds is worse
+      // than no measurement.
+      //
+      // `false` is what `sqflite` recommends "typically if you explicitly
+      // create multiple isolates", which is exactly this app. The cost is
+      // giving up rollback-on-open as a hot-restart safety net in debug: if a
+      // hot restart strands an open transaction, reopening no longer clears it
+      // and the app must be restarted properly. That is the right trade here.
+      rollbackActiveTransactionOnOpen: false,
       onConfigure: (db) async {
         // Off by default in SQLite, and `warnings_shown` is meaningless without
         // the link row it hangs off.
@@ -152,9 +213,28 @@ class LocalStore {
       // — the reasoning is there, with the crash it produces.
       onDowngrade: (db, from, to) async {},
     );
+
+    final db = await openDatabase(resolved, options: options);
     return LocalStore._(db);
   }
 
+  /// Closes the connection — **and on Android that means closing it for every
+  /// isolate in the process.** Read [open] before calling this.
+  ///
+  /// It has **no caller in `lib/` on purpose.** The one that existed —
+  /// `warningAlarmCallback`'s `finally` — is the defect measured on 2026-08-20:
+  /// the alarm isolate is handed the connection the UI already holds, so closing
+  /// it left every later UI call throwing `DatabaseException(database_closed 1)`
+  /// for the life of the process. `domain_purity_test.dart` now fails if a
+  /// background entry point calls it.
+  ///
+  /// Kept because the **tests** need it: they run on `sqflite_common_ffi`, where
+  /// each `open()` really is a separate connection and a `tearDown` must release
+  /// it. That difference between test and device is exactly what hid the defect,
+  /// so it is named here rather than left to be rediscovered.
+  ///
+  /// If a future caller in `lib/` ever needs this, it may only be one that owns
+  /// the whole process's store lifetime — never a background entry point.
   Future<void> close() => _db.close();
 
   static const List<String> _schema = [

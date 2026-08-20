@@ -109,8 +109,18 @@ providers, in-memory caches, and the Firestore listener's live state are all inv
 
 Consequences that shape the design:
 
-- The local store is **SQLite** (`sqflite`), not `SharedPreferences` — cross-isolate writes with
-  real locking. `SharedPreferences` caches in memory per isolate and needs `reload()` gymnastics.
+- The local store is **SQLite** (`sqflite`), not `SharedPreferences` — concurrent writes from more
+  than one isolate are actually serialised. `SharedPreferences` caches in memory per isolate and
+  needs `reload()` gymnastics.
+  - **Corrected 2026-08-20, measured on the POCO F3.** This said "cross-isolate writes with real
+    locking", which named the wrong mechanism. `android_alarm_manager_plus` runs the background
+    isolate **in the app's own process**, and `sqflite`'s Android plugin keeps a **static**
+    `_singleInstancesByPath` — so every isolate here is handed back the **same** native connection,
+    and writes are serialised by `sqflite`'s single worker thread rather than by SQLite file locking
+    between separate connections. The conclusion (SQLite, not `SharedPreferences`) is unchanged; the
+    reason is not. **Nothing may `close()` that connection from a background isolate** — one did,
+    and it killed the UI's store for the life of the process. See `LocalStore.open`, ADR-0006 and
+    `docs/testing/device-matrix.md`.
 - Both background entry points are `@pragma('vm:entry-point')` **top-level functions** that
   bootstrap the minimum they need, call `reconcile()`, and exit.
 - The domain layer must have **zero Flutter dependencies** so it runs identically in all three.

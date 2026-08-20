@@ -380,6 +380,79 @@ void main() {
           reason: 'the walker must follow the domain barrel too');
     });
   });
+
+  /// The store is ONE connection shared by every isolate in the process, and
+  /// these two facts about opening it cannot be asserted any other way.
+  ///
+  /// **Source-level on purpose.** The suite runs a single isolate against
+  /// `sqflite_common_ffi`, so it cannot reproduce either failure: both need two
+  /// Flutter engines in one Android process, sharing `SqflitePlugin`'s static
+  /// `_singleInstancesByPath`. That is the same blind spot that hid the
+  /// `Object.hash` defect in `CLAUDE.md` — every test compared two calls made
+  /// inside one process, and passed.
+  ///
+  /// A lint, not a proof. It is substring-based and a determined refactor could
+  /// evade it. It exists to stop the *specific* regression that already happened
+  /// once, and to make the next person read the reason before removing it.
+  group('the shared store connection', () {
+    /// Measured on the POCO F3, 2026-08-20: `warningAlarmCallback` closed the
+    /// store in a `finally`, and because Android hands the alarm isolate the
+    /// UI's own connection, every later UI call threw
+    /// `DatabaseException(database_closed 1)` for the life of the process.
+    ///
+    /// `sqflite`'s own documentation states the rule:
+    ///
+    /// > If `singleInstance` is true when using multiple isolates, make sure no
+    /// > background isolate closes the database, since that might close the
+    /// > database for all isolates.
+    ///
+    /// Phase 4's FCM entry point will be written from the same template and
+    /// inherits the rule, which is why this scans every background entry point
+    /// rather than only the alarm one.
+    test('no background entry point closes it', () {
+      const backgroundEntryPoints = <String>[
+        'lib/application/warning_alarm_handler.dart',
+      ];
+
+      for (final path in backgroundEntryPoints) {
+        final file = File(path);
+        expect(file.existsSync(), isTrue,
+            reason: '$path is listed here but does not exist — if a background '
+                'entry point was renamed, update this list rather than '
+                'deleting it');
+
+        final code = _withoutComments(file.readAsStringSync());
+        expect(code.contains('.close()'), isFalse,
+            reason: '$path closes the store. On Android the background isolate '
+                'runs in the app process and sqflite hands it the very '
+                'connection the UI already holds, so this closes the '
+                'database for every isolate and the UI throws '
+                'database_closed for the rest of the process. '
+                'Measured 2026-08-20. There is nothing to release: the '
+                'connection is process-scoped and sqflite owns its lifetime.');
+      }
+    });
+
+    /// `rollbackActiveTransactionOnOpen` defaults to **true in debug and false
+    /// in release**. When true, opening the store from one isolate rolls back a
+    /// transaction active in another — and this app opens the store from the
+    /// alarm isolate on every fire, while the UI writes through
+    /// `_db.transaction`.
+    ///
+    /// Every device measurement this project has is from a debug build, so an
+    /// unpinned default means the thing being measured is not the thing that
+    /// ships. Pinned to `false`, which is what sqflite recommends for an app
+    /// that explicitly creates multiple isolates.
+    test('open() pins rollbackActiveTransactionOnOpen', () {
+      final code =
+          _withoutComments(File('lib/data/local_store.dart').readAsStringSync());
+      expect(code.contains('rollbackActiveTransactionOnOpen: false'), isTrue,
+          reason: 'LocalStore.open() must pin this. Its default differs between '
+              'debug and release, so leaving it unset makes every device '
+              'measurement taken on a debug build mean something different in '
+              'the shipped build.');
+    });
+  });
 }
 
 /// Every project file reachable from [entry] by following `import`s.

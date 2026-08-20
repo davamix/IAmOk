@@ -13,6 +13,7 @@
 | [0005](0005-the-tap-screen-names-who-is-told.md) | The Tap screen names who will be notified, and says nothing else | Accepted | ARCHITECTURE.md §7 · `ui-ux/screens.md` |
 | [0006](0006-reconcile-is-serialised-on-disk.md) | `reconcile()` is serialised by a lease in the store | Accepted | ARCHITECTURE.md §3, §4, §6, §10 |
 | [0007](0007-a-force-stop-is-silent-and-total.md) | A force-stop is silent and total, and only opening the app repairs it | Accepted | ARCHITECTURE.md §4, §9, §10, §13 |
+| [0008](0008-the-warning-is-late-in-doze-and-the-app-says-so.md) | The warning is late in Doze; accept it, surface it, and do not promise a time | Accepted *(provisional)* | ARCHITECTURE.md §9, §10, §13, §14 |
 
 ## What belongs here
 

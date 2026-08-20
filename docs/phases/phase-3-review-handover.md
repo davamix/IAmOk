@@ -698,40 +698,27 @@ Nothing here is a false claim; all are honest gaps.
 7. **Then rewrite `docs/phases/phase-3-summary.md`** to record the settled state, and sign off the
    gate. It does not yet carry either of this session's two findings.
 
-### Device state as left on 2026-08-20 12:02
+### Device state as left on 2026-08-20 14:44
 
-Measured, not computed — `dumpsys alarm` parsed with the receiver-tag rule, store read with
-`run-as … cat` into a file and `PRAGMA integrity_check` run on it.
-
-- **Debug build installed** (`app-debug.apk`, `lastUpdateTime` 2026-08-19 22:39:55). It predates
+- **Debug build installed** (`app-debug.apk`, `lastUpdateTime` 2026-08-19 22:39:55). Predates
   `d497859` by five minutes, but that commit's `lib/` change is **doc-comment only** — verified by
-  diffing with comment lines stripped — so the installed binary is behaviourally identical to `HEAD`.
-- **The running process's UI database is CLOSED.** pid 6349 is alive, but the 11:28:47 alarm ran in
-  it and closed the shared connection, so **every harness control will throw `database_closed` until
-  the process is restarted**. See the finding in `device-matrix.md`. **Restart before using the
-  harness**: `input keyevent KEYCODE_HOME`, wait until `/proc/<pid>/oom_score_adj` is non-zero, then
-  `am kill` — never `force-stop`, which cancels the alarms.
-- Store: two accepted links, `mum_local-watched-user` and `granddad_local-watched-user`, both
-  `warning_local_time = 11:25`, `activeFrom = 2026-08-19`.
-- `warnings_shown` holds **2026-08-19 / `warnOnline`** for both (consumed by the 11:28:47 delivery) —
-  so **any new run must clear it again**, or the alarm will correctly say nothing. The harness's
-  "Arm the natural warning 3 minutes out" **does** clear it, via `saveWatcherCache(…, empty)`; a
-  hand-built run must do it itself.
-- `last_reconcile_at` = **11:28:47** on both links.
+  diffing with comment lines stripped — so the binary is behaviourally identical to `HEAD`.
+- **The running process's UI database is CLOSED again** (pid 15097; the 14:44 alarm ran in it). Every
+  harness control will throw `database_closed` until the process is restarted. **Restart before using
+  the harness**: `input keyevent KEYCODE_HOME`, wait until `/proc/<pid>/oom_score_adj` is non-zero
+  (~5 s, reached 902), then `am kill` — never `force-stop`, which cancels the alarms.
+- Store: two accepted links, both `warning_local_time = 14:42`, `activeFrom = 2026-08-19`;
+  `warnings_shown` holds **2026-08-19 / `warnOnline`** for both. Any new run must clear it — the
+  harness's "Arm the natural warning 3 minutes out" does, via `saveWatcherCache(…, empty)`.
 - Simulated backend: `succeeded`, no check-in days → outcome `warnOnline`.
-- **12 warning alarms and 20 reminders armed.** Next warning **2026-08-21 11:25**; next reminder
-  **2026-08-20 18:00**. The 12:00 reminder was consumed by the job-hop experiment.
-- Tray holds four of ours: three warnings at `when=11:28:47` (channel `warnings`, from the Doze
-  release) and one reminder at `when=12:00:00` (channel `reminders`). Left in place deliberately —
-  they are the evidence.
-- Device restored: `battery reset`, `deviceidle unforce`, deep and light both `ACTIVE`, 24-hour clock,
+- Device restored: `deviceidle unforce`, `battery reset`, deep and light both `ACTIVE`, 24-hour clock,
   Europe/Madrid, app **not** on the Doze whitelist.
-- `tools/doze-collect.ps1` gathers overnight evidence. Its `$baselineReconcileAt` and `$armedFor`
-  constants are from the **first** run and **must be updated** before reuse. Its store pull uses a
-  PowerShell `>` redirect on binary output; prefer `cmd /c "… > file"` or the Bash tool, which are
-  byte-faithful.
-- `/sdcard` holds ~75 stray `*.txt` dumps from this and earlier sessions. This session removed only
-  its own. They are harmless; clear them when convenient.
+- Tray holds the two warnings from 14:44 plus the 12:00 reminder — left as evidence.
+- `firebase_messaging` 16.5.0 was added to the **global pub cache** (`dart pub cache add`) to read its
+  Android sources. It is **not** a dependency of this project and `pubspec.yaml` is untouched.
+- `tools/doze-collect.ps1`'s `$baselineReconcileAt` and `$armedFor` are still from the first run and
+  **must be updated** before reuse. Its store pull uses a PowerShell `>` redirect on binary output;
+  prefer `cmd /c "… > file"` or the Bash tool, which are byte-faithful.
 
 ## Prompt to start the next session
 

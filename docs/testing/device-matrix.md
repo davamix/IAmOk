@@ -338,6 +338,103 @@ Same POCO F3, Android 13 / API 33, HyperOS `OS1.0`, stock power settings.
 > case a user would not see this. The mechanism — that a plain resume does not refresh the value — is
 > what was measured, and it holds either way.
 
+### The two measurements taken for ADR-0008 — recorded, not acted on
+
+Both were run at the owner's request to inform the ADR. **Nothing was implemented on the strength of
+either.** [ADR-0008](../architecture/decisions/0008-the-warning-is-late-in-doze-and-the-app-says-so.md)
+records the decision they inform.
+
+#### A. The temporary power allowlist IS granted, in full, and the job still does not run
+
+**Measured 2026-08-20 14:42, POCO F3, forced deep Doze, fresh process (pid 15097).** Sampled
+`dumpsys deviceidle tempwhitelist` on-device twice a second across the armed second, because
+round-tripping each poll through adb is too slow for a ten-second window.
+
+```
+T 14:42:00.346  UID=10612: +9s700ms - broadcast:u0a612:…/AlarmBroadcastReceiver
+T 14:42:04.871  UID=10612: +5s175ms - broadcast:u0a612:…/AlarmBroadcastReceiver
+T 14:42:09.971  UID=10612:    +75ms - broadcast:u0a612:…/AlarmBroadcastReceiver
+(gone by the next sample, ~14:42:10.5)
+```
+
+**The window is real, granted at the armed second, and lasts its full ten seconds** — first sample
+346 ms after the second already shows 9.7 s remaining, so the grant landed essentially at 14:42:00.0.
+It is attributed to `AlarmBroadcastReceiver`, our alarm's receiver.
+
+**And the warning still did not arrive.** No notification at 14:43:26 — 84 seconds after the armed
+second, `get deep` still `IDLE`. Doze was released at 14:43:44 and both warnings were in the tray by
+14:44:04. Fifth reproduction of the same pattern.
+
+> **So the temporary allowlist does not lift `readyNotDozing` for JobScheduler.** The app is handed a
+> full ten seconds of exemption and the plugin cannot use it, because it has already given the work
+> to a scheduler that ignores the exemption. The window is not missing. It is unused.
+
+**Flutter background engine start cost, for scale against that window:**
+
+| Measured | Duration |
+|---|---|
+| `Starting AlarmService…` → `AlarmService started!`, fresh process after `am kill` (14:39:19.794 → 14:39:20.089) | **295 ms** |
+| Same pair on the session's first cold launch (11:10:11.447 → 11:10:12.979) | **1.53 s** |
+
+Against a 10-second grant that is 6–34× headroom for the engine alone.
+
+**What is NOT measured, and cannot be on this build.** Whether the *reconcile* — which does a
+Firestore read (§10) — completes inside the same window. Phase 3 has **no Firebase dependency at
+all** and the release build carries **no `INTERNET` permission**, so there is nothing to time. This
+needs either the receiver path built or a throwaway spike, and it is the one remaining unknown for
+the "deliver from the receiver" option. **Do not treat the headroom above as an answer to it** — a
+network round trip on a cold radio in Doze is a different order of cost from starting an engine.
+
+Worth carrying with it: §10 already has `warnOffline` for a read that fails, so losing the race
+degrades to an honest, differently-worded warning rather than to silence. Whether that wording is
+acceptable when the watcher's phone is merely dozing rather than genuinely offline is a **copy
+question nobody has answered**, and it is the one that touches "never make a false claim".
+
+#### B. `firebase_messaging` uses `JobIntentService` — and vendors a modified copy that bypasses it
+
+**Source read at `firebase_messaging` 16.5.0**, pulled into the pub cache with `dart pub cache add`;
+the package is not a dependency of this project. The answer is more useful than yes or no.
+
+`FlutterFirebaseMessagingBackgroundService extends JobIntentService` — but **not** androidx's. The
+package ships its own `JobIntentService.java` with an extra parameter androidx does not have:
+
+```java
+public static void enqueueWork(Context, Class, int jobId, Intent work, boolean useWakefulService)
+
+static WorkEnqueuer getWorkEnqueuer(…, boolean useWakefulService) {
+  if (Build.VERSION.SDK_INT >= 26 && !useWakefulService) {
+    we = new JobWorkEnqueuer(context, cn, jobId);   // JobScheduler — what blocks in Doze
+  } else we = new CompatWorkEnqueuer(context, cn);  // mContext.startService(intent) — direct
+}
+```
+
+and `FlutterFirebaseMessagingReceiver` passes:
+
+```java
+FlutterFirebaseMessagingBackgroundService.enqueueMessageProcessing(
+    context, onBackgroundMessageIntent,
+    remoteMessage.getOriginalPriority() == RemoteMessage.PRIORITY_HIGH);
+```
+
+So **high-priority FCM starts the service directly and never creates a job**; normal-priority FCM
+goes through JobScheduler and would be held in Doze exactly as our warning is. The package's own
+comment names the trap this repo just measured:
+
+> *"Can throw on API 26+ if useWakefulService=true and app is NOT whitelisted. One example is when an
+> FCM high priority message is received the system will temporarily whitelist the app. However it is
+> possible that it does not end up getting whitelisted so we need to catch this and fall back to a
+> job service."*
+
+**Two consequences for the ADR:**
+
+- **Option 2 escapes the defect only if it uses high-priority FCM.** A data-only nudge at normal
+  priority inherits it. That is a constraint on the design, not a detail of it.
+- **Option 1's pattern is proven in production by a sibling plugin.** Starting a Flutter background
+  engine directly from a broadcast receiver, inside a temporary power allowlist, with a fallback when
+  the allowlist is absent, is what `firebase_messaging` does on every high-priority message.
+  `android_alarm_manager_plus` calls androidx's `enqueueWork`, which offers no such option. Measured
+  above: our receiver *is* allowlisted for the full ten seconds when it runs.
+
 ### FINDING, unfixed — the alarm isolate closes the UI's database
 
 **Found 2026-08-20 11:17 on the POCO F3, while setting the Doze experiment up.** After a warning

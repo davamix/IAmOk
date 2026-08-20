@@ -1,0 +1,158 @@
+# ADR-0008 — The warning is late in Doze; accept it, surface it, and do not promise a time
+
+**Date:** 2026-08-20 · **Status:** Accepted *(provisional — see "What this does not close")*
+**Phase:** 3 (measured on hardware, five runs)
+**Affects:** [ARCHITECTURE.md](../ARCHITECTURE.md) §9, §10, §13, §14
+
+## Context
+
+**Measured on the POCO F3, Android 13 / API 33, HyperOS OS1.0, stock power settings, app never on
+the Doze whitelist.** Five runs, 2026-08-19 and 2026-08-20. Full evidence in
+[`docs/testing/device-matrix.md`](../../testing/device-matrix.md).
+
+**The warning does not arrive on time when the watcher's phone is in deep Doze.** It arrives when
+the phone next leaves Doze — 3h31m late in the overnight run, and it would have been longer if the
+phone had been picked up later.
+
+Three things were established, in this order, and the third overturned the reading of the first two.
+
+**AlarmManager is not the problem.** In every run the `PendingIntent` was delivered at the armed
+second. Our alarms carry `flags=0x5` (`FLAG_ALLOW_WHILE_IDLE`), `exactAllowReason=policy_permission`,
+and `device_idle=--` — Doze is not deferring the alarm.
+
+**Nor is a cold service start.** The obvious hypothesis was that the Flutter engine could not be
+started from a hibernated process. It was tested directly: deep forced Doze with the process alive
+and `AlarmService started!` already logged three and a half minutes earlier. **Nothing ran.** Process
+warmth is irrelevant.
+
+**The block is the JobScheduler hop, and it has a name.** `AlarmBroadcastReceiver.onReceive` calls
+`AlarmService.enqueueAlarmProcessing`, which is `JobIntentService.enqueueWork` — a JobScheduler job.
+Thirteen seconds after the armed second, still in deep `IDLE`:
+
+```
+JOB #u0a612/1984: …androidalarmmanager.AlarmService
+  Satisfied constraints:   DEADLINE BACKGROUND_NOT_RESTRICTED TARE_WEALTH WITHIN_QUOTA
+  Unsatisfied constraints:                    <- none
+  readyNotDozing: false                       <- the only thing holding it
+  Pending work: #0, #1                        <- both links, queued
+  Standby bucket: ACTIVE   Uid: active        Ready: false
+```
+
+The `temporaryAppAllowlistDuration=10000` our alarm carries covers **the broadcast**, which did run.
+It does not extend across the hop to the job the broadcast enqueues.
+
+**And the same device delivers a different local notification on time in the same Doze.** Thirty
+minutes later, `flutter_local_notifications`' 12:00 reminder — whose alarm is *indistinguishable* in
+`dumpsys alarm` and whose receiver calls `notificationManager.notify()` directly instead of
+`enqueueWork()` — arrived at `when=12:00:00`, on the second, with `get deep` still `IDLE`.
+
+So the finding is narrower than "Doze breaks local delivery":
+
+> **Android delivers our alarms in Doze. Android renders our notifications in Doze. What does not
+> survive Doze is one plugin's decision to hand the work to JobScheduler.**
+
+## Decision
+
+**Accept the deferral for now. Do not fix it in Phase 3, do not promise a time, and surface it.**
+
+**1. The warning is documented as "the next time the phone is awake", not as a time.**
+
+The app has never told a user *when* the warning arrives — `warningLocalTime` is not rendered on any
+screen, only in the debug harness. That is now a property to preserve deliberately rather than an
+accident. Nothing in `lib/copy/` may state or imply a delivery time.
+
+The notification copy itself is unaffected: *"No check-in from Mum yesterday."* stays true whenever it
+is delivered, **as long as the deferral does not cross midnight** — see consequence 4, which is the
+part of this decision that carries real risk.
+
+**2. §13's health panel gains a row for it (Phase 7).**
+
+§13 already models the low-usage watcher as the case the panel exists for, and already carries a
+*"Last update: 3 days ago"* item. The new row reports the same class of fact from the other side:
+that this device defers background work while idle, and that a warning may therefore arrive late.
+It is a disclosure, not a fix, and this ADR says so plainly.
+
+**3. §14's trigger condition is reworded, because it is false as written.**
+
+§14 names the trigger for un-deferring §9's scheduled Function as *"whether **alarms** and data-only
+FCM actually survive on Xiaomi / Samsung / Huawei with stock power settings."* On this handset
+**alarms survive** — delivered at the armed second, every run — and so does a notification posted
+from a receiver. Left as written, the condition reads as met when the measurement says the opposite.
+
+**4. §9's scheduled Function stays deferred, and this ADR is not the argument for un-deferring it.**
+
+The escape hatch is still there and still cheap (§16). What has changed is that it is no longer the
+*only* candidate, because the cause is a plugin hand-off rather than a platform limit.
+
+## Consequences
+
+**1. The guarantee is gone for exactly the reader §13 is written for.** A watcher who uses their
+phone through the morning sees nothing different; the default `warningLocalTime` is 10:00, by which
+time most phones are awake. A watcher whose phone sits untouched — the low-usage watcher the whole
+health panel exists for — gets the warning whenever they next pick it up. That is the cost, stated
+plainly rather than softened.
+
+**2. Nothing the app says becomes false.** The decision is still made locally by an isolate that
+reconciles first (§10, ADR-0001), so away precedence, the three-state refusal (ADR-0004) and the four
+outcomes all keep working. A late warning is a *late* warning, not a wrong one.
+
+**3. The health panel cannot report this while it is happening.** A queued JobScheduler job is not
+observable from inside the app. The panel can only say "this device defers background work" as a
+standing property, and report staleness after the fact.
+
+**4. A deferral that crosses midnight silently DROPS a missed day. This is the sharp edge.**
+
+Derived from the code, not yet measured on device, and flagged here because it is the one
+consequence that is worse than lateness:
+
+`WarningPolicy.decide` takes `D = lastCompletedDay(now, watchedZone)` — computed from **when the
+isolate runs**, not from the day the alarm was armed for. That is deliberate (§3: a fire is a nudge
+to reconcile, carrying no authority) and correct for every case except this one. So:
+
+- an alarm armed for `D+1` at 10:00, asking about day `D`,
+- deferred past midnight into `D+2`,
+- runs, computes `D' = D+1`, and decides about **`D+1`**.
+
+Day `D` is never decided about by that fire. The next day's alarm also asks about `D+1`, which
+`warningsShownFor` now holds, so it is suppressed. **`D` is skipped, and nothing notices** — which is
+the "silence it cannot detect in itself" failure this design spends everything avoiding.
+
+This needs a 14-hour untouched phone from a 10:00 alarm, so it is not the common case. It is
+reachable by a watcher who leaves the phone in a drawer for a day. **It is not mitigated by this
+ADR** and should be measured with the harness's forced-date control before Phase 4 relies on the
+current behaviour.
+
+**5. This is reversible and cheap to revisit.** No data-model change, no migration, no one-way door
+(§16). Nothing here forecloses either alternative.
+
+## What this does not close
+
+Two measurements were run for the record and **neither is acted on here**. Both are written up in
+[`docs/testing/device-matrix.md`](../../testing/device-matrix.md); their results are summarised
+below because they change how the two alternatives should be weighed, and they were taken *after*
+this decision was made rather than to justify it.
+
+**A. The ten-second allowlist is granted in full — and the job still does not run.** Sampled twice a
+second in forced deep Doze: `UID=10612 … +9s700ms` at 346 ms past the armed second, counting down to
+`+75ms`, attributed to `AlarmBroadcastReceiver`. No warning arrived; releasing Doze 100 seconds later
+produced it within 20 s. **So the exemption exists and the plugin cannot use it**, having already
+handed the work to a scheduler that ignores it. A Flutter background engine starts in **295 ms**
+against that window. **Still unmeasured, and not measurable on this build** (no Firebase, no
+`INTERNET` in release): whether the §10 Firestore read also fits.
+
+**B. `firebase_messaging` vendors a modified `JobIntentService` that bypasses JobScheduler for
+high-priority messages**, calling `startService()` directly inside the FCM temporary allowlist, with
+a documented fallback to the job path when the allowlist is not granted.
+
+So the alternatives stay open, and neither is now a leap:
+
+- **Deliver from the receiver**, as the reminders already demonstrably do and as
+  `firebase_messaging` already does in production. Preserves §10 entirely. The remaining unknown is
+  the network read, not the engine start.
+- **§9's scheduled server-side Function**, at the cost §9 and ADR-0007 record — against the objection
+  that a server deciding "no check-in" cannot see the watcher's local away cache, which §10's whole
+  *verify before speaking* design rests on, and with the constraint that **it must use high-priority
+  FCM** or it inherits the very defect it was reached for.
+
+The status above is marked **provisional** for that reason: this ADR records what the app does today
+and what it may not claim, not a final answer about where the warning should come from.

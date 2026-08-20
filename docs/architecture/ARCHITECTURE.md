@@ -362,6 +362,20 @@ Cloud Scheduler out and this design does not re-open it. The data model supports
 later without migration — it is the documented escape hatch if §10's client alarms prove
 unreliable on real OEM hardware (§14).
 
+**Still absent after the Phase 3 device work, and the reason has changed** —
+[ADR-0008](decisions/0008-the-warning-is-late-in-doze-and-the-app-says-so.md). §10's client alarms
+*are* unreliable on this handset in one specific way: the warning arrives when the phone next leaves
+Doze rather than at its armed time. But the cause is `android_alarm_manager_plus` handing the work to
+JobScheduler, not the alarm or the platform, so the escape hatch is no longer the only candidate. Two
+objections to reaching for it first, recorded so it is a choice rather than a reflex:
+
+- **A server that decides "no check-in" cannot see the watcher's local away cache**, so it cannot
+  honour ADR-0001's precedence rule. §10's whole *verify before speaking* design lives on the device.
+  Two deciders means two answers about whether someone's relative is all right.
+- **A data-only nudge does not escape the problem it was reached for** if `firebase_messaging`'s
+  Android background handler is itself a `JobIntentService` — see the measurement in
+  `docs/testing/device-matrix.md`.
+
 ---
 
 ## 10. Alarm architecture
@@ -377,6 +391,7 @@ Two kinds of alarm, chosen by what a *spurious* fire costs:
 | Mechanism | `flutter_local_notifications.zonedSchedule` — display only, no code runs | `android_alarm_manager_plus` — wakes a Dart isolate |
 | Boot recovery | Free (`ScheduledNotificationBootReceiver`) | `rescheduleOnReboot: true` + a BOOT_COMPLETED `reconcile()` |
 | Verifies before speaking | No — cancellation is enough | **Yes** — see below |
+| **Delivery in Doze** *(measured 2026-08-20)* | **On time.** Posted straight from the receiver; `when=12:00:00` in deep `IDLE` | **Late.** Held by JobScheduler until the phone leaves Doze — 3h31m in the overnight run ([ADR-0008](decisions/0008-the-warning-is-late-in-doze-and-the-app-says-so.md)) |
 
 ### The dead man's switch, self-verifying
 
@@ -692,6 +707,7 @@ and surfaced in a **health panel** that is always reachable, showing green/red p
 | Last sync | app state | "Last update: 3 days ago" banner |
 | Clock skew | §11 | Warn, deep-link to settings |
 | **Backend access** | last reconcile was **refused**, not merely unreachable ([ADR-0004](decisions/0004-refused-is-not-unreachable.md)) | Red, with the remediation the refusal reason implies — "sign in again" for an expired token, "update the app" for an App Check rejection. Distinct from "offline", which is not a fault and not actionable. |
+| **Background deferral** | this device defers background work while idle ([ADR-0008](decisions/0008-the-warning-is-late-in-doze-and-the-app-says-so.md)) | Amber, standing, not actionable by the reader beyond the battery-optimization row above. Says the warning may arrive **late** — not that it will be missed. **It cannot report a deferral in progress**: a queued JobScheduler job is not observable from inside the app, so this row states a property of the device, and *Last sync* above reports the consequence after the fact. |
 
 `USE_EXACT_ALARM` is available to apps whose core purpose is alarms and reminders. This app
 plausibly qualifies but **expect to justify it in Play review** — write the justification before
@@ -724,9 +740,19 @@ alongside the first alarm, not after.
 
 ### The one thing an emulator cannot tell you
 
-Whether alarms and data-only FCM actually survive on Xiaomi / Samsung / Huawei with stock power
-settings. HANDOVER.md already names this the riskiest unknown; nothing in this design changes
-that. It is the trigger condition for un-deferring the scheduled Function in §9.
+Whether **the warning actually reaches the watcher** on Xiaomi / Samsung / Huawei with stock power
+settings. HANDOVER.md already names this the riskiest unknown; nothing in this design changes that.
+
+**Reworded 2026-08-20 by [ADR-0008](decisions/0008-the-warning-is-late-in-doze-and-the-app-says-so.md),
+because the previous wording — "whether *alarms* and data-only FCM actually survive" — is false as a
+test.** Measured on the POCO F3 over five runs: the **alarms survive**, delivered at the armed second
+in deep Doze every time, and a notification posted from a broadcast receiver is rendered in deep Doze
+on time. What did not survive was `android_alarm_manager_plus` handing the work to JobScheduler,
+which Doze holds (`readyNotDozing: false`). A condition phrased around alarms surviving reads as
+**met** on the very device where the warning arrived 3h31m late.
+
+So the trigger for un-deferring the scheduled Function in §9 is *delivery to the reader*, not alarm
+survival — and it has not been met by a platform limit, only by one plugin's hand-off.
 
 ---
 

@@ -1,15 +1,15 @@
 # Phase 3 review — handover
 
-**Written:** 2026-08-19 · **Head:** the architecture re-review commit · **781 tests**, `flutter
-analyze` clean, `flutter build apk --debug` and `--release` both succeed.
+**Written:** 2026-08-20 · **Head:** `2290e71` · **781 tests**, `flutter analyze` clean, both
+`flutter build apk --debug` and `--release` succeed.
 
 This document exists because the Phase 3 gate review ran long enough to span sessions. It records
 what the reviewers found, what was fixed, what is still owed, and how to pick it up.
 
-**Phase 3 is NOT signed off.** **All five reviewers have run at the gate and every finding is
-fixed**, including the architecture re-pass over the other four rounds. What remains is the
-**overnight Doze device criterion**, which is unstarted, and the resume-repair device row added at
-this gate.
+**Phase 3 is NOT signed off.** **All five reviewers have run at the gate and every finding is fixed.**
+The device work is done too, and it found something: **the warning does not arrive after a real
+night in Doze.** That is the open question the next session inherits — see *The Doze problem* below,
+which is the only section that still needs work.
 
 ---
 
@@ -49,7 +49,10 @@ and the reason each round now re-reads the previous round's diff first.
 | `769448c` | The **UI/UX** re-review at the gate |
 | `e2e084d` | The **security** review — its first run this round |
 | `ecd4e38` | The **infrastructure** review — its first run this round |
-| *this one* | The **architecture** re-pass — the last review owed |
+| `dd4dd03` | The **architecture** re-pass — the last review owed |
+| `d497859` | Post-gate device pass, and the clock format that does not follow a resume |
+| `cde67ae` | The overnight Doze run armed; forced Doze already ate a warning |
+| `2290e71` | The Doze night — broadcast on time, isolate 3h31m late |
 
 ---
 
@@ -63,8 +66,8 @@ and the reason each round now re-reads the previous round's diff first.
 | **uiux** | at the gate, over `7311a33` | All findings fixed. |
 | **testing** | at the gate, over `bbe68d5` | All findings fixed. |
 
-**Every reviewer has now run at the gate and every finding is fixed.** The remaining Phase 3 work is
-the **overnight Doze run** and then sign-off.
+**Every reviewer has now run at the gate and every finding is fixed.** No review work remains. What
+remains is one open device question — *The Doze problem*, below.
 
 ### Standing rule
 
@@ -444,6 +447,149 @@ produces a new widget against the same `State`, so neither fires.
 
 ---
 
+## The post-gate device pass (`d497859`) — six passes and one finding
+
+Seven checks on the POCO F3 against the six gate commits. Detail in `docs/testing/device-matrix.md`.
+
+**Passed:** a fresh install arms at the device's wall times (12:00 / 18:00 / 21:00 Madrid, not UTC);
+the alarm isolate wakes from an `am kill`ed process and picks the right message, twice; a 12-hour
+device gets *"This phone last checked 10:34 pm."* on the watcher row; a notification tap opens the
+watcher list with each row one TalkBack utterance; force-stop → reopen restores 0/0 → 12 warnings /
+18 reminders with the store agreeing exactly; and the release build runs with the harness absent,
+`aapt2` confirming compileSdk 36 / minSdk 24 / targetSdk 36 and **no `INTERNET`** — stronger evidence
+for the threat model's claim than the merger report, since it is the shipped artifact.
+
+**FINDING, still live: the cached 12/24-hour setting does not follow a plain resume.** Switching the
+device between formats while the app was backgrounded, two successive background→resume cycles wrote
+the **stale** value in **both** directions. A cold start wrote the correct one; so did a resume after
+a forced configuration change. Flutter refreshes `platformDispatcher.alwaysUse24HourFormat` only on a
+configuration change, so `cacheDeviceFacts` faithfully re-writes the same stale value.
+
+The write happens on resume; the value does not move. The zone half is unaffected —
+`flutter_timezone` is a live plugin call — though that was not measured, because setting the device
+zone needs `SUGGEST_MANUAL_TIME_AND_ZONE`, which adb does not hold. **Consequence is cosmetic and
+never a false claim about a person**, so it is recorded rather than urgently fixed; the live fix is a
+platform channel to `DateFormat.is24HourFormat` and belongs with Phase 7. Documented at
+`LocalStore.uses24HourClock`, and the docs that claimed otherwise are corrected.
+
+Caveat kept with it: the setting was changed with `adb shell settings put`, and a real Settings
+toggle might deliver a configuration change as a side effect. What was measured is that a plain
+resume does not refresh the value.
+
+**Not reached, and left unchecked rather than claimed:** a 12-hour time inside an isolate-posted
+notification (both harness controls that arm a real warning either force `succeeded` or null out
+`lastReconcileAt`, so neither message carries a time), and a device timezone change (needs a
+permission adb does not have — it needs a human in Settings).
+
+---
+
+## THE DOZE PROBLEM — the one thing still open
+
+**The warning does not arrive after a real night in Doze.** Three runs on the POCO F3 (Android 13,
+HyperOS `OS1.0`, stock power settings, app never on the Doze whitelist). Full evidence in
+`docs/testing/device-matrix.md`; this is the shape of it.
+
+| # | When | Doze state | App process | Result |
+|---|---|---|---|---|
+| 1 | 2026-08-19 22:56 | deep, **forced** (`deviceidle force-idle`) | backgrounded ~14 min | broadcast delivered **on time**, **no Dart ran at all** |
+| 2 | 2026-08-20 05:00 | deep, **real**, hours | hibernated by HyperOS | broadcast delivered **on time**; `AlarmService` not created until **08:31** — **3h31m late** |
+| 3 | 2026-08-20 10:30 | **light** only | **warm**, `AlarmService` already running since 09:30 | delivered 3m47s late (ordinary light-Doze batching), Dart ran in ~1s, **warning posted correctly** |
+
+### What is established
+
+- **AlarmManager is not the problem.** In runs 1 and 2 the `PendingIntent`s were delivered at exactly
+  the armed second. Our alarms carry `flags=0x5` (FLAG_ALLOW_WHILE_IDLE) and
+  `exactAllowReason=policy_permission`, and their `device_idle` policy is not deferring them.
+- **What fails is running Dart afterwards.** Run 2's smoking gun: `AlarmService` — the plugin's own
+  service that starts the Flutter engine and calls `warningAlarmCallback` — was created **once all
+  night, at 08:31:16**, three and a half hours after the 05:00 broadcast, and only once the phone was
+  back in use. `last_reconcile_at` stamped 08:31:17.
+- Our alarms' `idle-options` grant `temporaryAppAllowlistDuration=10000` — **ten seconds** to start a
+  service. That window is where this is being lost.
+
+### What is NOT established, and this is the point
+
+**Run 3 differs from runs 1 and 2 in _two_ variables at once** — light instead of deep Doze, *and* a
+warm process with the service already running. So it does not tell us which one matters.
+
+The hypothesis, stated so the next session can try to falsify it rather than confirm it:
+
+> **The cold service start is the cause, not Doze depth.** Run 2 argues for it — the broadcast was
+> punctual at 05:00 and it was specifically `AlarmService` *creation* that waited until the device
+> woke.
+
+Run 3 is **not** evidence that the mechanism works overnight. It was never in deep Doze: the idling
+history shows `deep-idle` beginning at ~10:38, five minutes *after* the alarm fired at 10:33.
+
+### The experiment that separates them
+
+**Deep Doze with a warm process.** If the warning arrives, the cause is the cold service start and
+the fix is about keeping the service reachable. If it does not, deep Doze itself blocks it and the
+answer is §9's scheduled server-side function.
+
+The obstacle, and it is real: **the two variables keep moving together.** The process would not die
+on demand this morning — `am kill` refuses while `oom_score_adj` is 0, and swiping from recents did
+not take either — while overnight HyperOS hibernated it on its own. Ideas worth trying, cheapest
+first:
+
+1. **`dumpsys deviceidle force-idle` with the app freshly launched** (service warm, deep Doze
+   immediate). This is run 1 with one variable changed — run 1's process had been backgrounded 14
+   minutes and may already have lost the service. Check `AlarmService started!` is in logcat for the
+   *current* pid before forcing idle.
+2. **The inverse:** light Doze with a genuinely cold process. Kill the process (see the note on
+   killing below), wait for light-idle, fire.
+3. If neither separates it, a second real night with the app **launched immediately before** the
+   phone is put down, to keep the service warm as long as HyperOS allows.
+
+### If it reproduces
+
+This is the trigger condition ARCHITECTURE.md §14 names for **un-deferring §9's scheduled
+server-side function**, and ADR-0007 is the record of what that costs. Do not decide that silently —
+it is a design change and belongs in an ADR.
+
+**Keep it in proportion when writing it up.** The default `warningLocalTime` is **10:00**
+watcher-local, by which time most watchers have used their phone and it is not in deep Doze. 05:00
+was chosen because it is harsher. What the finding costs is the *guarantee*, and it lands exactly on
+the reader §13 is written for: the low-usage watcher whose phone sits untouched.
+
+---
+
+## Measurement traps learned on the device, 2026-08-19/20
+
+Each of these produced a wrong answer before it produced a right one. They are in
+`docs/testing/device-matrix.md` too; repeated here because the next session will hit them within
+minutes.
+
+- **Counting pending alarms from `dumpsys alarm` by grepping the receiver name is wrong.** That
+  matches the **App Alarm history** section (`reason=data_cleared`, `reason=alarm_cancelled`) and
+  reported "18 reminders armed" on an app that had none. Pending alarms are the
+  `RTC_WAKEUP #n: Alarm{… <pkg>}` lines whose **following** line carries `tag=*walarm*:<pkg>/<receiver>`.
+  A correct parser is inline in `tools/doze-collect.ps1`.
+- **A notification's `when=` is the only honest answer to "when did this fire".** The tray showing two
+  warnings means nothing on its own — on 2026-08-20 they were from **00:26**, posted by a person
+  opening the app, not by the 05:00 alarm.
+- **Writing the app's store:** `run-as` can read it but cannot write through a redirect, cannot use a
+  heredoc (no writable temp), and cannot read `/sdcard` under scoped storage. What works is streaming
+  into the app's own shell:
+  `"cd /data/user/0/<pkg>/databases
+exec base64 -d > i_am_ok.db
+<base64>" | adb shell run-as <pkg> sh`
+  Verify with `PRAGMA integrity_check` afterwards, every time.
+- **Killing the app without cancelling its alarms is hard.** `am force-stop` cancels every alarm —
+  never use it mid-setup. `am kill` refuses while `oom_score_adj` is 0, and the app can sit at 0 long
+  after `KEYCODE_HOME`. Swiping from recents did not work over adb either. Unsolved.
+- **Driving the debug harness with `adb input tap` is unreliable.** Taps are absorbed as scrolls and
+  the scroll position is not stable between visits. Always verify a control ran by reading the store,
+  never by the tap returning. Several apparent findings this session were mis-taps.
+- **`dumpsys battery unplug` lets Doze engage while USB stays connected**, so adb keeps working. Pair
+  with `dumpsys deviceidle force-idle` for immediate deep Doze, and always `dumpsys battery reset` +
+  `dumpsys deviceidle unforce` afterwards.
+- **Verify the device actually idled.** `dumpsys deviceidle` → *Idling history*, newest last, entries
+  like `deep-idle: -10m35s`. An alarm firing on a phone that never idled proves nothing, and run 3
+  was exactly that.
+
+---
+
 ## Known-open, carried deliberately
 
 Nothing here is a false claim; all are honest gaps.
@@ -467,48 +613,65 @@ Nothing here is a false claim; all are honest gaps.
 
 ## Next steps, in order
 
-1. ~~**Run the remaining reviewers.**~~ **Done — all five have run at the gate and every finding is
-   fixed.** For the record, in the order they ran:
-   1. ~~**testing**~~ — **done at the gate.** Verdict: coverage adequate for Phase 3. Its two
-      sign-off blockers (the unasserted 12-hour row, the resume guard only a device could reach) are
-      fixed, along with seven lesser findings.
-   2. ~~**uiux**~~ — **done at the gate.** Ten findings, all fixed. The two that mattered were a
-      banned error phrase shipping on the watcher list, and an illegible button in both warnings-off
-      banners that the previous round had made worse.
-   3. ~~**security**~~ — **done at the gate.** No exploitable finding; the secrets guard is intact
-      in both directions. Three items acted on, and two proposed fixes deliberately not applied.
-   4. ~~**infrastructure**~~ — **done at the gate.** Nothing irreversible wrong; nine findings
-      acted on, including three unpinned Android SDK levels and a constraint line that was wrong in
-      both halves.
-   5. ~~**architecture**~~ — **done at the gate.** Nothing to fix before it; six items acted on,
-      the main one a duplication this round itself created.
-2. ~~**Fix what they find.**~~ Done, one commit per reviewer.
-3. **The overnight Doze run** on the build you intend to keep — **the next thing to do**, and the
-   last unobserved Phase 3 device criterion. Take the resume-repair row with it: force-stop, open,
-   background, return, and confirm the watcher alarms are re-armed and `last_reconcile_at` moved.
-   That path postdates the 2026-08-17 device pass and is unchecked on the matrix.
-4. **Then rewrite `docs/phases/phase-3-summary.md`** to record the settled state, and sign off the
-   gate.
+1. ~~**Run the five reviewers.**~~ **Done.** All five ran at the gate; every finding is fixed, one
+   commit per reviewer.
+2. ~~**The device pass.**~~ **Done** — seven checks in `d497859`, plus three Doze runs.
+3. **Settle the Doze question** — *The Doze problem* above. This is the only open work, and it is a
+   device experiment, not a code change. Do not write a fix before the experiment says which cause it
+   is.
+4. **Then decide about §9's scheduled function**, in an ADR if the answer is to un-defer it.
+5. **Then rewrite `docs/phases/phase-3-summary.md`** to record the settled state, and sign off the
+   gate. The summary is currently accurate about the reviewers and about the device pass, and does
+   **not** yet carry the Doze conclusion, because there is not one yet.
 
----
+### Device state as left on 2026-08-20 10:50
+
+- **Debug build of `2290e71`** installed (`app-debug.apk`), which carries the harness.
+- Store: two accepted links, `mum_local-watched-user` and `granddad_local-watched-user`, both
+  `warning_local_time = 10:30`, `activeFrom = 2026-08-18`.
+- `warnings_shown` holds **2026-08-19** for both (consumed by run 3) — so **any new run must clear it
+  again**, or the alarm will correctly say nothing. That is the mistake that spoiled the first
+  overnight run.
+- Simulated backend: `succeeded`, no check-in days → outcome `warnOnline`.
+- 14 warning alarms and 21 reminders armed; next warning **2026-08-21 10:30**.
+- Device restored: `battery reset`, `deviceidle unforce`, 24-hour clock, Europe/Madrid, night mode
+  off, app **not** on the Doze whitelist.
+- `tools/doze-collect.ps1` gathers the morning evidence. Its `$baselineReconcileAt` and `$armedFor`
+  constants are from the first run and **must be updated** before reuse.
 
 ## Prompt to start the next session
 
-> I'm continuing the Phase 3 gate review of the I Am Ok project. Read
-> `docs/phases/phase-3-review-handover.md` first — it records what the five reviewers have found so
-> far, what was fixed, and what is still owed. Then follow the reading order in `docs/README.md`.
+> I'm continuing Phase 3 of the I Am Ok project. Read `docs/phases/phase-3-review-handover.md`
+> first — especially **The Doze problem** and **Measurement traps learned on the device** — then
+> follow the reading order in `docs/README.md`.
 >
-> Head is the architecture re-review commit. 781 tests pass, `flutter analyze` is clean, and both
-> `flutter build apk --debug` and `--release` succeed. **All five reviewers have run at the gate and
-> every finding is fixed** — the review phase is complete.
+> Head is `2290e71`. 781 tests pass, `flutter analyze` is clean, both `--debug` and `--release`
+> build. **All five reviewers have run at the gate and every finding is fixed, so there is no review
+> work left.** One question is open and it is a device experiment.
 >
-> What remains before Phase 3 can be signed off is **device work, not review work**: the overnight
-> Doze run, and the resume-repair row beside it (force-stop, open, background, return, confirm the
-> watcher alarms re-arm). Both are unchecked on `docs/testing/device-matrix.md`. After that, rewrite
-> `docs/phases/phase-3-summary.md` to record the settled state.
+> **The warning does not arrive after a real night in Doze.** Three runs are recorded. AlarmManager
+> delivers the broadcast at exactly the armed second every time — that part works. What fails is
+> running Dart afterwards: overnight, the plugin's `AlarmService` was not created until 3h31m later,
+> when the phone was back in use. A third run *did* deliver correctly, but it was in **light** Doze
+> with a **warm** process, so it differs in two variables at once and settles nothing.
 >
-> Two things to carry with you. First, six of the last nine review rounds found a defect introduced
-> by the previous round's fix, so read your own recent changes as harshly as anything else. Second,
-> this is the watcher side, where a false claim to a family is the worst bug the app can have —
-> prefer stopping to ask over guessing, and if you think a finding is wrong, say so before acting on
-> it rather than after.
+> **Your job is the experiment that separates those two variables: deep Doze with a warm process.**
+> If the warning arrives, the cause is the cold service start. If it does not, deep Doze itself
+> blocks it and the answer is un-deferring §9's scheduled server-side function — which is a design
+> change and needs an ADR, not a quiet edit. The handover lists three approaches, cheapest first;
+> `dumpsys battery unplug` + `deviceidle force-idle` lets you do this in minutes with USB connected,
+> so start there rather than burning another night.
+>
+> The phone is connected and set up — but **`warnings_shown` already holds 2026-08-19, so a fresh run
+> will decide nothing until you clear it.** That exact mistake spoiled the first overnight run. Read
+> the traps section before touching the device: counting alarms out of `dumpsys alarm` and driving
+> the harness with `adb input tap` both produced confidently wrong answers this session, and the
+> notification `when=` field is the only honest answer to "when did it fire".
+>
+> Three things to carry with you. First, **verify the measurement before you trust the result** — more
+> than one finding this session dissolved on inspection, and one reviewer's estimate was off by a
+> factor that mattered. Second, **six of the nine review rounds found a defect introduced by the
+> previous round's fix**, so read recent commits at least as harshly as old code. Third, this is the
+> watcher side, where a false claim to a family is the worst bug the app can have — prefer stopping to
+> ask over guessing, and if you think a finding is wrong, say so before acting on it rather than
+> after.

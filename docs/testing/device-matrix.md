@@ -338,6 +338,56 @@ Same POCO F3, Android 13 / API 33, HyperOS `OS1.0`, stock power settings.
 > case a user would not see this. The mechanism — that a plain resume does not refresh the value — is
 > what was measured, and it holds either way.
 
+### RESULT — the overnight Doze run, 2026-08-20: the broadcast was on time, the isolate was 3h31m late
+
+**The alarm did not decide anything at 05:00.** The broadcast was delivered exactly on time; the
+service that runs the Dart isolate was not created until the phone was back in use.
+
+```
+05:00:00.334  SmartPower…i_am_ok: idle->background(659934ms) R(alarm start) adj=900
+05:00:00.396  AlarmManager: mPendingIntent -> PendingIntentRecord{… i_am_ok broadcastIntent}
+05:00:00.402  AlarmManager: mPendingIntent -> PendingIntentRecord{… i_am_ok broadcastIntent}
+              … nothing …
+08:31:16.021  SmartPower…i_am_ok: idle->background(192568ms)
+              R(service create io.github.davamix.i_am_ok/…androidalarmmanager.AlarmService) adj=0
+```
+
+`AlarmService` is `android_alarm_manager_plus`'s own service — the thing that spins up the Flutter
+engine and runs `warningAlarmCallback`. It was created **once** all night, at 08:31:16, and
+`last_reconcile_at` was stamped 08:31:17. There is no `AlarmService` line at 05:00 in a buffer that
+covers 00:26 onward in full, and no `notification_enqueue` from us at 05:00 either.
+
+The device had been back in use since about 08:25 (battery broadcasts, other apps waking). So the
+deferred work ran when the phone left Doze, **3h31m** after the alarm it belonged to.
+
+This matches, and now explains, the forced-Doze observation recorded below: the broadcast arrives,
+the service does not start. `setExactAndAllowWhileIdle` grants a temporary allowlist window — the
+`idle-options` bundle on our own alarms shows `temporaryAppAllowlistDuration=10000`, ten seconds — and
+the service start did not happen inside it.
+
+**What was NOT observed, and why.** The run was contaminated: at **00:26:12** the app was brought to
+the **foreground** by a person (`R(become foreground)`, `wm_on_resume_called`, a touch at
+00:26:13.370, then `wm_finish_activity … app-request`). That resume ran the shell's watcher
+reconcile, which posted both warnings and recorded 2026-08-19 in `warnings_shown`. By 05:00 the day
+was already consumed, so a correctly-working isolate would have said nothing anyway. **The two
+notifications in the tray are from 00:26, not from the alarm** — their `when` is
+`1787178372424`/`…594`, which is 00:26:12 Madrid.
+
+So this run establishes the **isolate deferral** and not the user-visible lateness of the warning
+itself. Those are different claims and only the first is measured.
+
+**Perspective before this is treated as fatal.** The product's default `warningLocalTime` is
+**10:00**, watcher-local, and most watchers have used their phone by then — the device would not be
+in Doze. 05:00 was chosen precisely because it is harsher, so that the mechanism could be observed
+at all on the owner's daily driver. What the finding costs is the *guarantee*: a watcher whose phone
+sits untouched — which §13 argues is exactly the low-usage watcher this app is for — gets the warning
+whenever they next pick the phone up, not at the time the app promised.
+
+**Owed next:** a clean re-run with the app left alone after setup, to see the notification itself
+arrive late; and a run at the natural 10:00 to see whether ordinary morning use makes the deferral
+disappear. If it reproduces, this is the trigger condition ARCHITECTURE.md §14 names for
+un-deferring §9's scheduled server-side function, and ADR-0007 is the record of what that costs.
+
 ### The overnight Doze run — armed 2026-08-19 23:14, to fire 2026-08-20 05:00
 
 Set up so the evidence survives without a live connection, and collected with

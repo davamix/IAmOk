@@ -221,12 +221,30 @@ What remains:
 5. FCM wiring in both the UI and background isolates
 6. **App Check** (Play Integrity), **monitoring mode only** — enforcing before the client sends
    tokens would lock the app out of its own backend
+7. **Re-open ADR-0008's delivery-hop question** — the Phase 4 trigger that ADR is written against.
+   Firebase is what makes the two deciding measurements possible: whether high-priority data-only FCM
+   wakes the background isolate in **deep Doze** (which is exit criterion 2 above, and must be run as
+   a measurement rather than a tick), and whether a Flutter engine can start *and* complete a
+   Firestore read inside the ~10-second temporary allowlist. Until then the warning stays late in
+   Doze by decision and the app promises no delivery time.
 
 **Blaze plan** is required from step 4 onward, along with the 2nd-gen Functions APIs (Cloud
 Functions, Cloud Build, Artifact Registry, Eventarc, Cloud Run, Pub/Sub, Cloud Storage). Free
 allowances mean effectively €0 at this scale, but the card must be on the account.
 
 **Exit criteria** — a tap on one physical phone quietly updates a second physical phone.
+
+> **Only one physical phone exists, and the substitution is recorded rather than made quietly** —
+> decided 2026-08-20, full reasoning in [testing/device-matrix.md](testing/device-matrix.md).
+> **POCO F3 = the watcher, the receiving endpoint; the API 36 AVD = the watched, tapping endpoint.**
+> The direction is the decision: the receiver is where FCM must pierce Doze and wake a background
+> isolate, so it stays on real OEM hardware and the emulator only writes a check-in. Run the other
+> way round the criterion proves nothing, because an emulator has no Doze and no vendor killer.
+>
+> So the criterion is met in its **functional** half. Its second-real-device half is **not** met, and
+> six specific checks are listed in the matrix as owed until a second handset exists — chief among
+> them the watched person's actual phone, which is still unidentified and is the one device that has
+> to work.
 
 ---
 

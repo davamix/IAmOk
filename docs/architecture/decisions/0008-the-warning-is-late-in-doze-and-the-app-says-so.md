@@ -1,6 +1,7 @@
 # ADR-0008 — The warning is late in Doze; accept it, surface it, and do not promise a time
 
-**Date:** 2026-08-20 · **Status:** Accepted *(provisional — see "What this does not close")*
+**Date:** 2026-08-20 · **Status:** **Accepted** — chosen by the owner over the two alternatives,
+and **revisited in Phase 4** on a named trigger, not on a feeling. See *Revisit trigger*.
 **Phase:** 3 (measured on hardware, five runs)
 **Affects:** [ARCHITECTURE.md](../ARCHITECTURE.md) §9, §10, §13, §14
 
@@ -124,6 +125,33 @@ current behaviour.
 
 **5. This is reversible and cheap to revisit.** No data-model change, no migration, no one-way door
 (§16). Nothing here forecloses either alternative.
+
+## Revisit trigger — Phase 4, and this is a scheduled task rather than a note
+
+This was first written as *"Accepted (provisional)"* with no trigger, which is how a holding position
+quietly becomes permanent. The owner has now chosen option 3 deliberately, **and** fixed when it gets
+re-opened.
+
+**Phase 4 is the trigger, because Firebase is what makes the deciding measurements possible.** Two
+questions are unanswerable today and become answerable then:
+
+1. **Can a Flutter background engine start *and complete a Firestore read* inside the ~10-second
+   temporary allowlist, cold, in deep Doze?** This is the whole of option 1's viability. It cannot be
+   measured in Phase 3: there is no Firebase dependency and the release build carries no `INTERNET`,
+   so there is nothing to time. The engine start alone is **295 ms** against that window — encouraging
+   and *not* an answer, because a network round trip on a cold radio in Doze is a different order of
+   cost.
+2. **Does high-priority data-only FCM wake the background isolate in deep Doze on this handset?**
+   This is already a Phase 4 exit criterion, and `docs/testing/device-matrix.md` now says to run it as
+   this measurement rather than as a tick. `firebase_messaging` bypasses the JobScheduler hop with
+   `startService()` **only for high-priority** messages, so the Function's priority is part of the
+   test, not an implementation detail.
+
+If (2) passes, a local isolate demonstrably *can* be woken inside Doze on this device, and the
+argument for option 2 weakens considerably. If (1) also passes, option 1 becomes the cheap fix and
+this ADR should be superseded rather than amended.
+
+**Until then the decision stands and the app may not promise a delivery time.**
 
 ## What this does not close
 

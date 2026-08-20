@@ -845,39 +845,104 @@ un-deferring §9's scheduled server-side function, and ADR-0007 is the record of
       zone, resume, and confirm `device_timezone` updated **and** the alarms re-armed at the new wall
       time.
 
-**Phase 4 — end to end.** PLAN.md's exit criterion is *"a tap on one physical phone quietly updates
-a second physical phone"*, and only one physical phone exists today. Either a second handset is
-found, or the criterion is met with the POCO plus the API 36 AVD as the second endpoint — which
-proves the *functional* path but proves nothing about delivery reliability, since the emulator has
-no OEM power manager. **Decide which before Phase 4, and record the choice**; quietly substituting
-the emulator would weaken the exit criterion without saying so.
+## What one phone and an emulator can prove — decided 2026-08-20
 
-- [ ] A tap on one device quietly updates the other
-- [ ] Data-only FCM wakes the background isolate with the app closed
-- [ ] Delivery still works after the device has been idle overnight (real Doze) — **POCO only;
-      the emulator cannot answer this**
+PLAN.md's Phase 4 exit criterion is *"a tap on one **physical phone** quietly updates a **second
+physical phone**"*, and **only one physical phone exists.** The choice was left open here with a
+warning that *"quietly substituting the emulator would weaken the exit criterion without saying so"*.
 
-**Phase 5 — pairing**
+**Decided: proceed with the POCO F3 + the `Medium_Phone_API_36.0` AVD**, and write down exactly what
+that combination proves and what it does not. The criterion is met in its *functional* half and
+explicitly **not** in its second-real-device half, which is listed below as owed rather than quietly
+dropped.
 
-- [ ] Two phones pair from a **cold install** using only a shared code
-- [ ] Each lands on the correct main screen from the two onboarding selections
-- [ ] Both Skip paths work and leave a usable app
+### The direction is the decision
 
-**Phase 6 — away mode**
+**POCO F3 = the watcher, the RECEIVING endpoint. AVD = the watched person, the TAPPING endpoint.**
+
+The tap happens on the watched device; the update lands on the watcher. **The reliability-critical
+endpoint is the receiver** — that is where FCM has to pierce Doze and wake a background isolate, and
+it is the only side where an emulator's missing power manager would destroy the result rather than
+merely limit it. With the POCO there, every check that carries risk still runs on real OEM hardware
+and the AVD only has to write a check-in.
+
+> **Never run it the other way round.** With the AVD receiving, *"data-only FCM wakes the background
+> isolate"* would pass on a machine with no Doze and no vendor killer — the exact false green this
+> section exists to prevent. If a run is ever done in that direction, it proves nothing and must not
+> be ticked.
+
+Prerequisite, verified rather than assumed: the AVD is `tag.id = google_apis_playstore` with
+`PlayStore.enabled = true` (`~/.android/avd/Medium_Phone.avd/config.ini`), so **Google Sign-In and
+FCM work on it**. An AOSP image would have made the whole arrangement impossible.
+
+### RUNNABLE NOW — POCO + AVD
+
+**Phase 4 — end to end.** All three, with the direction above.
+
+- [ ] A tap on one device quietly updates the other — AVD taps → Firestore → `onCheckInCreated` →
+      FCM → **POCO**
+- [ ] **Data-only FCM wakes the background isolate with the app closed** — kill the app on the
+      **POCO**, tap on the AVD. **This is also ADR-0008's deciding measurement, so run it as one.**
+      `firebase_messaging` selects `startService()` over the JobScheduler hop **only for
+      high-priority** messages (source-verified at 16.5.0), so confirm the Function sends high
+      priority, put the POCO in forced deep Doze (`dumpsys battery unplug` + `deviceidle
+      force-idle`), and sample `dumpsys deviceidle tempwhitelist` and `dumpsys jobscheduler` as the
+      Phase 3 runs did. A pass is the first evidence that a local isolate **can** be woken inside
+      Doze on this handset.
+- [ ] Delivery still works after the device has been idle overnight (real Doze) — POCO as receiver;
+      the AVD is not involved
+
+**Phase 5 — pairing.** All three.
+
+- [ ] Two phones pair from a **cold install** using only a shared code — POCO ↔ AVD
+- [ ] Each lands on the correct main screen from the two onboarding selections — one device is enough
+- [ ] Both Skip paths work and leave a usable app — one device is enough
+
+**Phase 6 — away mode.** All four, one of them with a role swap.
 
 - [ ] Away set from either side silences both sides everywhere
 - [ ] Cancelling restores both
-- [ ] **A device offline for the whole away period still ends away on the right day** — the check on
-      the design's most subtle claim: expiry is arithmetic against `through`, not a transmitted
-      message. Cannot be answered on one phone or in a unit test alone.
+- [ ] **A device offline for the whole away period still ends away on the right day** — keep the
+      **AVD** offline; the harness's forced-date control compresses the period so this need not take
+      a real week
 - [ ] Reminders for the first days back were armed *before* the trip and fire without the app being
-      opened
+      opened — **must run on the POCO**, because this is watched-side alarm reliability on real OEM
+      hardware. Roles live on links (§1), so the POCO plays the watched person for this one test.
+      **Record the role swap in the result**, or the run reads as if it contradicts the table above.
 
-**Ongoing**
+**Ongoing.** Both POCO, both need a human rather than adb.
 
 - [ ] Permissions are still granted after the device has sat unused for several days
       (Android auto-revoke — the silent killer of an inactive watcher)
 - [ ] Health panel reports every item correctly after a permission is revoked in Settings
+
+**Still owed from Phase 3**, and not a second-device problem — it needs a person in Settings:
+
+- [ ] **Device timezone change while backgrounded** — `cmd time_zone_detector
+      suggest_manual_time_zone` needs `SUGGEST_MANUAL_TIME_AND_ZONE`, which `adb` does not hold.
+      Change the zone, resume, and confirm `device_timezone` updated **and** the alarms re-armed at
+      the new wall time.
+
+### OWED UNTIL A SECOND REAL HANDSET EXISTS — do not attempt, do not tick
+
+Every one of these is about the **watched/tapping** endpoint being a real phone, which is precisely
+what the AVD cannot stand in for. They are listed so they can be picked up the day a second device
+is available, rather than being rediscovered as a gap at Phase 8.
+
+- [ ] **A real phone records a tap and syncs it under its own power management** — tapped offline,
+      synced later, and still filed under the right day. §11's `serverTimestamp()` hazard is the
+      reason this matters, and an emulator that is never really offline cannot exercise it.
+- [ ] **The watched side's reminders fire on real OEM hardware overnight**, app never opened. Phase 2
+      measured this on the POCO, but never on a *second* vendor.
+- [ ] **Both endpoints in real Doze at the same time** — the actual overnight case. Today only one
+      side can be, so the realistic scenario has never been run end to end.
+- [ ] **The watched person's real handset**, the priority-1 row above — *"Not yet identified. The
+      only device that has to work."* Likely old, so minSdk 24 and the elderly-first UI floors get
+      their first honest test. Identify before Phase 8, ideally before Phase 5 so pairing is
+      exercised on the hardware it will run on.
+- [ ] **A second vendor** — Samsung One UI, whose "Put unused apps to sleep" is on by default.
+- [ ] **A stock-Android control** (Pixel or similar) — the device that distinguishes "our bug" from
+      "their power manager".
 
 ## Recording results
 

@@ -10,12 +10,13 @@ what the reviewers found, what was fixed, what is still owed, and how to pick it
 The device work is done too, and it found something: **the warning does not arrive after a real
 night in Doze.**
 
-**Updated 2026-08-20 11:30 — the Doze question is SETTLED, and the session that settled it found a
-second, unrelated defect.** Deep Doze blocks the warning **with a warm process**, so the cold-service-
-start hypothesis is falsified; the block is a **JobScheduler** gate with a name, `readyNotDozing`.
-Separately, **the alarm isolate closes the UI's database** — `DatabaseException(database_closed 1)`,
-unfixed. Both are written up in `docs/testing/device-matrix.md`. What is now open is a *decision*, not
-a measurement — see *The Doze problem* and *Next steps*.
+**Updated 2026-08-20 17:00 — everything Phase 3 owed is now done, and the phase is signable.**
+The Doze question is settled (deep Doze blocks the warning even with a warm process; the gate is
+JobScheduler's `readyNotDozing`, and the reminder path is punctual in the same Doze because it skips
+the hop). The `database_closed` defect that session found is **fixed** with two guards. **All five
+exit criteria are observed on hardware.** Both open decisions are made — ADR-0008 option 3 with a
+Phase 4 revisit trigger, and POCO-receives / AVD-taps for the second endpoint. What remains is
+Phase 4 and the owner's sign-off; see *Next steps* and the prompt at the end.
 
 ---
 
@@ -641,6 +642,11 @@ exec base64 -d > i_am_ok.db
 - **`dumpsys battery unplug` lets Doze engage while USB stays connected**, so adb keeps working. Pair
   with `dumpsys deviceidle force-idle` for immediate deep Doze, and always `dumpsys battery reset` +
   `dumpsys deviceidle unforce` afterwards.
+- **With an emulator attached, every bare `adb` call is ambiguous.** From Phase 4 the AVD is the
+  second endpoint, so `adb shell …` will either fail with *"more than one device/emulator"* or
+  silently target the wrong one — and a `dumpsys` pulled from the emulator looks exactly like a
+  passing result. **Always `adb -s <serial>`.** `tools/doze-collect.ps1` takes a `-Serial` parameter
+  for this; get serials from `adb devices -l`.
 - **Verify the device actually idled.** `dumpsys deviceidle` → *Idling history*, newest last, entries
   like `deep-idle: -10m35s`. An alarm firing on a phone that never idled proves nothing, and run 3
   was exactly that.
@@ -676,89 +682,119 @@ Nothing here is a false claim; all are honest gaps.
 
 ## Next steps, in order
 
-1. ~~**Run the five reviewers.**~~ **Done.** All five ran at the gate; every finding is fixed, one
-   commit per reviewer.
-2. ~~**The device pass.**~~ **Done** — seven checks in `d497859`, plus three Doze runs.
-3. ~~**Settle the Doze question.**~~ **Done 2026-08-20** — deep Doze blocks it with a warm process;
-   the gate is JobScheduler's `readyNotDozing`. Evidence in `docs/testing/device-matrix.md`.
-4. ~~**Run the experiment the ADR's premise depends on.**~~ **Done 2026-08-20 12:00** — the
-   reminder path, whose alarm is identical and whose receiver skips the job hop, delivered at
-   `when=12:00:00` inside the same deep Doze. Doze is not the blocker; the hop is.
-5. **Decide about §9's scheduled function, in an ADR — owner's call.** The evidence is now
-   sufficient and the options are three, not one: deliver from the receiver as the reminders already
-   do (cheapest, and **the one remaining unmeasured step** is whether a Flutter background engine can
-   start inside the 10-second allowlist, or whether it needs a foreground service under the
-   exact-alarm exemption); or §9's server-side Function at ADR-0007's cost; or accept the deferral and
-   surface it in §13's health panel. **§14's trigger condition should be reworded either way** — it
-   says "whether alarms survive", and they do.
-6. **Decide what to do about `database_closed`** — the alarm isolate closing the UI's connection. It
-   is unfixed, it is not a Doze problem, and it lands on the isolate boundary in §4. This one is a
-   code defect rather than a decision, but the repair has several shapes and should be chosen
-   deliberately.
-7. **Then rewrite `docs/phases/phase-3-summary.md`** to record the settled state, and sign off the
-   gate. It does not yet carry either of this session's two findings.
+Everything Phase 3 owed is done. **Phase 3 is signable**; what follows is Phase 4.
 
-### Device state as left on 2026-08-20 14:44
+1. ~~Run the five reviewers.~~ ~~The device pass.~~ ~~Settle the Doze question.~~ ~~Run the
+   experiment the ADR's premise depends on.~~ **All done** — see the sections above.
+2. ~~**Fix `database_closed`.**~~ **Done** (`139a047`) — the alarm isolate no longer closes the UI's
+   shared connection, `rollbackActiveTransactionOnOpen` is pinned so debug and release agree, and two
+   source-level guards fail if either regresses. Proven on device.
+3. ~~**Drive the outstanding exit criteria.**~~ **Done** (`07b45bb`) — **all five** observed on
+   hardware, 15:33–15:55, one build, one session.
+4. ~~**Check the lease on the real topology.**~~ **Done** (`b2de87c`) — store and platform stayed
+   identical under a live UI. What it does *not* prove is written down with it.
+5. ~~**Decide about §9's scheduled function.**~~ **Done** —
+   [ADR-0008](../architecture/decisions/0008-the-warning-is-late-in-doze-and-the-app-says-so.md),
+   **option 3**: accept the deferral, promise no delivery time, surface it in §13. Accepted with a
+   **named Phase 4 revisit trigger** rather than left provisional.
+6. ~~**Decide the second endpoint.**~~ **Done** — POCO F3 receives, AVD taps. See
+   *What one phone and an emulator can prove* in `docs/testing/device-matrix.md`.
 
-- **Debug build installed** (`app-debug.apk`, `lastUpdateTime` 2026-08-19 22:39:55). Predates
-  `d497859` by five minutes, but that commit's `lib/` change is **doc-comment only** — verified by
-  diffing with comment lines stripped — so the binary is behaviourally identical to `HEAD`.
-- **The running process's UI database is CLOSED again** (pid 15097; the 14:44 alarm ran in it). Every
-  harness control will throw `database_closed` until the process is restarted. **Restart before using
-  the harness**: `input keyevent KEYCODE_HOME`, wait until `/proc/<pid>/oom_score_adj` is non-zero
-  (~5 s, reached 902), then `am kill` — never `force-stop`, which cancels the alarms.
-- Store: two accepted links, both `warning_local_time = 14:42`, `activeFrom = 2026-08-19`;
-  `warnings_shown` holds **2026-08-19 / `warnOnline`** for both. Any new run must clear it — the
-  harness's "Arm the natural warning 3 minutes out" does, via `saveWatcherCache(…, empty)`.
-- Simulated backend: `succeeded`, no check-in days → outcome `warnOnline`.
-- Device restored: `deviceidle unforce`, `battery reset`, deep and light both `ACTIVE`, 24-hour clock,
-  Europe/Madrid, app **not** on the Doze whitelist.
-- Tray holds the two warnings from 14:44 plus the 12:00 reminder — left as evidence.
-- `firebase_messaging` 16.5.0 was added to the **global pub cache** (`dart pub cache add`) to read its
-  Android sources. It is **not** a dependency of this project and `pubspec.yaml` is untouched.
-- `tools/doze-collect.ps1`'s `$baselineReconcileAt` and `$armedFor` are still from the first run and
-  **must be updated** before reuse. Its store pull uses a PowerShell `>` redirect on binary output;
-  prefer `cmd /c "… > file"` or the Bash tool, which are byte-faithful.
+### What is actually open
+
+- **Phase 4 itself**, in PLAN.md's order. Rules deploy **before** any client write — Firestore is in
+  locked mode, so a client built against undeployed rules gets `permission-denied`, which ADR-0004
+  maps to *refused* and turns into a false access-lost claim from a developer's own laptop.
+- **ADR-0008's revisit**, which is now Phase 4 step 7 rather than a note.
+- **The midnight day-drop** — ADR-0008 consequence 4, derived from the code and **not measured**. A
+  deferral crossing midnight makes the fire decide about `D+1` instead of the `D` it was armed for, so
+  `D` is silently skipped. The harness's forced-date control can settle it cheaply, and it should be
+  settled before Phase 4 leans on current behaviour.
+- **The watched person's handset is still unidentified** — the matrix's priority-1 row, *"the only
+  device that has to work"*. Identify before Phase 8, ideally before Phase 5's pairing flow.
+- **Sign off Phase 3** with the owner.
+
+### Device state as left on 2026-08-20 16:55
+
+Measured, not computed — `dumpsys alarm` parsed with the receiver-tag rule, store read with
+`run-as … cat` and `PRAGMA integrity_check` run on it.
+
+- **Debug build of the fixed code installed** (`lastUpdateTime` 2026-08-20 15:28:43) — this one
+  carries the `database_closed` fix, so **the harness keeps working after an alarm fires**. That was
+  not true of any earlier build today.
+- Serial **`1720f883`** (POCO F3, `alioth`). `tools/doze-collect.ps1` defaults to it; pass `-Serial`
+  when the emulator is attached, and never let a bare `adb` call decide for you.
+- Store: two accepted links, both `warning_local_time = 16:08`, `activeFrom = 2026-08-19`;
+  `warnings_shown` holds **2026-08-19 / `warnOnline`** for both. Any new warning run must clear it —
+  the harness's *Arm the natural warning 3 minutes out* does, via `saveWatcherCache(…, empty)`.
+- Simulated backend: `succeeded`, no check-in days, no away → outcome `warnOnline`.
+- **12 warning alarms and 20 reminders armed**; next warning **2026-08-21 16:08**.
+- Device restored: deep and light both `ACTIVE`, `battery reset`, 24-hour clock, Europe/Madrid, app
+  **not** on the Doze whitelist.
+- `firebase_messaging` 16.5.0 sits in the **global pub cache** (`dart pub cache add`) purely so its
+  Android sources could be read. It is **not** a dependency; `pubspec.yaml` is untouched. Phase 4 will
+  add it properly.
+- `/sdcard` holds stray `*.txt` dumps from these sessions. Harmless; clear when convenient.
 
 ## Prompt to start the next session
 
-> I'm continuing Phase 3 of the I Am Ok project. Read `docs/phases/phase-3-review-handover.md`
-> first — especially **The Doze problem** (now settled) and **Measurement traps learned on the
-> device** — then follow the reading order in `docs/README.md`.
+> I'm starting **Phase 4** of the I Am Ok project — the Firebase backbone. Read
+> `docs/phases/phase-3-review-handover.md` first, especially **Measurement traps learned on the
+> device**, then follow the reading order in `docs/README.md`. PLAN.md's Phase 4 has the step order
+> and it matters.
 >
-> All five reviewers have run at the gate and every finding is fixed. **The Doze question is
-> settled:** deep Doze blocks the warning even with a warm process, and the block is a JobScheduler
-> gate — `readyNotDozing: false` on `android_alarm_manager_plus`'s `JobIntentService` job, with the
-> alarm's own 10-second allowlist covering only the broadcast that enqueues it. Evidence in
-> `docs/testing/device-matrix.md`.
+> **Phase 3 is done and signable.** All five reviewers ran at the gate, every finding is fixed, and
+> **all five exit criteria were driven end-to-end on the device** — not merely asserted in tests. 783
+> tests, `flutter analyze` clean, both `--debug` and `--release` build.
 >
-> **Two things are open, and the first one gates the second.**
+> **Two decisions were made before you start; do not re-open them, but do read why.**
 >
-> 1. **The ADR on §9's scheduled server-side function — the owner's decision, not a quiet edit.**
->    The premise has been measured rather than assumed: the reminder path, whose alarm is identical
->    and whose receiver skips the job hop, delivered at `when=12:00:00` inside the same deep Doze. So
->    **Doze is not the blocker; the hop is**, and there are three options — deliver from the receiver,
->    §9's Function, or accept and surface the deferral. §14's trigger condition ("whether alarms …
->    survive") needs rewording either way, because they do.
-> 2. **One step remains unmeasured** and it is the one that would make option 1 cheap: whether a
->    Flutter background engine can be started from the receiver inside the 10-second temporary
->    allowlist, or whether that needs a foreground service under the exact-alarm exemption. Nobody has
->    tested it. Do not assume either way.
+> 1. **The second endpoint.** Only one physical phone exists. **POCO F3 = the watcher, the RECEIVING
+>    endpoint. The API 36 AVD = the watched, TAPPING endpoint.** The direction *is* the decision: the
+>    receiver is where FCM must pierce Doze and wake a background isolate, so it stays on real OEM
+>    hardware. **Run it the other way round and the result is worthless** — an emulator has no Doze
+>    and no vendor killer, so it will report success no matter what. `docs/testing/device-matrix.md`
+>    now splits every remaining device check into **runnable now** and **owed until a second real
+>    handset exists**; do not tick anything from the second list.
+> 2. **The Doze deferral.** [ADR-0008](../architecture/decisions/0008-the-warning-is-late-in-doze-and-the-app-says-so.md),
+>    option 3: the warning is late in deep Doze, we accept it, and **the app may not promise a
+>    delivery time**. The cause is precise — `android_alarm_manager_plus` hands the work to
+>    JobScheduler, which Doze holds at `readyNotDozing: false`, while the 10-second allowlist is
+>    granted in full and goes unused. **Phase 4 step 7 re-opens this on a named trigger**, because
+>    Firebase is what finally makes the deciding measurements possible.
 >
-> **Separately, there is an unfixed defect that is not about Doze at all.** After a warning alarm
-> fires while the app process is alive, the alarm isolate closes the UI's sqflite connection —
-> `DatabaseException(database_closed 1)` — and the UI's store stays dead for the life of the process.
-> Mechanism verified in `sqflite_android` 2.4.3's sources: the plugin keeps a **static**
-> single-instance map per process, so the second isolate is handed the *same* connection and
-> `warning_alarm_handler.dart`'s `finally { close(); }` closes it under the UI. `local_store.dart:56`
-> claims the opposite and is wrong. No test can see it — the suite runs one isolate. Decide the repair
-> deliberately; it lands on §4's isolate boundary.
+> **Start with PLAN.md step 2 — deploy `firestore.rules` before any client write exists.** Firestore
+> was created in locked mode, so a client built against undeployed rules gets `permission-denied`,
+> which ADR-0004 maps to **refused**, which drives the access-lost notification and its cadence. The
+> old step order manufactures the exact class of false claim to a family this app exists to prevent,
+> from your own laptop.
 >
-> Three things to carry with you. **Verify the measurement before you trust the result** — this
-> session's `database_closed` finding was nearly written off as a mis-tap because the harness prints
-> its failures below the fold. **Read recent commits at least as harshly as old code.** And this is
-> the watcher side, where a false claim to a family is the worst bug the app can have — prefer
-> stopping to ask over guessing.
+> **Exit criterion 2 — "data-only FCM wakes the background isolate with the app closed" — is also
+> ADR-0008's deciding measurement. Run it as one, not as a tick.** `firebase_messaging` bypasses the
+> JobScheduler hop with `startService()` **only for high-priority** messages, so the Function's
+> priority is part of the test. Put the POCO in forced deep Doze and sample
+> `dumpsys deviceidle tempwhitelist` and `dumpsys jobscheduler`, as the Phase 3 runs did.
 >
-> Device state, alarms armed, and the traps that produced wrong answers before right ones are all in
-> the handover.
+> **One thing is owed and unmeasured, and it is the sharpest edge of accepting the deferral.**
+> ADR-0008 consequence 4: `WarningPolicy.decide` takes `D = lastCompletedDay(now)` from when the
+> isolate *runs*, so a deferral crossing midnight decides about `D+1` instead of the `D` it was armed
+> for — and `D` is then never asked about again. **A missed day silently dropped.** Derived from the
+> code, not measured; the harness's forced-date control can settle it cheaply.
+>
+> **Traps that produced a wrong answer before a right one this session** — the full list is in the
+> handover, but these three will hit you within minutes:
+>
+> - **With the emulator attached, every bare `adb` call is ambiguous.** Always `adb -s <serial>`.
+>   `tools/doze-collect.ps1` takes `-Serial` and defaults to the POCO (`1720f883`).
+> - **A harness control that leaves the store unchanged may have run and *thrown*.** The failure
+>   prints below the fold. Scroll to the result panel and read it before blaming the tap — that
+>   misreading nearly buried the `database_closed` defect.
+> - **`when=` is the only honest answer to "when did it fire."** A notification in the tray proves
+>   nothing about when.
+>
+> Three things to carry with you. **Verify the measurement before you trust the result** — more than
+> one finding this session dissolved on inspection, and one of my own edits introduced an infinite
+> recursion that a parse check happily called clean. **Read recent commits at least as harshly as old
+> code.** And this is the side where a false claim to a family is the worst bug the app can have —
+> prefer stopping to ask over guessing, and if you think a finding is wrong, say so before acting on
+> it rather than after.

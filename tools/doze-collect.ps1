@@ -24,9 +24,30 @@
 # interesting case and is why they are printed separately rather than reduced to
 # a pass/fail.
 
+# ## Which device
+#
+# From Phase 4 the API 36 AVD is the second endpoint, so a bare `adb shell` is
+# ambiguous the moment it is running: adb either fails with "more than one
+# device/emulator" or silently picks the wrong one - and a dumpsys pulled from
+# the emulator looks exactly like a passing result. So every call below goes
+# through `Invoke-Adb`, which always passes `-s`.
+#
+# Default is the POCO F3, the only device these Doze questions are about.
+# Override when that changes:
+#
+#   pwsh -File tools/doze-collect.ps1 -Serial emulator-5554
+#
+# `adb devices -l` lists serials.
+param(
+    [string]$Serial = '1720f883'   # POCO F3 (alioth). `adb devices -l` if this changes.
+)
+
 $ErrorActionPreference = 'Continue'
 $adb = 'D:\Android\Sdk\platform-tools\adb.exe'
 $pkg = 'io.github.davamix.i_am_ok'
+
+# Every adb call in this script goes through here. Nothing may call $adb directly.
+function Invoke-Adb { & $adb -s $Serial @args }
 $out = Join-Path $env:TEMP 'doze'
 New-Item -ItemType Directory -Force -Path $out | Out-Null
 
@@ -35,24 +56,29 @@ $baselineReconcileAt = '2026-08-19 23:11:50'
 $armedFor            = '2026-08-20 05:00:00'
 
 Write-Host "=== device ===" -ForegroundColor Cyan
-& $adb devices -l | Select-Object -Skip 1
-"device time : " + (& $adb shell "date '+%Y-%m-%d %H:%M:%S %Z'")
+& $adb devices -l | Select-Object -Skip 1   # deliberately NOT -s: this IS the list
+"device time : " + (Invoke-Adb shell "date '+%Y-%m-%d %H:%M:%S %Z'")
 "armed for   : $armedFor Madrid"
 "baseline    : last_reconcile_at $baselineReconcileAt"
+# These two are hand-set per run and are the easiest thing in this script to
+# forget. A stale pair does not fail - it silently compares the new run against
+# the OLD run's numbers and prints a confident, wrong verdict. So say so, every
+# time, rather than trusting a comment nobody re-reads.
+Write-Host "  ^ CHECK THESE TWO. They are hand-set per run; stale values give a confident wrong answer." -ForegroundColor Yellow
 
 Write-Host "`n=== 1. did the device actually spend the night in Doze? ===" -ForegroundColor Cyan
 # Without this the whole run proves nothing: an alarm firing on a phone that
 # never idled is not evidence about Doze. `deviceidle` keeps a step history.
-& $adb shell "dumpsys deviceidle > /sdcard/dozestate.txt" | Out-Null
-& $adb pull /sdcard/dozestate.txt "$out\dozestate.txt" | Out-Null
+Invoke-Adb shell "dumpsys deviceidle > /sdcard/dozestate.txt" | Out-Null
+Invoke-Adb pull /sdcard/dozestate.txt "$out\dozestate.txt" | Out-Null
 $dz = Get-Content "$out\dozestate.txt"
-"current deep state : " + (& $adb shell dumpsys deviceidle get deep)
-"current light state: " + (& $adb shell dumpsys deviceidle get light)
+"current deep state : " + (Invoke-Adb shell dumpsys deviceidle get deep)
+"current light state: " + (Invoke-Adb shell dumpsys deviceidle get light)
 $dz | Select-String -Pattern "Idling history|IDLE|STEP|state=" | Select-Object -First 25 |
   ForEach-Object { "  " + $_.Line.Trim() }
 
 Write-Host "`n=== 2. the store — the app's own record, written at fire time ===" -ForegroundColor Cyan
-& $adb exec-out run-as $pkg cat databases/i_am_ok.db > "$out\store.db"
+Invoke-Adb exec-out run-as $pkg cat databases/i_am_ok.db > "$out\store.db"
 $py = @"
 import sqlite3, datetime, sys
 c = sqlite3.connect(r'$out\store.db')
@@ -77,8 +103,8 @@ $py | Out-File -FilePath "$out\q.py" -Encoding utf8
 python "$out\q.py"
 
 Write-Host "`n=== 3. the tray ===" -ForegroundColor Cyan
-& $adb shell "dumpsys notification --noredact > /sdcard/dozenotif.txt" | Out-Null
-& $adb pull /sdcard/dozenotif.txt "$out\notif.txt" | Out-Null
+Invoke-Adb shell "dumpsys notification --noredact > /sdcard/dozenotif.txt" | Out-Null
+Invoke-Adb pull /sdcard/dozenotif.txt "$out\notif.txt" | Out-Null
 $hits = Get-Content "$out\notif.txt" | Select-String -Pattern "android.text=String \((No check-in|Can't check)"
 if ($hits) { $hits | ForEach-Object { "  " + $_.Line.Trim() } } else { "  (none of ours)" }
 
@@ -87,8 +113,8 @@ Write-Host "`n=== 4. the platform's alarm record ===" -ForegroundColor Cyan
 # line carries the receiver tag. Grepping the receiver name alone matches the
 # App Alarm history section instead and reports armed alarms on an app that has
 # none — that mistake was made once already, on 2026-08-19.
-& $adb shell "dumpsys alarm > /sdcard/dozealarm.txt" | Out-Null
-& $adb pull /sdcard/dozealarm.txt "$out\alarm.txt" | Out-Null
+Invoke-Adb shell "dumpsys alarm > /sdcard/dozealarm.txt" | Out-Null
+Invoke-Adb pull /sdcard/dozealarm.txt "$out\alarm.txt" | Out-Null
 $py2 = @"
 import re, datetime
 lines = open(r'$out\alarm.txt', encoding='utf-8', errors='replace').read().splitlines()
@@ -115,7 +141,7 @@ Write-Host "`n=== 5. logcat: was the broadcast delivered, and did Dart run? ==="
 # The decisive line. On 2026-08-19 under FORCED Doze the broadcast was delivered
 # and the app was returned to idle 3s later with no Dart having run, so these two
 # questions have to be asked separately.
-& $adb logcat -d -v time > "$out\logcat.txt" 2>&1
+Invoke-Adb logcat -d -v time > "$out\logcat.txt" 2>&1
 $lc = Get-Content "$out\logcat.txt"
 "AlarmManager deliveries to us:"
 $lc | Select-String -Pattern "AlarmManager.*davamix|davamix.*alarm start" | ForEach-Object { "  " + $_.Line } | Select-Object -Last 10

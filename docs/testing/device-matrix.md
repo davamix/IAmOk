@@ -338,6 +338,158 @@ Same POCO F3, Android 13 / API 33, HyperOS `OS1.0`, stock power settings.
 > case a user would not see this. The mechanism — that a plain resume does not refresh the value — is
 > what was measured, and it holds either way.
 
+### FINDING, unfixed — the alarm isolate closes the UI's database
+
+**Found 2026-08-20 11:17 on the POCO F3, while setting the Doze experiment up.** After a warning
+alarm fires *while the app process is alive*, every subsequent UI store operation throws:
+
+```
+Arm the natural warning 3 minutes out FAILED
+DatabaseException(database_closed 1)
+```
+
+Reproduced on two different harness controls — "Arm the natural warning 3 minutes out" and "Dump
+LocalStore", the latter with a stack through `LocalStore.dump` (`local_store.dart:947`). It is
+**permanent for the life of the process**, not transient. The `1` is the database id: the UI's own
+connection, opened at launch.
+
+**Mechanism, read out of `sqflite_android` 2.4.3's source rather than guessed from the symptom.**
+
+- `android_alarm_manager_plus` runs the background isolate **in the app's own process** —
+  `AlarmService` has no `android:process=":remote"`.
+- `SqflitePlugin.java` holds a **static** `_singleInstancesByPath` map (line 59), shared by every
+  Flutter engine in that process.
+- `onOpenDatabaseCall` (≈line 349): a second isolate opening the same path finds the existing entry
+  and is handed back **the same `databaseId`**. It does not get a connection of its own.
+- `onCloseDatabaseCall` (≈line 453): `close()` removes that id from `databaseMap` and closes the
+  underlying `SQLiteDatabase`.
+
+So `warningAlarmCallback`'s `finally { await store?.close(); }`
+(`warning_alarm_handler.dart:101`) closes the connection **the UI is still holding**. The UI's
+Dart-side `Database` keeps the now-dead id, and every later call fails.
+
+**It falsifies a claim in the code.** `LocalStore.open()`'s docstring (`local_store.dart:56`) says:
+
+> Called by **each** isolate that needs it — UI, alarm, and later FCM. They each hold their own
+> connection to the same file; SQLite does the locking.
+
+On Android, in-process, there is **one** connection, not two or three.
+
+**Why 781 tests do not catch it.** The suite opens `sqflite_common_ffi` in a single isolate. This is
+Android-plugin static-state behaviour that only exists on a device with two Flutter engines in one
+process — the same shape as the `Object.hash` defect already in `CLAUDE.md`, where every test
+compared two calls made inside one process.
+
+**Consequences.** Confirmed: the UI's store is dead for the process lifetime after any warning alarm
+fires, so watcher-list reads, the resume reconcile and every harness control throw. **Not measured,
+but following from the same mechanism and worth checking before it is dismissed:** a tap on the
+watched side after a warning alarm has fired, and what `transaction()` from two isolates does to one
+shared connection — the `reconcile_lock` design is written on top of the "own connection" premise
+that has just been falsified. The alarm isolate's *own* work completes correctly before it closes,
+so **delivery of the warning itself is unaffected**; the damage is to the UI afterwards.
+
+**Deliberately not fixed here.** The repair is a design decision — do not close a shared
+single-instance connection, or open with `singleInstance: false`, or reference-count — and it lands
+on the isolate boundary ARCHITECTURE.md §4 defines. It belongs with the owner and an architecture
+pass, not a quiet edit at a phase gate.
+
+### SETTLED — deep Doze blocks it with a WARM process, and the block is JobScheduler
+
+**Measured 2026-08-20 11:25 on the POCO F3.** This is the experiment the three earlier runs could
+not separate: **deep Doze with a warm process**. The answer is that **process warmth is irrelevant**
+— the hypothesis carried forward from run 2 ("the cold service start is the cause") is **falsified**.
+
+| | |
+|---|---|
+| Process | pid 6349, alive, **`AlarmService started!` logged at 11:21:49** — the background isolate was already initialised 3½ minutes before the alarm |
+| Doze | `battery unplug` + `deviceidle force-idle`, screen off; `get deep` = **`IDLE`** throughout |
+| Owed? | `warnings_shown` **empty**, `active_from` 2026-08-19 — a warning genuinely owed for the 19th |
+| Armed | 11:25:00, confirmed in `dumpsys alarm` |
+| Result | broadcast **on time**; **nothing ran**; warning arrived **11:28:47**, i.e. 3m47s late and only because Doze was released at 11:28:43 |
+
+**The mechanism, read out of the platform rather than inferred from timing.** At 11:25:13, thirteen
+seconds after the armed second, with the device still in deep `IDLE`:
+
+```
+JOB #u0a612/1984: io.github.davamix.i_am_ok/…androidalarmmanager.AlarmService
+  Required constraints:    DEADLINE
+  Satisfied constraints:   DEADLINE BACKGROUND_NOT_RESTRICTED TARE_WEALTH WITHIN_QUOTA
+  Unsatisfied constraints:                      <-- none
+  Implicit constraints:
+    readyNotDozing: false                       <-- the only thing holding it
+    readyDeadlineSatisfied: true
+  Pending work:
+    #0: Intent { … AlarmBroadcastReceiver (has extras) }
+    #1: Intent { … AlarmBroadcastReceiver (has extras) }
+  Standby bucket: ACTIVE      Uid: active
+  Ready: false (job=false …)
+```
+
+So the chain is: **AlarmManager delivers the broadcast → `AlarmBroadcastReceiver.onReceive` calls
+`AlarmService.enqueueAlarmProcessing` → `JobIntentService.enqueueWork` → a JobScheduler job → Doze
+holds the job.** Both links' work items are sitting in the queue. Every *explicit* constraint is
+satisfied; the single implicit one, `readyNotDozing`, is not.
+
+**Why the 10-second allowlist does not save it.** Our alarm carries, in this session's own
+`dumpsys alarm` capture:
+
+```
+flags=0x5  exactAllowReason=policy_permission  device_idle=--
+idle-options=Bundle[{… temporaryAppAllowlistReasonCode=302,
+                      temporaryAppAllowlistDuration=10000, …}]
+```
+
+That temporary allowlist covers **the broadcast**, and it did its job — `onReceive` ran at
+11:25:00.039. It does **not** extend to the JobScheduler job the broadcast enqueues. The work is
+handed across a boundary the exemption does not cross.
+
+**The app was in the most favourable state Android offers and it still did not run.** `Standby
+bucket: ACTIVE`, `Uid: active`, foreground three minutes earlier. That closes the obvious objection
+that the experiment was contaminated by driving it by hand: a recently-used app is exactly the case
+most likely to be let through, and it was not. A real night can only be worse.
+
+**The release, which is the confirmation.** Doze was ended at 11:28:43 and nothing else was touched:
+
+```
+11:28:46.787  SmartPower…i_am_ok: idle->background R(service create …AlarmService) adj=0
+11:28:47      both warnings posted, when=11:28:47
+```
+
+3.9 seconds after leaving Doze. That is run 2's **3h31m** reproduced in miniature and under control:
+the work waits for the end of Doze, however long that is. All three channels agree on 11:28:47 —
+`warnings_shown` gained 2026-08-19/`warnOnline` for both links, `last_reconcile_at` stamped
+11:28:47, and both notifications carry `when=11:28:47` against an armed second of 11:25:00. The copy
+was right — *"No check-in from Mum yesterday."* and the same for Granddad — which is the point: the
+decision is correct, the delivery is late.
+
+**Positive control, same session, same build.** At 11:15:00 with the device ACTIVE and the same warm
+process, the identical setup delivered both warnings at `when=11:15:00` — punctual to the second.
+So the path itself works; only Doze breaks it.
+
+#### What this does and does not license
+
+- It **does** settle the question the three earlier runs left open. Cold service start is not the
+  cause. Deep Doze is, and it blocks at a named, observable gate.
+- It is **forced** Doze again — but run 2 was a natural overnight and produced the same outcome, and
+  the gate now has a name that is the same gate in both cases. The forced run adds the mechanism; the
+  natural run supplies the realism.
+- It does **not**, on its own, establish that the answer must be §9's server-side function. What is
+  blocked is specifically the **`JobIntentService` hop inside `android_alarm_manager_plus`**, not
+  "Dart at alarm time". Worth weighing before the ADR is written — see the open question below.
+
+#### The open question the ADR needs first — NOT measured
+
+`flutter_local_notifications`' `ScheduledNotificationReceiver.onReceive` posts its notification
+**directly** (`notificationManager.notify(...)`, source read at 22.3.0) with **no job hop**. That
+suggests the reminder path may survive deep Doze where the warning path does not — and if so, the
+block is a property of *how this plugin hands off*, not of Doze forbidding all alarm-time work.
+
+**This has not been tested and must not be assumed.** The warning path cannot simply copy it: a
+reminder posts a pre-rendered notification, while a warning has to run Dart to read the store and
+decide. The cheap experiment is to arm forced Doze a few minutes before one of the 12:00 / 18:00 /
+21:00 reminders and see whether it posts on time. Until that is run, "local delivery cannot work in
+Doze" is a **stronger claim than the evidence supports**.
+
 ### RESULT — the overnight Doze run, 2026-08-20: the broadcast was on time, the isolate was 3h31m late
 
 **The alarm did not decide anything at 05:00.** The broadcast was delivered exactly on time; the

@@ -8,8 +8,14 @@ what the reviewers found, what was fixed, what is still owed, and how to pick it
 
 **Phase 3 is NOT signed off.** **All five reviewers have run at the gate and every finding is fixed.**
 The device work is done too, and it found something: **the warning does not arrive after a real
-night in Doze.** That is the open question the next session inherits — see *The Doze problem* below,
-which is the only section that still needs work.
+night in Doze.**
+
+**Updated 2026-08-20 11:30 — the Doze question is SETTLED, and the session that settled it found a
+second, unrelated defect.** Deep Doze blocks the warning **with a warm process**, so the cold-service-
+start hypothesis is falsified; the block is a **JobScheduler** gate with a name, `readyNotDozing`.
+Separately, **the alarm isolate closes the UI's database** — `DatabaseException(database_closed 1)`,
+unfixed. Both are written up in `docs/testing/device-matrix.md`. What is now open is a *decision*, not
+a measurement — see *The Doze problem* and *Next steps*.
 
 ---
 
@@ -483,7 +489,40 @@ permission adb does not have — it needs a human in Settings).
 
 ---
 
-## THE DOZE PROBLEM — the one thing still open
+## THE DOZE PROBLEM — SETTLED 2026-08-20, and the answer was not the hypothesis
+
+> **Read `docs/testing/device-matrix.md` § *SETTLED — deep Doze blocks it with a WARM process, and the
+> block is JobScheduler* for the evidence.** The short form:
+>
+> A fourth run supplied the missing cell — **deep Doze with a warm process** (pid alive,
+> `AlarmService started!` logged 3½ minutes before the alarm). The broadcast arrived on time and
+> **nothing ran**, exactly as in runs 1 and 2. **Process warmth is irrelevant; the hypothesis below
+> is falsified.**
+>
+> The mechanism was read out of `dumpsys jobscheduler` rather than inferred from timing. The plugin's
+> `AlarmBroadcastReceiver` hands the work to `JobIntentService.enqueueWork`, i.e. **a JobScheduler
+> job**, and in Doze that job sits with every explicit constraint satisfied and one implicit one not:
+> `readyNotDozing: false`. The 10-second `temporaryAppAllowlistDuration` on our alarm covers the
+> **broadcast** — which did run — and does not extend across the hop to the job. The app was in
+> `Standby bucket: ACTIVE` with `Uid: active` and still did not run, which closes the objection that
+> driving it by hand made it easier than a real night.
+>
+> Releasing Doze at 11:28:43 produced `R(service create …AlarmService)` at 11:28:46.787 and both
+> warnings at `when=11:28:47`, against an armed second of **11:25:00**. That is run 2's 3h31m
+> reproduced in miniature and under control.
+>
+> **One caution before the ADR.** What is proven blocked is the **`JobIntentService` hop inside
+> `android_alarm_manager_plus`**, not "Dart at alarm time". `flutter_local_notifications` posts from
+> its receiver with no job hop, so the reminder path may well survive deep Doze — **untested**. Until
+> someone runs that, *"local delivery cannot work in Doze"* is a stronger claim than the evidence
+> supports, and an ADR that rests on it would rest on an unmeasured premise.
+
+### The three runs that could not settle it, kept for the record
+
+**Everything from here to *If it reproduces* is superseded.** It is kept because the reasoning is
+worth reading and because the hypothesis it argues for turned out to be **wrong** — run 4 falsified
+it. Do not act on the "experiment that separates them" below; it has been run, and the answer is in
+the box above.
 
 **The warning does not arrive after a real night in Doze.** Three runs on the POCO F3 (Android 13,
 HyperOS `OS1.0`, stock power settings, app never on the Doze whitelist). Full evidence in
@@ -575,12 +614,23 @@ minutes.
 exec base64 -d > i_am_ok.db
 <base64>" | adb shell run-as <pkg> sh`
   Verify with `PRAGMA integrity_check` afterwards, every time.
-- **Killing the app without cancelling its alarms is hard.** `am force-stop` cancels every alarm —
-  never use it mid-setup. `am kill` refuses while `oom_score_adj` is 0, and the app can sit at 0 long
-  after `KEYCODE_HOME`. Swiping from recents did not work over adb either. Unsolved.
-- **Driving the debug harness with `adb input tap` is unreliable.** Taps are absorbed as scrolls and
-  the scroll position is not stable between visits. Always verify a control ran by reading the store,
-  never by the tap returning. Several apparent findings this session were mis-taps.
+- **Killing the app without cancelling its alarms is hard — but it is SOLVED.** `am force-stop`
+  cancels every alarm, so never use it mid-setup. `am kill` refuses while `oom_score_adj` is 0.
+  **What works: `input keyevent KEYCODE_HOME`, wait ~5 s, read `/proc/<pid>/oom_score_adj` until it
+  is non-zero (it reached 700), then `am kill`.** Measured 2026-08-20: the process died and all 12
+  warning alarms and 21 reminders were still armed afterwards. The earlier "unsolved" note came from
+  killing too soon after `HOME` and reading nothing back — always read `oom_score_adj` first rather
+  than guessing at a delay.
+- **Driving the debug harness with `adb input tap`: verify by the store, but do not conclude
+  "mis-tap" from the store alone.** Always verify a control ran by reading the store, never by the
+  tap returning — that part stands. But on 2026-08-20 two taps that left the store unchanged were
+  taken for mis-taps and were nothing of the kind: the taps had landed, the control had run, and it
+  had **thrown**. The harness prints `<label> FAILED` and the stack into a result panel **below the
+  fold**, so the screen looks untouched until you scroll to the bottom. That misreading nearly buried
+  the `database_closed` finding. **Scroll to the result panel and read it before blaming the tap** —
+  `exec-out screencap -p` into a file and actually look at the image. Coordinates: take a screenshot,
+  measure the button in it, and re-measure after every scroll; do not reuse coordinates across
+  visits.
 - **`dumpsys battery unplug` lets Doze engage while USB stays connected**, so adb keeps working. Pair
   with `dumpsys deviceidle force-idle` for immediate deep Doze, and always `dumpsys battery reset` +
   `dumpsys deviceidle unforce` afterwards.
@@ -606,8 +656,14 @@ Nothing here is a false claim; all are honest gaps.
   with Phase 7's multi-person layout.
 - **Screen-reader focus cannot be moved** to an arbitrary widget in Flutter. The tapped row is
   announced instead, and the code says so rather than implying focus.
-- **§9's scheduled server-side function stays deferred.** ADR-0007 is the record of what that costs,
-  and is now the strongest argument in the project for un-deferring it.
+- **§9's scheduled server-side function stays deferred.** ADR-0007 is the record of what that costs.
+  The 2026-08-20 Doze result is the strongest argument in the project for un-deferring it — but read
+  the caution in *The Doze problem* first: what is proven blocked is one plugin's JobScheduler hop,
+  and a client-side path that skips that hop has not been ruled out because it has not been tested.
+- **`DatabaseException(database_closed 1)`** — the alarm isolate closes the UI's shared sqflite
+  connection, killing the UI's store for the life of the process. Found 2026-08-20, unfixed,
+  mechanism verified in the plugin sources. Full write-up in `docs/testing/device-matrix.md`. This is
+  the one genuinely new *defect* on this list; everything else here is an honest gap.
 
 ---
 
@@ -616,62 +672,94 @@ Nothing here is a false claim; all are honest gaps.
 1. ~~**Run the five reviewers.**~~ **Done.** All five ran at the gate; every finding is fixed, one
    commit per reviewer.
 2. ~~**The device pass.**~~ **Done** — seven checks in `d497859`, plus three Doze runs.
-3. **Settle the Doze question** — *The Doze problem* above. This is the only open work, and it is a
-   device experiment, not a code change. Do not write a fix before the experiment says which cause it
-   is.
-4. **Then decide about §9's scheduled function**, in an ADR if the answer is to un-defer it.
-5. **Then rewrite `docs/phases/phase-3-summary.md`** to record the settled state, and sign off the
-   gate. The summary is currently accurate about the reviewers and about the device pass, and does
-   **not** yet carry the Doze conclusion, because there is not one yet.
+3. ~~**Settle the Doze question.**~~ **Done 2026-08-20** — deep Doze blocks it with a warm process;
+   the gate is JobScheduler's `readyNotDozing`. Evidence in `docs/testing/device-matrix.md`.
+4. **Run the one cheap experiment the ADR's premise depends on** — arm forced Doze a few minutes
+   before one of the 12:00 / 18:00 / 21:00 reminders and see whether `flutter_local_notifications`
+   delivers on time with no job hop. It costs about ten minutes with the phone connected and it
+   decides whether the answer is "go server-side" or "fix the delivery hop". **Do this before writing
+   the ADR**, not after.
+5. **Then decide about §9's scheduled function**, in an ADR. The decision is the owner's; the
+   evidence is now sufficient to make it, and the options are wider than the ADR was going to
+   assume — server-side function, a client-side delivery path that skips the job hop, or accepting
+   the deferral and saying so in §13's health panel.
+6. **Decide what to do about `database_closed`** — the alarm isolate closing the UI's connection. It
+   is unfixed, it is not a Doze problem, and it lands on the isolate boundary in §4. This one is a
+   code defect rather than a decision, but the repair has several shapes and should be chosen
+   deliberately.
+7. **Then rewrite `docs/phases/phase-3-summary.md`** to record the settled state, and sign off the
+   gate. It does not yet carry either of this session's two findings.
 
-### Device state as left on 2026-08-20 10:50
+### Device state as left on 2026-08-20 11:34
 
-- **Debug build of `2290e71`** installed (`app-debug.apk`), which carries the harness.
+Measured, not computed — `dumpsys alarm` parsed with the receiver-tag rule, store read with
+`run-as … cat` into a file and `PRAGMA integrity_check` run on it.
+
+- **Debug build installed** (`app-debug.apk`, `lastUpdateTime` 2026-08-19 22:39:55). It predates
+  `d497859` by five minutes, but that commit's `lib/` change is **doc-comment only** — verified by
+  diffing with comment lines stripped — so the installed binary is behaviourally identical to `HEAD`.
+- **The running process's UI database is CLOSED.** pid 6349 is alive, but the 11:28:47 alarm ran in
+  it and closed the shared connection, so **every harness control will throw `database_closed` until
+  the process is restarted**. See the finding in `device-matrix.md`. **Restart before using the
+  harness**: `input keyevent KEYCODE_HOME`, wait until `/proc/<pid>/oom_score_adj` is non-zero, then
+  `am kill` — never `force-stop`, which cancels the alarms.
 - Store: two accepted links, `mum_local-watched-user` and `granddad_local-watched-user`, both
-  `warning_local_time = 10:30`, `activeFrom = 2026-08-18`.
-- `warnings_shown` holds **2026-08-19** for both (consumed by run 3) — so **any new run must clear it
-  again**, or the alarm will correctly say nothing. That is the mistake that spoiled the first
-  overnight run.
+  `warning_local_time = 11:25`, `activeFrom = 2026-08-19`.
+- `warnings_shown` holds **2026-08-19 / `warnOnline`** for both (consumed by the 11:28:47 delivery) —
+  so **any new run must clear it again**, or the alarm will correctly say nothing. The harness's
+  "Arm the natural warning 3 minutes out" **does** clear it, via `saveWatcherCache(…, empty)`; a
+  hand-built run must do it itself.
+- `last_reconcile_at` = **11:28:47** on both links.
 - Simulated backend: `succeeded`, no check-in days → outcome `warnOnline`.
-- 14 warning alarms and 21 reminders armed; next warning **2026-08-21 10:30**.
-- Device restored: `battery reset`, `deviceidle unforce`, 24-hour clock, Europe/Madrid, night mode
-  off, app **not** on the Doze whitelist.
-- `tools/doze-collect.ps1` gathers the morning evidence. Its `$baselineReconcileAt` and `$armedFor`
-  constants are from the first run and **must be updated** before reuse.
+- **12 warning alarms and 21 reminders armed.** Next warning **2026-08-21 11:25**; next reminder
+  **2026-08-20 12:00** — that reminder is the free opportunity for the untested job-hop experiment in
+  *Next steps* item 4.
+- Device restored: `battery reset`, `deviceidle unforce`, deep and light both `ACTIVE`, 24-hour clock,
+  Europe/Madrid, app **not** on the Doze whitelist.
+- `tools/doze-collect.ps1` gathers overnight evidence. Its `$baselineReconcileAt` and `$armedFor`
+  constants are from the **first** run and **must be updated** before reuse. Its store pull uses a
+  PowerShell `>` redirect on binary output; prefer `cmd /c "… > file"` or the Bash tool, which are
+  byte-faithful.
+- `/sdcard` holds ~75 stray `*.txt` dumps from this and earlier sessions. This session removed only
+  its own. They are harmless; clear them when convenient.
 
 ## Prompt to start the next session
 
 > I'm continuing Phase 3 of the I Am Ok project. Read `docs/phases/phase-3-review-handover.md`
-> first — especially **The Doze problem** and **Measurement traps learned on the device** — then
-> follow the reading order in `docs/README.md`.
+> first — especially **The Doze problem** (now settled) and **Measurement traps learned on the
+> device** — then follow the reading order in `docs/README.md`.
 >
-> Head is `2290e71`. 781 tests pass, `flutter analyze` is clean, both `--debug` and `--release`
-> build. **All five reviewers have run at the gate and every finding is fixed, so there is no review
-> work left.** One question is open and it is a device experiment.
+> All five reviewers have run at the gate and every finding is fixed. **The Doze question is
+> settled:** deep Doze blocks the warning even with a warm process, and the block is a JobScheduler
+> gate — `readyNotDozing: false` on `android_alarm_manager_plus`'s `JobIntentService` job, with the
+> alarm's own 10-second allowlist covering only the broadcast that enqueues it. Evidence in
+> `docs/testing/device-matrix.md`.
 >
-> **The warning does not arrive after a real night in Doze.** Three runs are recorded. AlarmManager
-> delivers the broadcast at exactly the armed second every time — that part works. What fails is
-> running Dart afterwards: overnight, the plugin's `AlarmService` was not created until 3h31m later,
-> when the phone was back in use. A third run *did* deliver correctly, but it was in **light** Doze
-> with a **warm** process, so it differs in two variables at once and settles nothing.
+> **Two things are open, and the first one gates the second.**
 >
-> **Your job is the experiment that separates those two variables: deep Doze with a warm process.**
-> If the warning arrives, the cause is the cold service start. If it does not, deep Doze itself
-> blocks it and the answer is un-deferring §9's scheduled server-side function — which is a design
-> change and needs an ADR, not a quiet edit. The handover lists three approaches, cheapest first;
-> `dumpsys battery unplug` + `deviceidle force-idle` lets you do this in minutes with USB connected,
-> so start there rather than burning another night.
+> 1. **One cheap experiment, ~10 minutes with the phone connected.** What is proven blocked is that
+>    plugin's job hop, *not* "Dart at alarm time" — `flutter_local_notifications` posts straight from
+>    its receiver with no job hop. Arm forced Doze a few minutes before the 12:00 / 18:00 / 21:00
+>    reminder and see whether it lands on time. Run this **before** anyone writes the ADR, because an
+>    ADR written now would rest on the unmeasured premise that nothing local can run in Doze.
+> 2. **Then the ADR on §9's scheduled server-side function** — the owner's decision, not a quiet
+>    edit. The options are wider than "go server-side": a delivery path that skips the job hop, or
+>    accepting the deferral and surfacing it in §13's health panel.
 >
-> The phone is connected and set up — but **`warnings_shown` already holds 2026-08-19, so a fresh run
-> will decide nothing until you clear it.** That exact mistake spoiled the first overnight run. Read
-> the traps section before touching the device: counting alarms out of `dumpsys alarm` and driving
-> the harness with `adb input tap` both produced confidently wrong answers this session, and the
-> notification `when=` field is the only honest answer to "when did it fire".
+> **Separately, there is an unfixed defect that is not about Doze at all.** After a warning alarm
+> fires while the app process is alive, the alarm isolate closes the UI's sqflite connection —
+> `DatabaseException(database_closed 1)` — and the UI's store stays dead for the life of the process.
+> Mechanism verified in `sqflite_android` 2.4.3's sources: the plugin keeps a **static**
+> single-instance map per process, so the second isolate is handed the *same* connection and
+> `warning_alarm_handler.dart`'s `finally { close(); }` closes it under the UI. `local_store.dart:56`
+> claims the opposite and is wrong. No test can see it — the suite runs one isolate. Decide the repair
+> deliberately; it lands on §4's isolate boundary.
 >
-> Three things to carry with you. First, **verify the measurement before you trust the result** — more
-> than one finding this session dissolved on inspection, and one reviewer's estimate was off by a
-> factor that mattered. Second, **six of the nine review rounds found a defect introduced by the
-> previous round's fix**, so read recent commits at least as harshly as old code. Third, this is the
-> watcher side, where a false claim to a family is the worst bug the app can have — prefer stopping to
-> ask over guessing, and if you think a finding is wrong, say so before acting on it rather than
-> after.
+> Three things to carry with you. **Verify the measurement before you trust the result** — this
+> session's `database_closed` finding was nearly written off as a mis-tap because the harness prints
+> its failures below the fold. **Read recent commits at least as harshly as old code.** And this is
+> the watcher side, where a false claim to a family is the worst bug the app can have — prefer
+> stopping to ask over guessing.
+>
+> Device state, alarms armed, and the traps that produced wrong answers before right ones are all in
+> the handover.

@@ -421,7 +421,28 @@ away period with what Firestore returned — *including overwriting it with noth
 > gone. Only a read that succeeded and returned nothing may clear the cache. Keying this on
 > connectivity instead would wipe a legitimate away on a transient error and warn falsely.
 
-**Then decide**, against a cache that is now either fresh or knowably stale:
+**Then decide** — **about every completed day this device has not settled, oldest first**
+([ADR-0009](decisions/0009-decide-about-every-completed-day.md)), against a cache that is now either
+fresh or knowably stale:
+
+> **This step asked about one day only until 2026-08-20, and that silently dropped missed days.**
+> `D` is computed from *when the isolate runs*, so a fire deferred past local midnight decided about
+> `D+1` and `D` was never asked about again — and the mechanism was not Doze: a phone in a drawer for
+> three days, a force-stop nobody undid until Thursday, a flat battery over a weekend and a multi-day
+> refused read all dropped days the same way. Silence is the one failure this app cannot detect in
+> itself, and this was that silence arrived at by arithmetic.
+>
+> The window is `(lastDecidedDay, D]`, floored at `activeFrom` and capped at **seven days** — the
+> same seven as the rolling alarm window below. In ordinary daily operation it is `{D}` alone, which
+> is the property that made it safe to change this path at all. `lastDecidedDay` advances only across
+> days that were actually **settled** — decided silent, already standing, or posted *and delivered* —
+> so a muted phone does not step over a day nobody was told about. A **refused** read advances it not
+> at all: ADR-0004 keeps access loss apart from claims about the watched person, so those days are
+> caught up once a successful read can say something about *her*.
+>
+> Catch-up posts only the outcomes that are claims about a **day**. `warnUnverifiableAway` is present
+> tense — a claim about this phone — so an older day with that outcome is neither posted nor settled,
+> and is decided again on evidence later.
 
 1. Compute `D` = the most recently **completed** calendar day in the watched person's timezone.
 2. If `link.status != "accepted"` → silent, **and cancel the warning alarm**. Nothing to say about

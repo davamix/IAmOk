@@ -534,6 +534,9 @@ The full set. Everything the app says out loud is here.
 | Read **refused** — the app has lost access ([ADR-0004](../architecture/decisions/0004-refused-is-not-unreachable.md)) | Watcher | *"Can't check on Mum — I Am Ok has lost access to the check-ins. Open the app to see what to do. Your phone last saw a check-in on Saturday 15 August."* |
 | …and no check-in has ever been seen | Watcher | *"Can't check on Mum — I Am Ok has lost access to the check-ins. Open the app to see what to do. Your phone has not seen a check-in yet."* |
 | …and an away period is cached for the day | Watcher | *"Can't check on Mum — I Am Ok has lost access to the check-ins. Open the app to see what to do. Mum was marked away until Saturday 22 August."* |
+| …and the day warned about is **not** yesterday ([ADR-0009](../architecture/decisions/0009-decide-about-every-completed-day.md)) | Watcher | *"No check-in from Mum on Friday 14 August."* |
+| …the offline variant of the same | Watcher | *"No check-in received from Mum on Friday 14 August — your phone has been offline since 22:10."* |
+| …the unverifiable-away variant of the same | Watcher | *"Can't check on Mum for Friday 14 August — your phone has been offline since Tuesday 10:14. Mum was marked away until Saturday 22 August."* |
 | Late check-in after a warning was shown | Watcher | *"Correction: Mum did check in yesterday, at 23:40."* Replaces the warning by id. |
 | …and the read carries no tap time | Watcher | *"Correction: Mum did check in yesterday."* Same id, same replacement. |
 | …and the day corrected is **not** yesterday | Watcher | *"Correction: Mum did check in on Saturday 15 August."* (with the time clause when Phase 4 supplies one) |
@@ -544,6 +547,26 @@ The full set. Everything the app says out loud is here.
 
 Away transitions happen a handful of times a year, so these can be ordinary notifications rather
 than silent ones — alarm fatigue is not a risk at that frequency.
+
+> **A warning names its day unless the day is yesterday**
+> ([ADR-0009](../architecture/decisions/0009-decide-about-every-completed-day.md)). `reconcile()`
+> now decides about **every** completed day it has not settled, not only the most recent — because
+> asking about one day only meant a fire deferred past midnight, a phone in a drawer for three days,
+> a force-stop nobody undid, or a flat battery over a weekend dropped every day in between, silently.
+> So a warning can be about a day that is not yesterday, and the word *yesterday* would then be a
+> false claim to a family in the message whose whole purpose is not to make one.
+>
+> The rule is the correction's, below, applied to the warning: *yesterday* for the day before the
+> **reader's** today, the written-out date for any other. One shared helper renders both, so a
+> warning and the correction that later replaces it at the same id cannot describe the same day
+> differently.
+>
+> Two consequences worth stating rather than discovering. **The unverifiable-away line takes its day
+> differently** — *"Can't check on Mum for Friday 14 August"* — because that message opens with a
+> claim about **this phone** and the opening has to survive a one-line truncation; the date goes
+> after the name rather than displacing it. And this **removes a falsehood that predates ADR-0009**:
+> a watcher several zones from the watched person could already be told *"yesterday"* about a
+> watched-local day that was not their yesterday. That message now dates itself.
 
 > **A correction names the day unless the day is yesterday.** The reconcile emits one for *every*
 > standing warning a read confirms, not only yesterday's, and a missed day stays in

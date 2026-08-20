@@ -37,7 +37,7 @@ class LocalStore {
   ///
   /// **v2** adds `reconcile_lock`; **v3** re-keys it by scope. See
   /// [acquireReconcileLock].
-  static const int schemaVersion = 3;
+  static const int schemaVersion = 4;
 
   static const String defaultDatabaseName = 'i_am_ok.db';
 
@@ -177,6 +177,25 @@ class LocalStore {
             case 3:
               await db.execute('DROP TABLE IF EXISTS reconcile_lock');
               await db.execute(_reconcileLockTable);
+            // ADR-0009. Additive, and **idempotent by inspection rather than by
+            // luck** — the rule the block above states and the reason it states
+            // it: `onDowngrade` accepts a newer file and rewrites its version
+            // down, leaving the newer schema in place, so v3 → v4 → roll back →
+            // re-install v4 replays this step against a table that already has
+            // the column. A bare ALTER TABLE would throw `duplicate column
+            // name`, `openDatabase` would throw with it, and `LocalStore.open()`
+            // is unguarded in both entry points — the app could not open its
+            // store at all and the only repair would be a reinstall, which
+            // destroys `warnings_shown`.
+            case 4:
+              final columns =
+                  await db.rawQuery('PRAGMA table_info(watcher_cache)');
+              final has = columns.any((c) => c['name'] == 'last_decided_day');
+              if (!has) {
+                await db.execute(
+                  'ALTER TABLE watcher_cache ADD COLUMN last_decided_day TEXT',
+                );
+              }
             default:
               throw StateError('no migration to v$v');
           }
@@ -282,7 +301,13 @@ class LocalStore {
       last_reconcile_at       INTEGER,
       access_lost_since       TEXT,
       access_lost_cause       TEXT,
-      access_lost_notified_on TEXT
+      access_lost_notified_on TEXT,
+      -- ADR-0009's catch-up pointer: the newest day this device has SETTLED,
+      -- which is not the same as the newest day it ran. See
+      -- `WatcherCache.lastDecidedDay`. Null on a fresh install, and null means
+      -- the window is `{D}` alone — no retro-warning about days nobody was
+      -- watching.
+      last_decided_day        TEXT
     )
     ''',
     // `warningsShownFor` — a map of day → WHICH warning is standing, not a set
@@ -734,6 +759,7 @@ class LocalStore {
       accessLostSince: _day(row['access_lost_since']),
       accessLostCause: _refusedCause(row['access_lost_cause']),
       accessLostNotifiedOn: _day(row['access_lost_notified_on']),
+      lastDecidedDay: _day(row['last_decided_day']),
     );
   }
 
@@ -757,6 +783,7 @@ class LocalStore {
             'access_lost_since': cache.accessLostSince?.toString(),
             'access_lost_cause': cache.accessLostCause?.name,
             'access_lost_notified_on': cache.accessLostNotifiedOn?.toString(),
+            'last_decided_day': cache.lastDecidedDay?.toString(),
           },
           conflictAlgorithm: ConflictAlgorithm.replace,
         );

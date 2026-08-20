@@ -83,6 +83,25 @@ abstract final class NotificationCopy {
   /// error, so it throws rather than returning something harmless. A silent
   /// decision that reached a notification is a bug that must not be smoothed
   /// over into a spurious warning.
+  ///
+  /// ## "Yesterday" is only true of one day, and this can be called about others
+  ///
+  /// ADR-0009 has `reconcile()` decide about **every** completed day it has not
+  /// settled, so a fire deferred past local midnight, a phone out of a drawer,
+  /// or a recovered multi-day refusal can post about a day that is not
+  /// yesterday. Three of these four bodies said *yesterday* unconditionally, and
+  /// posting one of them about an older day would be a false claim to a family
+  /// — in the message whose entire purpose is not to make one.
+  ///
+  /// The remedy is [correctionBody]'s, which met this first: the correction path
+  /// has always been able to fire for several days at once. `_when` is that
+  /// idiom, shared rather than copied, so the warning and the correction that
+  /// later retracts it cannot describe the same day differently.
+  ///
+  /// It also removes a falsehood that pre-dates ADR-0009. A watcher several
+  /// zones from the watched person could already be told *"yesterday"* about a
+  /// watched-local day that was not their yesterday; that message now dates
+  /// itself. The words got **more** true on a path where truth is the product.
   static String warningBody({
     required WarningOutcome outcome,
     required String watchedName,
@@ -107,11 +126,19 @@ abstract final class NotificationCopy {
             'silent has no message; a silent decision must not reach the '
             'notification layer',
           ),
-        WarningOutcome.warnOnline => 'No check-in from $watchedName yesterday.',
+        WarningOutcome.warnOnline =>
+          'No check-in from $watchedName ${_when(day, today)}.',
         WarningOutcome.warnOffline => 'No check-in received from $watchedName '
-            'yesterday — ${_offlineClause(unverifiedSince, watcherZone, today, uses24Hour)}',
+            '${_when(day, today)} — '
+            '${_offlineClause(unverifiedSince, watcherZone, today, uses24Hour)}',
+        // The one outcome that names no day when it is about yesterday, because
+        // it is a claim about THIS PHONE rather than about a missed day: "can't
+        // check" is present tense. It gains the day only when the day is not
+        // yesterday — otherwise two of these, posted for two days in the same
+        // catch-up, would arrive at two notification ids with identical text and
+        // no way for the reader to tell them apart.
         WarningOutcome.warnUnverifiableAway =>
-          'Can\'t check on $watchedName — '
+          'Can\'t check on $watchedName${_forDayClause(day, today)} — '
               '${_offlineClause(unverifiedSince, watcherZone, today, uses24Hour)} '
               '${_awayClause(watchedName, away)}',
         WarningOutcome.warnAccessLost => _accessLostBody(
@@ -120,6 +147,24 @@ abstract final class NotificationCopy {
             lastConfirmedDay: lastConfirmedDay,
           ),
       };
+
+  /// *"yesterday"*, or *"on Monday 10 August"* when it is not.
+  ///
+  /// [day] is a day in the **watched person's** zone and [today] is the
+  /// **watcher's** today, which is the reader's frame and therefore the right
+  /// one to judge "yesterday" against: the reader is the one the word has to be
+  /// true for. Shared by [warningBody] and [correctionBody] so a warning and the
+  /// correction that retracts it can never describe the same day differently.
+  static String _when(DayKey day, DayKey today) =>
+      day == today.previous ? 'yesterday' : 'on ${_date(day)}';
+
+  /// *""*, or *" for Monday 10 August"* when the day is not yesterday.
+  ///
+  /// The same judgement as [_when], for the one message that reads better with
+  /// no day at all in the ordinary case. Kept beside it so the two cannot drift
+  /// about which day counts as yesterday.
+  static String _forDayClause(DayKey day, DayKey today) =>
+      day == today.previous ? '' : ' for ${_date(day)}';
 
   /// *"your phone has been offline since 22:10."* — or the never-reconciled
   /// variant.
@@ -232,8 +277,11 @@ abstract final class NotificationCopy {
     required tz.Location watcherZone,
   }) {
     // "Yesterday" reads better and is what the approved string says, so it is
-    // kept for the one day it is true of.
-    final when = day == today.previous ? 'yesterday' : 'on ${_date(day)}';
+    // kept for the one day it is true of. Through [_when], which ADR-0009 made
+    // shared: the warning this retracts renders its day with the same call, and
+    // a correction that dated a day differently from the warning above it would
+    // be its own small confusion at the worst moment to have one.
+    final when = _when(day, today);
     return tappedAt == null
         ? 'Correction: $watchedName did check in $when.'
         : 'Correction: $watchedName did check in $when, '

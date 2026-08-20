@@ -250,10 +250,35 @@ void main() {
         accessLostSince: day('2026-08-10'),
         accessLostCause: RefusedCause.unauthenticated,
         accessLostNotifiedOn: day('2026-08-13'),
+        // ADR-0009's catch-up pointer. Deliberately a DIFFERENT day from
+        // `lastConfirmedDay` above: the two are both nullable DayKeys on the
+        // same row, and a fixture that gave them the same value would pass with
+        // the two columns swapped.
+        lastDecidedDay: day('2026-08-17'),
       );
 
       await store.saveWatcherCache('mum_ana', cache);
       expect(await store.watcherCache('mum_ana'), cache);
+    });
+
+    test('lastDecidedDay survives the round-trip on its own', () async {
+      // Named separately from the field-by-field test above because a null it
+      // never wrote would compare equal to a null it failed to read. This one
+      // asserts the value, not the equality.
+      await store.saveWatcherCache(
+        'mum_ana',
+        WatcherCache(lastDecidedDay: day('2026-08-17')),
+      );
+      expect(
+        (await store.watcherCache('mum_ana')).lastDecidedDay,
+        day('2026-08-17'),
+      );
+
+      // Null clears it: a cache written without one must not inherit the old
+      // value, or a device that reset would keep catching up on days it had
+      // already spoken about.
+      await store.saveWatcherCache('mum_ana', const WatcherCache.empty());
+      expect((await store.watcherCache('mum_ana')).lastDecidedDay, isNull);
     });
 
     test('lastReconcileAt keeps the TIME, not just the day', () async {

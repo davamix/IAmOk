@@ -547,6 +547,63 @@ void main() {
       );
     });
 
+    test('v4 adds last_decided_day, and the v1 row survives it', () async {
+      // ADR-0009's column. Additive, like every step in this ladder, so the row
+      // seeded at v1 must still be there with its warning intact.
+      final upgraded = await LocalStore.open(path: await seedV1());
+      addTearDown(upgraded.close);
+
+      final cache = await upgraded.watcherCache('mum_ana');
+      expect(cache.lastDecidedDay, isNull,
+          reason: 'an upgraded store has decided nothing yet, and null means '
+              'the window is {D} alone — no retro-warning about the days this '
+              'device was on an older build');
+      expect(cache.warningsShownFor,
+          {DayKey(2026, 8, 14): WarningOutcome.warnOnline});
+
+      // And it is writable, i.e. the column really is there rather than merely
+      // absent from a query that names its columns.
+      await upgraded.saveWatcherCache(
+        'mum_ana',
+        cache.withLastDecidedDay(DayKey(2026, 8, 16)),
+      );
+      expect((await upgraded.watcherCache('mum_ana')).lastDecidedDay,
+          DayKey(2026, 8, 16));
+    });
+
+    test('the v4 step is IDEMPOTENT, which the ladder requires of every step',
+        () async {
+      // The hazard `onDowngrade`'s comment spells out, made concrete: a store
+      // that already HAS the column but whose version says 3. That is what a
+      // rollback leaves behind — the newer schema in place, the version rewritten
+      // down — and a bare `ALTER TABLE … ADD COLUMN` throws `duplicate column
+      // name` against it. `openDatabase` throws with it, and `LocalStore.open()`
+      // is unguarded in both entry points, so the app could not open its store
+      // at all and the only repair would be a reinstall — destroying
+      // `warnings_shown`, the exact loss the whole block exists to prevent.
+      final path = await seedV1();
+
+      // Upgrade to current, so the column exists.
+      final current = await LocalStore.open(path: path);
+      await current.saveWatcherCache(
+        'mum_ana',
+        WatcherCache(lastDecidedDay: DayKey(2026, 8, 16)),
+      );
+      await current.close();
+
+      // Now rewrite the version down, exactly as onDowngrade does, leaving the
+      // v4 schema in place.
+      final rolledBack = await openDatabase(path, version: 3, onCreate: (_, _) async {});
+      await rolledBack.close();
+
+      // Re-open at the current version: the v4 step replays.
+      final replayed = await LocalStore.open(path: path);
+      addTearDown(replayed.close);
+      expect((await replayed.watcherCache('mum_ana')).lastDecidedDay,
+          DayKey(2026, 8, 16),
+          reason: 'the replay must be a no-op, not a throw and not a reset');
+    });
+
     test('v2 gets the scope-keyed lock, and both scopes work', () async {
       // The re-key is the whole content of this migration. v2 could hold one
       // lock for the entire app; v3 must let the watched and watcher sides hold

@@ -22,7 +22,14 @@ import '../support/zones.dart';
 /// asserted here rather than left to review, because it is the thing a
 /// well-meaning rewording would quietly break.
 void main() {
-  final d = day('2026-08-16');
+  // **`d` is `today.previous`, and that is not decoration.** `D` is the last
+  // COMPLETED day, so in the ordinary case it is the day before the reader's
+  // today — and since ADR-0009 the copy renders "yesterday" for exactly that day
+  // and dates every other one. This fixture said 2026-08-16 against a today of
+  // 2026-08-16, a pairing no punctual same-zone fire produces, and the group
+  // below asserting the approved openings was quietly exercising a cross-zone
+  // case instead of the ordinary one. The dated forms have their own group.
+  final d = day('2026-08-15');
   final since = at(madrid, 2026, 8, 11, 10, 14);
 
   String body(
@@ -282,6 +289,104 @@ void main() {
         ),
         'Correction: Mum did check in on Saturday 15 August.',
       );
+    });
+
+    group('ADR-0009 — a warning names its day when "yesterday" is false', () {
+      // The correction path met this first and solved it; the warning path had
+      // the same problem the moment ADR-0009 let a reconcile speak about a day
+      // that is not the last completed one. Same helper, same formatter, so a
+      // warning and the correction that later retracts it cannot describe the
+      // same day differently.
+
+      String warn(WarningOutcome outcome, DayKey on, DayKey todayIs) =>
+          NotificationCopy.warningBody(
+            outcome: outcome,
+            watchedName: 'Mum',
+            day: on,
+            away: outcome == WarningOutcome.warnUnverifiableAway
+                ? AwayPeriod(from: day('2026-08-14'), through: day('2026-08-22'))
+                : null,
+            unverifiedSince: outcome == WarningOutcome.warnOnline ? null : since,
+            lastConfirmedDay: null,
+            watcherZone: madrid,
+            uses24Hour: true,
+            today: todayIs,
+          );
+
+      test('the ordinary day still reads "yesterday" — the approved string', () {
+        expect(
+          warn(WarningOutcome.warnOnline, day('2026-08-16'), day('2026-08-17')),
+          'No check-in from Mum yesterday.',
+        );
+      });
+
+      test('an older day is dated, never called yesterday', () {
+        expect(
+          warn(WarningOutcome.warnOnline, day('2026-08-14'), day('2026-08-17')),
+          'No check-in from Mum on Friday 14 August.',
+        );
+      });
+
+      test('the offline variant dates its day and keeps its offline clause', () {
+        final body =
+            warn(WarningOutcome.warnOffline, day('2026-08-14'), day('2026-08-17'));
+        expect(body, startsWith('No check-in received from Mum on Friday 14 August —'));
+        expect(body, contains('your phone has been offline since'));
+      });
+
+      test('two caught-up days do not read identically', () {
+        expect(
+          warn(WarningOutcome.warnOnline, day('2026-08-14'), day('2026-08-17')),
+          isNot(warn(WarningOutcome.warnOnline, day('2026-08-15'), day('2026-08-17'))),
+        );
+      });
+
+      test('the unverifiable-away message keeps its opening either way', () {
+        // The collapsed shade shows one line, and the differentiator — a claim
+        // about US, not about her — has to survive in the first words whether or
+        // not the day is named.
+        for (final on in [day('2026-08-16'), day('2026-08-14')]) {
+          expect(
+            warn(WarningOutcome.warnUnverifiableAway, on, day('2026-08-17')),
+            startsWith("Can't check on Mum"),
+          );
+        }
+      });
+
+      test('it names no day for yesterday, and does for an older one', () {
+        expect(
+          warn(WarningOutcome.warnUnverifiableAway, day('2026-08-16'),
+              day('2026-08-17')),
+          startsWith("Can't check on Mum —"),
+        );
+        expect(
+          warn(WarningOutcome.warnUnverifiableAway, day('2026-08-14'),
+              day('2026-08-17')),
+          startsWith("Can't check on Mum for Friday 14 August —"),
+        );
+      });
+
+      test('a warning and the correction that retracts it agree on the day', () {
+        // Both go through `_when`. If they ever stopped, a family would read
+        // "No check-in from Mum on Friday 14 August" and then "Correction: Mum
+        // did check in yesterday" about the same day, at the same id.
+        const on = 'Friday 14 August';
+        expect(
+          warn(WarningOutcome.warnOnline, day('2026-08-14'), day('2026-08-17')),
+          contains(on),
+        );
+        expect(
+          NotificationCopy.correctionBody(
+            watchedName: 'Mum',
+            day: day('2026-08-14'),
+            today: day('2026-08-17'),
+            tappedAt: null,
+            watcherZone: madrid,
+            uses24Hour: true,
+          ),
+          contains(on),
+        );
+      });
     });
 
     test('two corrections in one pass do not read identically', () {

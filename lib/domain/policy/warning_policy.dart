@@ -168,7 +168,85 @@ abstract final class WarningPolicy {
   /// reconcile is ordinary for a phone in a pocket.
   static const int defaultStaleAwayAfterDays = 2;
 
+  /// How far back a reconcile may catch up on days it never decided about
+  /// ([ADR-0009][]).
+  ///
+  /// Seven, matching §10's seven-day rolling alarm window — the same number for
+  /// the same reason, which is that a week is as far back as this design ever
+  /// looks. It is a **cap on the burst**, not a target: a device that has been
+  /// unable to decide for a month must not wake up and post thirty
+  /// notifications on the one channel §1 is built to keep un-swipeable.
+  ///
+  /// Days older than this are dropped, knowingly. That is the residual ADR-0009
+  /// accepts, and it is a strictly smaller one than dropping every day but the
+  /// newest.
+  static const int defaultCatchUpDays = 7;
+
+  /// Every completed day this reconcile must decide about, **oldest first**.
+  ///
+  /// ADR-0009. Before it, the answer was always the single day
+  /// `lastCompletedDay(now)` — and a fire that ran late, a phone in a drawer,
+  /// or a force-stop nobody undid until Thursday therefore skipped every day in
+  /// between and skipped them **silently**, which is the one failure this app
+  /// cannot detect in itself.
+  ///
+  /// [lastDecidedDay] is the newest day this device has actually *settled* —
+  /// see [WatcherCache.lastDecidedDay] for what settled means and why it is not
+  /// simply "the last day we ran".
+  ///
+  /// Three properties this list always has, each load-bearing:
+  ///
+  /// - **It always ends at `D`.** Everything downstream that keys on "the
+  ///   decision about the current day" — the access-lost cadence, the watcher
+  ///   row, the alarm window — is unchanged by this function existing.
+  /// - **It is `{D}` alone in ordinary operation**, because yesterday's run
+  ///   settled `D - 1`. The common case is provably identical to the behaviour
+  ///   this replaced, which is what makes it safe to land on the warning path.
+  /// - **It is `{D}` alone on a first reconcile**, when [lastDecidedDay] is
+  ///   null. A fresh install does not retro-warn about days it was not watching.
+  ///
+  /// [ADR-0009]: ../../../docs/architecture/decisions/0009-decide-about-every-completed-day.md
+  /// [WatcherCache.lastDecidedDay]: ../reconcile/watcher_cache.dart
+  static List<DayKey> daysToDecide({
+    required DateTime now,
+    required tz.Location watchedZone,
+    required DayKey activeFrom,
+    required DayKey? lastDecidedDay,
+    int catchUpDays = defaultCatchUpDays,
+  }) {
+    final d = lastCompletedDay(now, watchedZone);
+
+    var start = lastDecidedDay == null ? d : lastDecidedDay.next;
+
+    // Never before the link existed (§7). Easy to omit, and its own §17 risk —
+    // `decideFor` guards it per day as well, and both guards are deliberate:
+    // this one keeps the list short, that one keeps the answer right.
+    if (start < activeFrom) start = activeFrom;
+
+    // The burst cap.
+    final floor = d.minusDays(catchUpDays - 1);
+    if (start < floor) start = floor;
+
+    // `lastDecidedDay >= d` on every reconcile after the first of the day, and
+    // on a device whose clock moved backwards. Both must still produce a
+    // decision about `D`: reconcile() is idempotent by design and the second run
+    // of the day is the normal case, not an edge one.
+    if (start > d) start = d;
+
+    final days = <DayKey>[];
+    for (var day = start; day <= d; day = day.next) {
+      days.add(day);
+    }
+    return days;
+  }
+
   /// Decides for the most recently completed day in [watchedZone] as of [now].
+  ///
+  /// A thin delegation to [decideFor], which is where the reasoning lives. The
+  /// split exists because ADR-0009 needs to ask the same six ordered steps about
+  /// a day that is **not** the current one, and two copies of this body would be
+  /// two chances to get the ordering wrong — the ordering being the whole of
+  /// ADR-0001 and ADR-0004.
   ///
   /// [away] and the three cache values must already have been refreshed by a
   /// successful read; passing raw cache values here re-introduces exactly the
@@ -193,12 +271,48 @@ abstract final class WarningPolicy {
     required DateTime? lastReconcileAt,
     required Verification verification,
     int staleAwayAfterDays = defaultStaleAwayAfterDays,
+  }) =>
+      decideFor(
+        // Step 1. D = the most recently completed day in the WATCHED person's
+        // zone. The alarm fires at watcher-local time; the question is about
+        // watched-local days, which is why a watcher abroad is never woken at
+        // 03:00 (§11).
+        day: lastCompletedDay(now, watchedZone),
+        now: now,
+        watchedZone: watchedZone,
+        away: away,
+        linkAccepted: linkAccepted,
+        activeFrom: activeFrom,
+        lastConfirmedDay: lastConfirmedDay,
+        lastReconcileAt: lastReconcileAt,
+        verification: verification,
+        staleAwayAfterDays: staleAwayAfterDays,
+      );
+
+  /// Decides about **[day] specifically**, which may be older than `D`.
+  ///
+  /// ADR-0009's entry point. [now] is still required and is still a real input:
+  /// it is what the away staleness bound is measured against — *how stale is my
+  /// cache right now* — which is a question about the present whatever day is
+  /// being decided about.
+  ///
+  /// Everything else here is [decide], unchanged. The six ordered steps, their
+  /// precedence, and every argument for that precedence are untouched by
+  /// ADR-0009: it changes *which days the policy is asked about* and nothing
+  /// about what it answers.
+  static WarningDecision decideFor({
+    required DayKey day,
+    required DateTime now,
+    required tz.Location watchedZone,
+    required AwayPeriod? away,
+    required bool linkAccepted,
+    required DayKey activeFrom,
+    required DayKey? lastConfirmedDay,
+    required DateTime? lastReconcileAt,
+    required Verification verification,
+    int staleAwayAfterDays = defaultStaleAwayAfterDays,
   }) {
-    // Step 1. D = the most recently completed day in the WATCHED person's zone.
-    // The alarm fires at watcher-local time; the question is about watched-local
-    // days, which is why a watcher abroad is never woken at 03:00 (§11).
     final today = DayKey.fromInstant(now, watchedZone);
-    final day = lastCompletedDay(now, watchedZone);
 
     // Step 2. A revoked link says nothing at all, before any other reasoning
     // (§10 step 2, ADR-0004). See SilenceReason.linkRevoked for why the

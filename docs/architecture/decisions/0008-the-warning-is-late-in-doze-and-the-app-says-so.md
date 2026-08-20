@@ -103,6 +103,15 @@ standing property, and report staleness after the fact.
 
 **4. A deferral that crosses midnight silently DROPS a missed day. This is the sharp edge.**
 
+> **MEASURED and FIXED, 2026-08-20 —
+> [ADR-0009](0009-decide-about-every-completed-day.md).** It was real, and it was **wider than this
+> consequence states**: `reconcile()` asked about exactly one day however long it had been since the
+> previous run, so a phone in a drawer, a force-stop, a flat battery and a multi-day refused read
+> dropped days with no Doze involved at all. That is why the fix is not "carry the armed day on the
+> alarm" — after a force-stop there is no alarm left to carry anything. `reconcile()` now decides
+> about every completed day it has not settled, bounded at seven. The paragraphs below are kept as
+> the derivation that turned out to be right about the mechanism and too narrow about its reach.
+
 Derived from the code, not yet measured on device, and flagged here because it is the one
 consequence that is worse than lateness:
 
@@ -122,6 +131,10 @@ This needs a 14-hour untouched phone from a 10:00 alarm, so it is not the common
 reachable by a watcher who leaves the phone in a drawer for a day. **It is not mitigated by this
 ADR** and should be measured with the harness's forced-date control before Phase 4 relies on the
 current behaviour.
+
+> That last sentence was overtaken. It was measured in `flutter test`, not on the device, for the
+> reason `docs/testing/strategy.md` gives: a question about *logic* that needs a device to answer it
+> is logic in the wrong layer. The device had already contributed the only part it could.
 
 **5. This is reversible and cheap to revisit.** No data-model change, no migration, no one-way door
 (§16). Nothing here forecloses either alternative.
@@ -182,5 +195,10 @@ So the alternatives stay open, and neither is now a leap:
   *verify before speaking* design rests on, and with the constraint that **it must use high-priority
   FCM** or it inherits the very defect it was reached for.
 
-The status above is marked **provisional** for that reason: this ADR records what the app does today
-and what it may not claim, not a final answer about where the warning should come from.
+So this ADR records what the app does today and what it may not claim — **not** a final answer about
+where the warning should come from. That answer is owed at the *Revisit trigger* above.
+
+> **The line here used to read "the status above is marked provisional for that reason", and it had
+> been false since the owner chose option 3.** The header says **Accepted**, with a named Phase 4
+> trigger, which is the whole point of that decision: a holding position with no trigger is how one
+> quietly becomes permanent. Corrected on entering Phase 4, when the trigger came due.

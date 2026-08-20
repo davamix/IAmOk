@@ -376,6 +376,13 @@ class _DebugHarnessScreenState extends ConsumerState<DebugHarnessScreen> {
                   ..writeln('  about day  ${person.decision.day}')
                   ..writeln('  silence    ${person.decision.silenceReason?.name ?? '-'}')
                   ..writeln('  confirmed  ${person.cache.lastConfirmedDay ?? '-'}')
+                  // ADR-0009's catch-up pointer. On the device this is the one
+                  // value that says whether a gap is about to be caught up on,
+                  // and it is not derivable from anything else on this panel:
+                  // `standing` only holds days something was actually SAID
+                  // about, so a day left unsettled looks identical to a day that
+                  // never existed.
+                  ..writeln('  decided    ${person.cache.lastDecidedDay ?? '-'}')
                   ..writeln('  standing   ${person.cache.warningsShownFor}')
                   ..writeln('  lostAccess ${person.cache.accessLostSince ?? '-'}'
                       ' ${person.cache.accessLostCause?.name ?? ''}');

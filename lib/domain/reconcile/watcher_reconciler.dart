@@ -72,6 +72,7 @@ class WatcherReconcileResult {
     required this.cache,
     required this.decision,
     required this.shouldNotify,
+    this.catchUpWarnings = const [],
     required this.corrections,
     required this.shouldPostCorrections,
     required this.watchedZoneUnknown,
@@ -98,6 +99,30 @@ class WatcherReconcileResult {
   /// entry point calls reconcile, so a warning already standing must not fire
   /// again on app open or on boot.
   final bool shouldNotify;
+
+  /// Warnings owed for days **older than `D`**, oldest first — ADR-0009.
+  ///
+  /// Empty on every ordinary reconcile, because the ordinary window is `{D}`
+  /// alone. It fills only when this device could not decide for a day or more:
+  /// a fire deferred past local midnight, a phone in a drawer, a force-stop
+  /// nobody undid, a flat battery, or the days after a multi-day refused read.
+  ///
+  /// **Disjoint from [shouldNotify] by construction**, and that is what keeps
+  /// this from being a second copy of the same decision: [shouldNotify] is
+  /// about `D` and every entry here is strictly older than `D`. The caller posts
+  /// both — same channel, same treatment, one notification per day, each at its
+  /// own id because [AlarmIds] keys them by `(link, day)`.
+  ///
+  /// Already delivery-filtered, exactly as [shouldNotify] is: an entry here is a
+  /// warning that is owed **and** that the platform can actually post. Days that
+  /// could not be delivered are not here and are not marked settled either, so
+  /// the next reconcile finds them still owed.
+  ///
+  /// The copy for these must name the day. Three of the four warning bodies said
+  /// *yesterday*, and posting one of those about an older day would be a false
+  /// claim to a family in the message whose whole purpose is not to make one —
+  /// see [NotificationCopy.warningBody].
+  final List<WarningDecision> catchUpWarnings;
 
   /// Standing warnings a late check-in has disproved. The notification is
   /// **replaced** by the correction message — or, when
@@ -403,17 +428,45 @@ abstract final class WatcherReconciler {
     }
 
     // 3. Decide, against a cache that is now either fresh or knowably stale.
-    final decision = WarningPolicy.decide(
-      now: now,
-      watchedZone: watchedZone,
-      away: next.away,
-      linkAccepted: link.isAccepted,
-      activeFrom: link.activeFrom,
-      lastConfirmedDay: next.lastConfirmedDay,
-      lastReconcileAt: next.lastReconcileAt,
-      verification: read.verification,
-      staleAwayAfterDays: staleAwayAfterDays,
-    );
+    //
+    // **Every completed day this device has not settled, oldest first**
+    // (ADR-0009), not only the most recent one. In ordinary daily operation
+    // that list is `{D}` and this is exactly the single call it replaced —
+    // which is the property that made it safe to change the warning path at
+    // all. It grows only when a day or more went by with nothing decided.
+    //
+    // The whole list is computed here, before any of the branches below mutate
+    // `next`, so every day is decided against the same post-read snapshot. A
+    // day decided against a cache another day's recording had already moved
+    // would be deciding about `D - 2` using what we just concluded about
+    // `D - 1`, which is not what any of the six steps mean.
+    final refreshed = next;
+    final decisions = [
+      for (final day in WarningPolicy.daysToDecide(
+        now: now,
+        watchedZone: watchedZone,
+        activeFrom: link.activeFrom,
+        lastDecidedDay: refreshed.lastDecidedDay,
+      ))
+        WarningPolicy.decideFor(
+          day: day,
+          now: now,
+          watchedZone: watchedZone,
+          away: refreshed.away,
+          linkAccepted: link.isAccepted,
+          activeFrom: link.activeFrom,
+          lastConfirmedDay: refreshed.lastConfirmedDay,
+          lastReconcileAt: refreshed.lastReconcileAt,
+          verification: read.verification,
+          staleAwayAfterDays: staleAwayAfterDays,
+        ),
+    ];
+
+    // `daysToDecide` always ends at `D`, so this is always the decision about
+    // the current day — which is what every surface below keys on: the
+    // access-lost cadence, the watcher row, the withdrawal branch. Nothing that
+    // read `decision` before ADR-0009 reads a different thing now.
+    final decision = decisions.last;
 
     // Access loss is tracked apart from warningsShownFor, which is reserved for
     // claims about the watched person (ADR-0004). Two consequences, both
@@ -430,6 +483,7 @@ abstract final class WatcherReconciler {
     // found no check-in — the family left reading a hedge the device has since
     // resolved.
     final withdrawn = <DayKey>[];
+    final catchUp = <WarningDecision>[];
     final bool shouldNotify;
 
     // A standing access-lost notice must be cancelled the moment it stops being
@@ -462,6 +516,10 @@ abstract final class WatcherReconciler {
       withdrawn.addAll(next.warnedDays);
       cancelAccessLostNotice = hadStandingAccessNotice;
       next = next.withWarningsWithdrawn().withAccessRestored();
+      // Every day in the window is settled: a revoked link says nothing at all
+      // about any of them, and revocation is final (ADR-0004 decision 7), so
+      // there is nothing for a later catch-up to come back for.
+      next = next.withLastDecidedDay(decision.day);
     } else if (read is ReadRefused) {
       // Keyed on the READ, not on the decision. §13's health item is defined as
       // "the last reconcile was refused" — a fact about the read — so a refusal
@@ -532,19 +590,70 @@ abstract final class WatcherReconciler {
         next = next.withAccessLostNotifiedOn(decision.day);
       }
     } else {
-      final standing = next.warningsShownFor[decision.day];
-      final owed = decision.isWarning &&
-          (standing == null || _supersedes(decision.outcome, standing));
+      // One pass over every day this reconcile is deciding about, oldest first
+      // (ADR-0009). With the ordinary `{D}` window this is the single-day code
+      // it replaced, unrolled once.
+      var postForToday = false;
 
-      shouldNotify = owed && delivery.warning.postsNotification;
+      // ADR-0009's pointer only ever crosses a CONTIGUOUS run of settled days.
+      // Stepping over an unsettled one would drop it exactly as the old
+      // single-day window dropped everything below `D` — the same defect,
+      // reintroduced through the field written to fix it.
+      var settledThrough = next.lastDecidedDay;
+      var stillContiguous = true;
 
-      // Only record what is actually on screen. When the new message does not
-      // supersede, the old one is still the one showing — and when nothing
-      // could be posted at all, nothing is standing, so the next reconcile of
-      // the same day must find the warning still owed rather than served.
-      if (owed && delivery.warning.consumesReminder) {
-        next = next.withWarningShownFor(decision.day, decision.outcome);
+      for (final each in decisions) {
+        final isToday = each.day == decision.day;
+        final standing = next.warningsShownFor[each.day];
+        final owed = each.isWarning &&
+            (isToday || _namesTheDay(each.outcome)) &&
+            (standing == null || _supersedes(each.outcome, standing));
+
+        final post = owed && delivery.warning.postsNotification;
+
+        // Only record what is actually on screen. When the new message does not
+        // supersede, the old one is still the one showing — and when nothing
+        // could be posted at all, nothing is standing, so the next reconcile of
+        // the same day must find the warning still owed rather than served.
+        final recorded = owed && delivery.warning.consumesReminder;
+        if (recorded) {
+          next = next.withWarningShownFor(each.day, each.outcome);
+        }
+
+        if (post) {
+          if (each.day == decision.day) {
+            postForToday = true;
+          } else {
+            catchUp.add(each);
+          }
+        }
+
+        // Settled: nothing was owed (silent, or a warning already stands), or
+        // what was owed actually reached someone. Two cases must NOT settle,
+        // and they are different failures:
+        //
+        //   `owed && !recorded` — the muted phone, NotificationDelivery
+        //   .unavailable. Nothing reached anyone, so the day is still owed.
+        //
+        //   an old day whose warning does not name a day — a
+        //   `warnUnverifiableAway` we declined to post above. Nothing was said
+        //   about that day at all, so settling it would drop it exactly as the
+        //   old single-day window did. Leaving it unsettled is what gets it
+        //   decided again once a successful read can say something about HER:
+        //   silent if the away really did cover it, warned if the away had been
+        //   cancelled and she was expected to tap.
+        final settled =
+            each.isWarning ? recorded || (!owed && standing != null) : true;
+        if (!settled) stillContiguous = false;
+        if (stillContiguous && settled) settledThrough = each.day;
       }
+
+      shouldNotify = postForToday;
+
+      if (settledThrough != null) {
+        next = next.withLastDecidedDay(settledThrough);
+      }
+
       if (read is ReadSucceeded) {
         cancelAccessLostNotice = hadStandingAccessNotice;
         next = next.withAccessRestored();
@@ -566,6 +675,7 @@ abstract final class WatcherReconciler {
       cache: next,
       decision: decision,
       shouldNotify: shouldNotify,
+      catchUpWarnings: catchUp,
       corrections: corrections,
       shouldPostCorrections: delivery.warning.postsNotification,
       watchedZoneUnknown: link.tryWatchedZone == null,
@@ -577,6 +687,33 @@ abstract final class WatcherReconciler {
       warningsToCancel: currentlyScheduled.difference(desired),
     );
   }
+
+  /// Whether this outcome is a claim about **one particular day**, and can
+  /// therefore be posted for a day that is not today (ADR-0009).
+  ///
+  /// [WarningOutcome.warnOnline] and [WarningOutcome.warnOffline] name a day
+  /// nobody checked in — one message per missed day is one fact per message, and
+  /// the copy dates each one.
+  ///
+  /// [WarningOutcome.warnUnverifiableAway] is not that. It is present tense —
+  /// *this phone cannot check, and she was marked away until Saturday* — a claim
+  /// about the cache's staleness right now rather than about any day. Caught up
+  /// across a six-day gap it would post six notifications differing only in a
+  /// date that is not what any of them is actually about, on the one channel §1
+  /// is built to keep un-swipeable. A test caught that before this shipped.
+  ///
+  /// So an older day with that outcome is not posted **and is not settled**: the
+  /// day was never spoken about, and the pointer stops below it. Once a read
+  /// succeeds, that day is decided again on evidence rather than on a stale
+  /// cache — silent if the away really covered it, warned if the away had been
+  /// cancelled and she was expected to tap.
+  ///
+  /// [WarningOutcome.warnAccessLost] cannot reach here — the refused branch
+  /// above owns it, has its own decaying cadence, and deliberately advances no
+  /// pointer.
+  static bool _namesTheDay(WarningOutcome outcome) =>
+      outcome == WarningOutcome.warnOnline ||
+      outcome == WarningOutcome.warnOffline;
 
   /// Whether [next] is a claim worth replacing [standing] with.
   ///

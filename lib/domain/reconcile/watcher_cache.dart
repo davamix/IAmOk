@@ -20,6 +20,7 @@ class WatcherCache {
     this.accessLostSince,
     this.accessLostCause,
     this.accessLostNotifiedOn,
+    this.lastDecidedDay,
   });
 
   const WatcherCache.empty()
@@ -29,7 +30,8 @@ class WatcherCache {
         lastReconcileAt = null,
         accessLostSince = null,
         accessLostCause = null,
-        accessLostNotifiedOn = null;
+        accessLostNotifiedOn = null,
+        lastDecidedDay = null;
 
   /// The away period as last successfully read. Cached per link even though
   /// away is global to the watched person, because §6 stores it that way.
@@ -57,6 +59,46 @@ class WatcherCache {
   /// correction handler later retract a message that never claimed anything
   /// about her. Access failures live in [accessLostSince] instead.
   final Map<DayKey, WarningOutcome> warningsShownFor;
+
+  /// The newest completed day this device has actually **settled** — ADR-0009's
+  /// catch-up pointer, and the answer to *which days must still be decided
+  /// about*.
+  ///
+  /// Before it existed, `reconcile()` asked about exactly one day, the last
+  /// completed one, however long it had been since the previous run. A fire
+  /// deferred past local midnight, a phone in a drawer for three days, a
+  /// force-stop nobody undid until Thursday, a flat battery over a weekend — all
+  /// of them skipped every day in between, and skipped them **silently**, which
+  /// is the one failure this app cannot detect in itself.
+  ///
+  /// ## Settled is not "the last day we ran", and the difference is the whole
+  /// point
+  ///
+  /// A day is settled when it was decided **silent**, or a warning for it is
+  /// already standing, or a warning was owed and was **recorded as delivered**.
+  /// A day whose warning was owed but reached nobody — `POST_NOTIFICATIONS`
+  /// revoked, [NotificationDelivery.unavailable] — is *not* settled, and this
+  /// pointer stops below it rather than stepping over it.
+  ///
+  /// That is the rule [NotificationDelivery] already enforces for the
+  /// access-lost cadence — *record what was delivered, not what was decided* —
+  /// applied here, because the alternative reintroduces the identical defect
+  /// through a new field: a muted phone would advance the pointer daily and the
+  /// days would be dropped exactly as before.
+  ///
+  /// The reconciler therefore only ever advances it across a **contiguous** run
+  /// of settled days. A hole cannot be jumped.
+  ///
+  /// ## A refused read does not advance it
+  ///
+  /// ADR-0004 keeps access loss apart from claims about the watched person, so
+  /// days spent refused were never decided about *her*. When access returns the
+  /// window catches up on them: days she tapped are settled by the evidence the
+  /// recovered read carries, and days she genuinely missed are warned about.
+  ///
+  /// **Null means never decided**, and the window is then `{D}` alone — a fresh
+  /// install does not retro-warn about days it was not watching.
+  final DayKey? lastDecidedDay;
 
   /// When tier 1 was last read **successfully**.
   ///
@@ -111,6 +153,13 @@ class WatcherCache {
       accessLostSince: accessLostSince ?? day,
       accessLostCause: cause,
       accessLostNotifiedOn: accessLostNotifiedOn,
+      // Carried. **Every one of the four places in this class that rebuilds the
+      // whole value has to name every field**, and this one and
+      // [withAccessRestored] both dropped ADR-0009's pointer when it was added —
+      // caught by a test, not by review. Dropping it resets the catch-up window
+      // to "first run", which silently un-owes every day the outage covered. A
+      // test now pins all four.
+      lastDecidedDay: lastDecidedDay,
     );
   }
 
@@ -135,6 +184,7 @@ class WatcherCache {
       lastConfirmedDay: lastConfirmedDay,
       warningsShownFor: warningsShownFor,
       lastReconcileAt: lastReconcileAt,
+      lastDecidedDay: lastDecidedDay,
     );
   }
 
@@ -172,6 +222,13 @@ class WatcherCache {
       lastConfirmedDay: confirmed,
       warningsShownFor: warningsShownFor,
       lastReconcileAt: at,
+      // Carried, not cleared. This constructor rebuilds the whole value so it
+      // can drop the access-lost fields — a successful read is proof access is
+      // back — and ADR-0009's pointer is not part of that state. Resetting it
+      // here would make every successful read forget which days are still owed,
+      // which is the defect ADR-0009 exists to fix, arriving through the one
+      // path that runs on every reconcile.
+      lastDecidedDay: lastDecidedDay,
     );
   }
 
@@ -220,6 +277,7 @@ class WatcherCache {
     DayKey? accessLostSince,
     RefusedCause? accessLostCause,
     DayKey? accessLostNotifiedOn,
+    DayKey? lastDecidedDay,
   }) =>
       WatcherCache(
         away: away ?? this.away,
@@ -229,7 +287,21 @@ class WatcherCache {
         accessLostSince: accessLostSince ?? this.accessLostSince,
         accessLostCause: accessLostCause ?? this.accessLostCause,
         accessLostNotifiedOn: accessLostNotifiedOn ?? this.accessLostNotifiedOn,
+        lastDecidedDay: lastDecidedDay ?? this.lastDecidedDay,
       );
+
+  /// Advances ADR-0009's catch-up pointer to [day].
+  ///
+  /// **Monotonic, deliberately.** A device whose clock moved backwards — §3
+  /// lists a clock change among the seven cases `reconcile()` collapses, and
+  /// §11 says skew is surfaced rather than silently trusted — would otherwise
+  /// walk the pointer back and re-warn about days already settled. Re-posting a
+  /// warning a family has already read and acted on is a small version of the
+  /// worst thing this app can do.
+  WatcherCache withLastDecidedDay(DayKey day) {
+    if (lastDecidedDay != null && day <= lastDecidedDay!) return this;
+    return copyWith(lastDecidedDay: day);
+  }
 
   WatcherCache clearAway() => WatcherCache(
         lastConfirmedDay: lastConfirmedDay,
@@ -238,6 +310,7 @@ class WatcherCache {
         accessLostSince: accessLostSince,
         accessLostCause: accessLostCause,
         accessLostNotifiedOn: accessLostNotifiedOn,
+        lastDecidedDay: lastDecidedDay,
       );
 
   @override
@@ -249,6 +322,7 @@ class WatcherCache {
       other.accessLostSince == accessLostSince &&
       other.accessLostCause == accessLostCause &&
       other.accessLostNotifiedOn == accessLostNotifiedOn &&
+      other.lastDecidedDay == lastDecidedDay &&
       _sameWarnings(other.warningsShownFor, warningsShownFor);
 
   @override
@@ -259,6 +333,7 @@ class WatcherCache {
         accessLostSince,
         accessLostCause,
         accessLostNotifiedOn,
+        lastDecidedDay,
         Object.hashAllUnordered(
           warningsShownFor.entries.map((e) => Object.hash(e.key, e.value)),
         ),
@@ -273,6 +348,7 @@ class WatcherCache {
 
   @override
   String toString() => 'WatcherCache(away: $away, confirmed: $lastConfirmedDay, '
-      'warnings: $warningsShownFor, reconciled: $lastReconcileAt'
+      'warnings: $warningsShownFor, reconciled: $lastReconcileAt, '
+      'decided: $lastDecidedDay'
       '${hasLostAccess ? ', accessLost: $accessLostSince/${accessLostCause?.name}' : ''})';
 }

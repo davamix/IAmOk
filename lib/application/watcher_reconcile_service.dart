@@ -498,29 +498,49 @@ class WatcherReconcileService {
       await notifications.cancelAccessLost(link.id);
     }
 
-    // 4. The warning itself, if one is owed AND the platform can post it.
-    //    `shouldNotify` already folds in the delivery state; re-deciding here
-    //    would be a second opinion about a question the domain answered.
-    if (result.shouldNotify) {
+    // 4. The warnings — the one for today if it is owed, and the days ADR-0009
+    //    caught up on, **oldest first**.
+    //
+    //    `shouldNotify` and `catchUpWarnings` already fold in the delivery
+    //    state; re-deciding here would be a second opinion about a question the
+    //    domain answered. They are disjoint by construction — `shouldNotify` is
+    //    about `D`, every catch-up entry is strictly older — so this posts each
+    //    day exactly once, at its own notification id.
+    //
+    //    Oldest first so the newest sits at the top of the shade, which is where
+    //    a reader looks first and is the day most likely to still be actionable.
+    for (final decision in [
+      ...result.catchUpWarnings,
+      if (result.shouldNotify) result.decision,
+    ]) {
       final body = NotificationCopy.warningBody(
-        outcome: result.decision.outcome,
+        outcome: decision.outcome,
         watchedName: link.watchedName,
-        day: result.decision.day,
-        away: result.decision.away,
-        unverifiedSince: result.decision.unverifiedSince,
-        lastConfirmedDay: result.decision.lastConfirmedDay,
+        day: decision.day,
+        away: decision.away,
+        unverifiedSince: decision.unverifiedSince,
+        lastConfirmedDay: decision.lastConfirmedDay,
+        // The reader's today, which is what decides whether the body may say
+        // "yesterday" — see [NotificationCopy.warningBody]. A catch-up day never
+        // may, and that is the whole reason the copy changed.
         today: DayKey.fromInstant(now, watcherZone),
         uses24Hour: uses24Hour,
         watcherZone: watcherZone,
       );
-      if (result.decision.outcome == WarningOutcome.warnAccessLost) {
+      if (decision.outcome == WarningOutcome.warnAccessLost) {
         // A different channel, deliberately: a watcher who mutes app faults must
         // still hear about a missed day (ADR-0004).
+        //
+        // Only ever reached for `D`. Access loss is a fact about the READ, and
+        // the refused branch of the reconciler never fills `catchUpWarnings` —
+        // it does not even advance ADR-0009's pointer, so the days spent refused
+        // are caught up on later, once a successful read can say something about
+        // her rather than about us.
         await notifications.showAccessLost(linkId: link.id, body: body);
       } else {
         await notifications.showWarning(
           linkId: link.id,
-          day: result.decision.day,
+          day: decision.day,
           body: body,
         );
       }

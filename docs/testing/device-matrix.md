@@ -287,12 +287,41 @@ in [phase-3-summary.md](../phases/phase-3-summary.md).
       the plugin's `RebootBroadcastReceiver` from its own record: `last_reconcile_at` was unchanged
       afterwards, so **a reboot restores what was armed, not what should be** — only a reconcile
       repairs a divergence.
-- [ ] **Two isolates contend for the reconcile lease and only one changes the alarm set** —
-      [ADR-0006](../architecture/decisions/0006-reconcile-is-serialised-on-disk.md). Asserted in
-      `test/data/local_store_lock_test.dart` across two connections to one file, but that runs on
-      `sqflite_common_ffi`'s **desktop** SQLite; whether Android's honours `BEGIN EXCLUSIVE` the same
-      way between two isolates is the same API-level gap that hid the UPSERT defect. Fire the alarm
-      while the app is open in the foreground and confirm the store and `dumpsys` still agree.
+- [x] **The alarm isolate reconciles while the UI is live, and the store and the platform still
+      agree** — 2026-08-20 16:01–16:09, app in the **foreground** throughout, pid 19814.
+      [ADR-0006](../architecture/decisions/0006-reconcile-is-serialised-on-disk.md).
+
+      Three alarm fires with the UI open (16:01:04, 16:05:04, 16:08:00), one with two UI reconciles
+      issued into the same second, and one with **20 back-to-back UI reconciles**. Afterwards:
+
+      | | |
+      |---|---|
+      | Platform (`dumpsys alarm`, receiver-tag rule) | **12** warning alarms |
+      | Store (`pending_alarms`) | **12** rows |
+      | The two sets | **identical**, instant for instant |
+      | `PRAGMA integrity_check` | ok |
+      | `reconcile_lock` | released, no orphaned lease |
+      | Exceptions in logcat | **none** — no `DatabaseException`, no nested-transaction error, no `database_closed` |
+      | Duplicate notifications | none |
+
+      **What this does NOT establish, stated plainly because the distinction is the whole point of
+      the entry.** Concurrency was *induced*, not *proven*: nothing here demonstrates that two
+      reconciles were ever inside the lease window simultaneously, and the mechanism cannot be
+      observed from outside — a refused lease is caught by `acquireReconcileLock`'s
+      `on DatabaseException` arm and returns `false` silently, and the lease row is deleted by the
+      `finally`. So this is evidence of **absence of harm** under a live UI, not evidence that the
+      exclusion fired.
+
+      The prediction that remains untested on device, recorded so the next attempt can falsify it:
+      with one shared connection each isolate holds its own Dart-side transaction lock, so a second
+      `BEGIN EXCLUSIVE` should fail as a *nested* transaction rather than block on SQLite's
+      cross-connection lock. Same outcome, different mechanism from the one ADR-0006 and
+      `local_store_lock_test.dart` describe.
+
+      Also observed, and worth knowing before timing another attempt: delivery on this device is
+      **not reliably on the armed second when the app is in the foreground** — 16:01 and 16:05 both
+      landed at **+4.5 s**, while every backgrounded fire earlier in the session (15:33–15:55) landed
+      on the second. Two attempts at forcing an overlap missed for that reason.
 - [x] **Tapping the *lost access* notification opens the watcher surface from a cold start**,
       2026-08-18 — process dead, tapped from the shade, app cold-started and opened the list with the
       right person's row highlighted and the cause-specific remediation showing.

@@ -23,16 +23,40 @@ import 'package:test/test.dart';
 /// lock tested on one connection asserts nothing at all — it would pass against
 /// an implementation that ignored SQLite completely and kept a bool in memory.
 ///
-/// So every test here opens **two real `LocalStore`s on one real file**, which
-/// is the closest a desktop test can get to the shape of two isolates.
+/// So every test here opens **two real `LocalStore`s on one real file**.
+///
+/// ## That is NOT the shape the device has — measured 2026-08-20
+///
+/// This used to claim two connections were "the closest a desktop test can get
+/// to the shape of two isolates". They are not: **on Android the isolates share
+/// ONE connection.** `android_alarm_manager_plus` runs the alarm isolate in the
+/// app's own process and `sqflite`'s plugin keeps a static
+/// `_singleInstancesByPath`, so the second `LocalStore.open()` is handed the
+/// first one's `databaseId`. See `LocalStore.open` for the defect that taught us
+/// this, and ADR-0006's amendment.
+///
+/// So these tests exercise a *different* topology from the shipped one. That is
+/// not useless — two connections is the stricter case, and a lock that works
+/// across real connections is what Phase 4 would need if an isolate ever ran in
+/// its own process — but it means **a green run here says nothing about how the
+/// lease behaves on the phone**.
+///
+/// What the device showed (2026-08-20, `docs/testing/device-matrix.md`): with the
+/// UI live and the alarm isolate reconciling, the store and the platform's alarm
+/// set stayed identical and nothing threw. What it did **not** show is the
+/// exclusion actually firing — a refused lease is caught and returned as `false`
+/// silently, so it cannot be observed from outside.
+///
+/// The prediction still owed a test: with one shared connection each isolate has
+/// its own Dart-side transaction lock, so a second `BEGIN EXCLUSIVE` should fail
+/// as a **nested** transaction rather than block on SQLite's cross-connection
+/// lock — the same refusal by a different route.
 ///
 /// ## What it still cannot tell us
 ///
 /// These run against `sqflite_common_ffi`, which binds desktop SQLite, while the
 /// app runs `sqflite` over Android's. That is the same API-level axis that let
 /// Phase 2 ship SQL which could not parse below API 29 with 500+ tests green.
-/// **The device matrix owes a real two-isolate check.** What these tests do
-/// establish is that the logic is right wherever SQLite behaves like SQLite.
 void main() {
   sqfliteFfiInit();
   databaseFactory = databaseFactoryFfi;

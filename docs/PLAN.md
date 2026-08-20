@@ -167,15 +167,22 @@ switch, the false-warning suppression, and the late-arrival correction.
 suppressed when away covers the day; is replaced by a correction when a late check-in arrives; and
 says something **different and honest** when the device cannot reach the network.
 
-> **Status: implemented and covered by tests; the mechanism is verified on hardware; the phase is
-> NOT signed off.** All five exit criteria are asserted at the composition level and every
-> assertion is on *which* message rather than that something fired. On the POCO F3 with stock
-> HyperOS settings the alarm isolate wakes — including from a killed process, where Android
-> cold-started a new one to run it. What is **not** yet done: **security and infrastructure have not
-> reviewed this round at all** (architecture, testing and UI/UX have, and their findings are fixed —
-> see [phases/phase-3-review-handover.md](phases/phase-3-review-handover.md) for the live status),
-> driving the four outcomes end-to-end on the device rather than from tests, and the overnight Doze
-> run. ADR-0007 now records the force-stop response.
+> **Status, 2026-08-20: implemented, reviewed, and all five exit criteria observed on hardware.
+> Not yet signed off** — see [phases/phase-3-review-handover.md](phases/phase-3-review-handover.md)
+> for what remains.
+>
+> **Done since this block was last written:** all five reviewers ran at the gate and every finding is
+> fixed; **all five exit criteria were driven end-to-end on the device** (2026-08-20 15:33–15:55,
+> one build, one session — not merely asserted in tests); the alarm isolate wakes from a killed
+> process; and the reconcile ran with the UI live without the store and the platform diverging.
+>
+> **Two things were found on the device and are recorded rather than glossed.** The warning is
+> **late when the watcher's phone is in deep Doze** — `android_alarm_manager_plus` hands the work to
+> JobScheduler, which Doze holds; accepted for now in
+> [ADR-0008](architecture/decisions/0008-the-warning-is-late-in-doze-and-the-app-says-so.md), which
+> also reworded §14's trigger condition because it was false as written. And the alarm isolate was
+> **closing the UI's shared database connection**, now fixed with two guards. ADR-0007 records the
+> force-stop response.
 > Evidence in [phases/phase-3-summary.md](phases/phase-3-summary.md).
 
 ---

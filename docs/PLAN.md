@@ -189,13 +189,28 @@ says something **different and honest** when the device cannot reach the network
 
 ## Phase 4 — Firebase backbone
 
+> **In progress. Steps 1, 2 and 3 are done and proven on the POCO F3 against the emulator suite;
+> steps 4-7 are not started.** Start from
+> [phases/phase-4-handover.md](phases/phase-4-handover.md), which carries the current state, the
+> four things that went wrong — two of them **false greens**, work that looked finished and was not
+> — and the prompt to continue.
+>
+> **[ADR-0009](architecture/decisions/0009-decide-about-every-completed-day.md) also landed here**
+> and was not in this plan: ADR-0008 consequence 4 was owed as a measurement, turned out to be real,
+> and turned out to be **wider than Doze** — a drawer, a force-stop and a flat battery dropped
+> missed days by the same arithmetic. `reconcile()` now decides about every completed day it has
+> not settled.
+
 **The irreversible step is already done** — Firestore exists in `europe-west1`, Native mode.
 What remains:
 
-1. Wire `firebase_core` + `google_sign_in` against the existing config, using the **Web** client ID
-   as `serverClientId`. Release SHA fingerprints get added at Phase 8, when the keystore exists.
-2. **`firestore.rules` + emulator-based rules tests, and deploy them — before any client write
-   exists.**
+1. ~~Wire `firebase_core` + `google_sign_in` against the existing config, using the **Web** client
+   ID as `serverClientId`.~~ **Done** (`8f13f46`, `a0dc307`). Release SHA fingerprints still get
+   added at Phase 8, when the keystore exists. Sign-in is driven from the debug harness — the screen
+   inventory specifies no sign-in surface and Phase 5 builds the real one.
+2. ~~**`firestore.rules` + emulator-based rules tests, and deploy them — before any client write
+   exists.**~~ **Done** (`a433c47`) — 73 tests, mutation-checked, live ruleset
+   `87c8784d-42b8-45c8-8bcc-76d295656157`.
 
    ```powershell
    firebase deploy --only firestore:rules --project i-am-ok-c74ca
@@ -210,7 +225,9 @@ What remains:
    > Following the old order produces the exact class of false claim to a family that this app exists
    > to avoid, from a developer's own laptop.
 
-3. `users/{uid}` + token subcollection; check-in write with `deviceTappedAt` + `receivedAt`.
+3. ~~`users/{uid}` + token subcollection; check-in write with `deviceTappedAt` + `receivedAt`.~~
+   **Done** (`9ffea33`), plus the link sync the step did not mention and cannot work without.
+   The token methods are written and are called in step 5.
    **The watcher's reconcile read must use `Source.server`, or check
    `metadata.isFromCache`** — offline persistence is on by default and `get()` does *not* throw when
    offline, it serves the local cache. Treating that as a successful read stamps `lastReconcileAt`

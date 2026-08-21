@@ -8,7 +8,7 @@ non-goals in [HANDOVER.md](HANDOVER.md), which the whole design is built on top 
 
 | | |
 |---|---|
-| Current phase | **Phase 3 — Watcher side · implemented and measured on hardware; reviewer pass outstanding.** The alarm isolate wakes on the POCO F3 with stock HyperOS settings, including with the app process killed — see [phases/phase-3-summary.md](phases/phase-3-summary.md). The five reviewer agents have **not** run to completion, so the phase is not signed off. Next: reviewers, then the owner's review, then ADR-0007 on the force-stop response. |
+| Current phase | **Phase 4 — Firebase backbone · steps 1-3 done and proven on hardware, steps 4-7 outstanding.** Rules deployed before any client write existed; Firebase up in all three isolates; sign-in, `users/{uid}`, the check-in write and the real `Source.server` read all driven end to end on the POCO F3 against the emulator suite. **Start from [phases/phase-4-handover.md](phases/phase-4-handover.md)** — it carries the state, four things that went wrong (two of them false greens), and the prompt. Phase 3 is complete: [phases/phase-3-summary.md](phases/phase-3-summary.md). |
 | Phase history | [phases/](phases/) — one summary per completed phase |
 | Firebase project | `i-am-ok-c74ca` · Firestore `europe-west1` · Native mode · all permanent |
 | Repo | https://github.com/davamix/IAmOk (public) |

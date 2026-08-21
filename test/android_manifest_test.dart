@@ -205,8 +205,19 @@ void main() {
   /// `firebase-messaging` merges it, and the source manifest has declared it
   /// since Phase 3 for the alarm that wakes the watcher's isolate.
   ///
+  /// **Re-measured a third time, after step 6 added `firebase_app_check`.** The
+  /// answer is **no change at all** — still fourteen, and
+  /// `firebase-appcheck-playintegrity` plus `com.google.android.play:integrity`
+  /// contribute none of their own.
+  ///
+  /// That is worth recording precisely *because* it is a null result. The rule
+  /// in this file's docstring is "owed whenever a plugin is added", and a rule
+  /// that is only honoured when it finds something stops being run. The Phase 4
+  /// security review caught that this measurement had been skipped for step 6
+  /// while the two before it were recorded.
+  ///
   /// This is the routine the docstring above predicts: a plugin was added, the
-  /// release build was run, and the diff is one line rather than a guess.
+  /// release build was run, and the diff is stated rather than guessed.
   ///
   /// **The two biometric permissions are a live question for Phase 8**, not a
   /// curiosity. This app has no biometric feature and never asks for one; they

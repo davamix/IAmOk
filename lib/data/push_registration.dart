@@ -85,21 +85,51 @@ class PushRegistration {
   /// would go on sending this person's check-ins to a phone that has signed into
   /// somebody else's account.
   ///
-  /// Best-effort even so: the ordinary way a token dies is an uninstall, where
-  /// nothing runs at all. `onCheckInCreated`'s `UNREGISTERED` pruning is the
-  /// backstop, and this only cleans up the cases the app is alive to notice.
+  /// ## It must not be able to hang, and `delete()` can
   ///
-  /// The **device token itself is deliberately left alive.** Invalidating it
-  /// with `deleteToken()` would also cost the next account on this phone a fresh
-  /// registration round trip, for no gain: what makes a push reach an account is
-  /// the document, and that is what this removes.
+  /// `DocumentReference.delete()` completes on **server acknowledgement**, not
+  /// on local application — the same property that makes the check-in write
+  /// fired rather than awaited. Awaited here with no bound, a sign-out on a
+  /// phone with no signal simply never returns: the button does nothing,
+  /// forever. Firing it instead is worse, not better, because the queued write
+  /// would replay *after* `auth.signOut()` and be refused.
+  ///
+  /// So it is bounded, and the timeout is treated as a failure like any other.
+  ///
+  /// ## On failure the DEVICE TOKEN is invalidated, and that inverts the
+  /// argument this docstring used to make
+  ///
+  /// It used to say the device token is "deliberately left alive", because
+  /// "what makes a push reach an account is the document, and that is what this
+  /// removes" — and then claimed `onCheckInCreated`'s `UNREGISTERED` pruning as
+  /// the backstop when it could not.
+  ///
+  /// **That backstop does not exist for this case.** A row left behind here
+  /// belongs to a token that is still perfectly *valid* — the app is installed
+  /// and registered — so FCM returns success and **delivers**. Nothing ever
+  /// returns `UNREGISTERED`, nothing prunes, and every later check-in of every
+  /// person the previous account watched pushes `watchedName` and a day someone
+  /// was verified alive to a phone now signed into somebody else's account.
+  ///
+  /// The original argument is right for the **success** path and exactly
+  /// inverted for the failure path, which is the only path where the document
+  /// survives. Invalidating the token there costs the next account one
+  /// registration round trip and is what makes the claimed backstop true: the
+  /// orphaned row now answers `UNREGISTERED` on the next fan-out and is deleted.
   Future<void> unregister({required String uid}) async {
     final value = await token();
     if (value == null) return;
     try {
-      await _users.deleteToken(uid: uid, token: value);
+      await _users
+          .deleteToken(uid: uid, token: value)
+          .timeout(const Duration(seconds: 5));
     } on Object {
-      // Swallowed; see above.
+      try {
+        // The row survived. Make it self-cleaning rather than permanent.
+        await _messaging.deleteToken();
+      } on Object {
+        // Nothing left to try, and a sign-out must still complete.
+      }
     }
   }
 

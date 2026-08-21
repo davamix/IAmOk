@@ -207,6 +207,26 @@ describe('fanOutCheckIn — who is told', () => {
     assert.equal(sender.calls.length, 0);
   });
 
+  it('ignores a link whose id and body disagree', async () => {
+    // The rules authorise on the document ID — `hasAcceptedLink` resolves
+    // `links/{watchedUid}_{watcherUid}` and never reads these fields. A link
+    // where the two disagree would otherwise be pushed to by a watcher the rules
+    // refuse every read to.
+    await db.doc(`links/${MUM}_someone-else`).set({
+      watchedUid: MUM,
+      watcherUid: CARLA,
+      status: 'accepted',
+      watchedName: 'Mum',
+    });
+    await seedToken(CARLA, 'token-carla');
+
+    const sender = recordingSender();
+    const result = await fanOutCheckIn({ db, sender }, fact());
+
+    assert.equal(result.acceptedLinks, 0);
+    assert.equal(sender.calls.length, 0);
+  });
+
   it('skips a malformed link rather than failing the whole fan-out', async () => {
     await db.doc('links/broken').set({ watchedUid: MUM, status: 'accepted' });
     await seedLink({ watcherUid: ANA });

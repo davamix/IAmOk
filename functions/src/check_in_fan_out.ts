@@ -263,6 +263,21 @@ async function acceptedWatcherLinks(
     if (data['status'] !== 'accepted') continue;
     const watcherUid = data['watcherUid'];
     if (typeof watcherUid !== 'string' || watcherUid.length === 0) continue;
+
+    // **The rules authorise on the document ID; this must agree with them.**
+    //
+    // `firestore.rules`' `hasAcceptedLink` resolves
+    // `links/{watchedUid}_{watcherUid}` by id and asks whether it exists — it
+    // never reads these fields. Authorising here on the fields alone means a
+    // link whose id and body disagreed would let this fan-out push
+    // `watchedName` and a day someone was verified alive to a watcher the rules
+    // would refuse every read to.
+    //
+    // Not reachable today: client `create` on `links/` is `if false`, and every
+    // writer uses the deterministic id. It becomes reachable when `redeemInvite`
+    // starts writing links in Phase 5, and the cheapest moment to pin an
+    // invariant is before the code that could break it exists.
+    if (doc.id !== `${watchedUid}_${watcherUid}`) continue;
     const watchedName = data['watchedName'];
     accepted.push({
       watcherUid,

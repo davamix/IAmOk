@@ -135,8 +135,23 @@ needs no server. The residual risk is accepted and recorded in
 
 ### T7 — Stale FCM tokens leaking pushes to a reassigned device
 
-**Control.** Tokens live in a subcollection with `updatedAt`, so the Function prunes by age and
-deletes any token that returns `UNREGISTERED`.
+**Control.** Tokens live in a subcollection, and `onCheckInCreated` deletes any token FCM reports
+`UNREGISTERED`.
+
+**It does NOT prune by age, and this line used to say it did** — corrected 2026-08-21 when the
+Function was written. `updatedAt` exists so that it *could*, and `check_in_fan_out.ts` refuses:
+§13's watcher, the one who never opens the app, has by definition the stalest token in the
+collection, so an age filter would silence exactly the person FCM is in this design for, and would
+do it quietly. FCM's own `UNREGISTERED` is the authority on whether a token is dead; a date is a
+guess about it.
+
+**The sign-out path is the other half of this control, and its own backstop was wrong.**
+`PushRegistration.unregister` deletes the token document *before* the session ends, because the
+rules grant that delete to `isSelf(uid)` only. A row that survives that step is **not** cleaned up
+by `UNREGISTERED` pruning, whatever the code used to claim: the app is still installed and the
+token still valid, so FCM returns success and delivers, indefinitely, to a phone that may since
+have signed into another account. So a failed or timed-out delete now invalidates the device token
+instead, which is what makes the row answer `UNREGISTERED` and actually get pruned.
 
 ### T8 — Credential exposure through the repo
 
@@ -213,7 +228,10 @@ declared it since Phase 3 for the alarm that wakes the watcher's isolate.
 holds, and is what the T-ratings above actually need:
 
 - **Everything it transmits goes to one place**: `i-am-ok-c74ca`, over TLS, to the collections §7
-  defines. There is no analytics SDK, no crash reporter, no logging endpoint — still verified by
+  defines — with one narrow addition from Phase 4 step 6, stated rather than glossed: App Check
+  attests to `firebaseappcheck.googleapis.com` through Play Services. Still Google, already covered
+  by *Google / Firebase as an operator*, and it carries an attestation verdict rather than any of
+  this app's data. There is no analytics SDK, no crash reporter, no logging endpoint — still verified by
   grep at this gate: no `print`, no `debugPrint`, no `dart:developer`, no `http`, no socket anywhere
   in `lib/`.
 - **What it sends is what §7 lists and nothing more**: a display name, a per-day timestamp, an away
@@ -259,4 +277,11 @@ added.
 - **T9, on-device** — the retention bound for `warnings_shown`, which currently keeps every missed
   day for ever. Recorded above; owed before Phase 8's privacy policy describes it.
 - **App Check enforcement** — turning it from monitoring to enforcing, and how to verify real
-  traffic is attested first. Phase 4 provisions it; enabling enforcement is a later, separate step.
+  traffic is attested first. Phase 4 ships the client; **registering the debug token and enabling
+  enforcement are both still owed**, and until then the rules are the whole defence.
+- **No volume bound on `onCheckInCreated`** — §8 allows a user `create`, `update` *and* `delete` on
+  their own `checkins/{uid}/days/{date}`, and the trigger fires on every create. A create/delete
+  loop is therefore an unbounded push generator aimed at that person's **own** watchers' phones and
+  at the project's Function and FCM budget. Confidentiality-neutral — only consenting watchers are
+  reachable — and `maxInstances: 10` bounds concurrency but not volume. Same family as T3's owed
+  rate limiting; raised 2026-08-21 by the Phase 4 security review and deliberately not fixed there.

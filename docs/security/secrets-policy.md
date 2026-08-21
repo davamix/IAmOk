@@ -48,9 +48,14 @@ Not the secrecy of the key. Two things:
 
 1. **Firestore security rules** — see [firestore-rules-guidelines.md](firestore-rules-guidelines.md).
    Every read is scoped to the caller's uid or to an accepted link.
-2. **App Check** with Play Integrity — proves requests come from the real app on a real device, so a
-   stranger with the extracted API key gets nothing. Proposed in Phase 4, **monitoring mode only**
-   at first: enforcing before the client sends tokens would lock the app out of its own backend.
+2. **App Check** with Play Integrity — *once enforcement is enabled*, it will prove requests come
+   from the real app on a real device, so a stranger with the extracted API key gets nothing.
+
+   **Today it protects nothing, and the tense above used to hide that.** Phase 4 step 6 ships the
+   client, so the app now *sends* attestation tokens — but in **monitoring mode**, which blocks no
+   request at all. Enforcing before clients were attesting would refuse every read, which ADR-0004
+   maps to *refused*, which is the access-lost notice arriving at every family at once. So: rules
+   are the whole defence until enforcement is turned on, and this list has exactly one live entry.
 
 ---
 

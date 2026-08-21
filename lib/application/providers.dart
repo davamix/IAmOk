@@ -36,7 +36,11 @@ class AppServices {
     required this.clockService,
     required this.selfUid,
     required this.auth,
-  });
+    // Private, so it cannot be an initialising formal — a named parameter may
+    // not bind to a private field. Same shape as the repositories' `_injected`.
+    PushRegistration? push,
+    // ignore: prefer_initializing_formals
+  }) : _push = push;
 
   final LocalStore store;
   final Clock clock;
@@ -109,12 +113,19 @@ class AppServices {
   /// `users/{uid}` and its token subcollection (§7). UI isolate only.
   UserRepository get users => UserRepository();
 
+  final PushRegistration? _push;
+
   /// This install's FCM registration (§7, tier 2). UI isolate only.
   ///
   /// The background isolates never register anything: a token is a fact about
   /// *this install*, established while somebody is signed in, and the isolates
   /// that could run without one have nothing to do with acquiring it.
-  PushRegistration get push => PushRegistration(users);
+  ///
+  /// Injectable for the same reason [auth] is: [signOut]'s **ordering** is a
+  /// security property — the token document has to go before the session does —
+  /// and it was guaranteed by nothing but two adjacent lines until a test could
+  /// watch them run.
+  PushRegistration get push => _push ?? PushRegistration(users);
 
   /// Makes this install reachable by push, and never fails its caller.
   ///
@@ -140,11 +151,42 @@ class AppServices {
   /// this person's check-ins to a phone that has since signed into somebody
   /// else's account. Neither party would see anything wrong.
   ///
-  /// The delete is best-effort ([PushRegistration.unregister] swallows), because
-  /// a sign-out must complete regardless. FCM's own `UNREGISTERED` pruning is
-  /// what eventually clears a row this could not.
+  /// The delete is bounded and best-effort ([PushRegistration.unregister] both
+  /// times out and swallows), because a sign-out must complete regardless.
+  ///
+  /// ## The uid is the LIVE one, and using the snapshot was a real hole
+  ///
+  /// This read `selfUid`, and guarded on `signedIn`, which is derived from it —
+  /// and [selfUid] is **the launch-time snapshot**. Sign in and sign out again
+  /// without restarting and the snapshot is still `signedOutUid`, so the guard
+  /// is false and the unregister is **skipped entirely** — while the sign-in
+  /// path has demonstrably registered a token under the new uid, because the
+  /// harness passes the fresh uid explicitly for exactly this reason.
+  ///
+  /// So the one case `signOut` exists to prevent was the one case it did not
+  /// cover. Debug-only today, since production sign-in needs a restart; it stops
+  /// being debug-only the moment Phase 5 builds a real sign-in screen, which is
+  /// why it is fixed now rather than noted.
+  ///
+  /// `auth.currentUid` is the right source here specifically: it is the identity
+  /// the security rules will judge the delete against, and the token was
+  /// registered under it. The store snapshot remains the right source
+  /// everywhere a *background isolate* has to agree with the UI — see
+  /// [LocalStore.selfUid] — and those are different questions.
   Future<void> signOut() async {
-    if (signedIn) await push.unregister(uid: selfUid);
+    final uid = auth.currentUid ?? (signedIn ? selfUid : null);
+    if (uid != null) {
+      try {
+        await push.unregister(uid: uid);
+      } on Object {
+        // **Belt as well as braces.** `unregister` already swallows and times
+        // out, so this catches nothing today. It is here because the property
+        // that matters is *the session ends*: if that call ever threw for a
+        // reason nobody anticipated, the user would be left signed in, looking
+        // at a button that does nothing — the same failure the timeout inside
+        // `unregister` exists to prevent, arriving by the other route.
+      }
+    }
     await auth.signOut();
   }
 

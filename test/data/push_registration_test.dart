@@ -91,16 +91,61 @@ void main() {
   });
 
   test('a delete that throws does not stop a sign-out', () async {
-    // Sign-out is the caller, and it must complete. A token document left
-    // behind is a stale row the fan-out will send to and FCM will accept and
-    // drop; `onCheckInCreated`'s UNREGISTERED pruning is the backstop.
-    final registration = PushRegistration(
-      _ThrowingUsers(),
-      messaging: _FakeMessaging(token: 'tok-abc'),
-    );
+    // Sign-out is the caller, and it must complete.
+    final messaging = _FakeMessaging(token: 'tok-abc');
+    final registration = PushRegistration(_ThrowingUsers(), messaging: messaging);
 
     await expectLater(registration.unregister(uid: 'uid-ana'), completes);
   });
+
+  test('a delete that FAILS invalidates the device token instead', () async {
+    // The row survived, and it belongs to a token that is still perfectly
+    // valid — the app is installed and registered — so FCM would return success
+    // and DELIVER. Nothing would ever answer UNREGISTERED and nothing would ever
+    // prune it, and every later check-in of everyone the previous account
+    // watched would push a name and a verified day to a phone now signed into
+    // somebody else's account.
+    //
+    // Invalidating the device token is what makes the pruning backstop true.
+    final messaging = _FakeMessaging(token: 'tok-abc');
+    final registration = PushRegistration(_ThrowingUsers(), messaging: messaging);
+
+    await registration.unregister(uid: 'uid-ana');
+
+    expect(messaging.deleted, isTrue,
+        reason: 'a surviving row must be made self-cleaning, or it is permanent');
+  });
+
+  test('a delete that SUCCEEDS leaves the device token alone', () async {
+    // The other half, and the reason this is not simply "always delete the
+    // token": on the success path the document is gone, so invalidating the
+    // token would cost the next account on this phone a registration round trip
+    // for nothing.
+    final users = _RecordingUsers();
+    final messaging = _FakeMessaging(token: 'tok-abc');
+
+    await PushRegistration(users, messaging: messaging)
+        .unregister(uid: 'uid-ana');
+
+    expect(users.deleted, [('uid-ana', 'tok-abc')]);
+    expect(messaging.deleted, isFalse);
+  });
+
+  test('a delete that never completes does not hang the sign-out', () async {
+    // `DocumentReference.delete()` completes on SERVER acknowledgement, so on a
+    // phone with no signal it simply does not complete. Unbounded, that is a
+    // sign-out button that does nothing, forever — and it is worst on exactly
+    // the device state where the orphaned row is created.
+    final messaging = _FakeMessaging(token: 'tok-abc');
+    final registration = PushRegistration(_HangingUsers(), messaging: messaging);
+
+    await expectLater(
+      registration.unregister(uid: 'uid-ana'),
+      completes,
+    );
+    expect(messaging.deleted, isTrue,
+        reason: 'a timeout is a failure like any other, and takes the same path');
+  }, timeout: const Timeout(Duration(seconds: 30)));
 
   test('a rotated token is re-registered, and the old one is left alone',
       () async {
@@ -153,6 +198,16 @@ class _RecordingUsers implements UserRepository {
       throw UnimplementedError(invocation.memberName.toString());
 }
 
+class _HangingUsers implements UserRepository {
+  @override
+  Future<void> deleteToken({required String uid, required String token}) =>
+      Completer<void>().future;
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) =>
+      throw UnimplementedError(invocation.memberName.toString());
+}
+
 class _ThrowingUsers implements UserRepository {
   @override
   Future<void> saveToken({required String uid, required String token}) async =>
@@ -175,7 +230,19 @@ class _FakeMessaging implements FirebaseMessaging {
 
   String? token;
   final bool throwing;
+
+  /// Whether `deleteToken()` was called — the SDK-level invalidation, not the
+  /// Firestore document delete. These are different things and the tests care
+  /// about which one happened.
+  bool deleted = false;
+
   final StreamController<String> _refreshes = StreamController<String>.broadcast();
+
+  @override
+  Future<void> deleteToken({String? senderId}) async {
+    deleted = true;
+    token = null;
+  }
 
   void rotate(String next) {
     token = next;

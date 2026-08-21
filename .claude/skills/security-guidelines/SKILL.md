@@ -22,8 +22,12 @@ project number · the API key in `android/app/google-services.json` · the Andro
 client ids · `firestore.rules` · debug SHA fingerprints.
 
 All of these ship inside the APK, where anyone can unzip and read them. Treating an extractable key
-as a secret buys nothing and creates false confidence. The real controls are **security rules plus
-App Check**.
+as a secret buys nothing and creates false confidence. The real control is **security rules** —
+and, once enforcement is enabled, App Check.
+
+**App Check is not a control yet.** Phase 4 ships the client, so the app sends attestation tokens,
+but in **monitoring mode**, which blocks nothing. Until enforcement is turned on the rules are the
+whole defence, and no code, comment or surface may imply otherwise.
 
 ### Three rules that follow
 

@@ -102,6 +102,73 @@ void main() {
     );
   });
 
+  group('cleartext to the emulator is a DEBUG-only grant', () {
+    // Measured on the POCO F3, 2026-08-21: the first sign-in against the
+    // emulator suite failed with
+    //
+    //   [firebase_auth/unknown] Cleartext HTTP traffic to 127.0.0.1 not permitted
+    //
+    // because Android has denied cleartext by default since API 28 and the
+    // suite speaks plain HTTP. The grant that fixes it is narrow in two
+    // directions at once, and this group asserts both — a "move it to main so
+    // profile builds work too" would undo the second silently, and the symptom
+    // would be a shipped app permitted to send plaintext.
+
+    test('the config exists and names only the two loopback routes', () {
+      final config = File(
+        'android/app/src/debug/res/xml/network_security_config.xml',
+      );
+      expect(config.existsSync(), isTrue);
+
+      final domains = RegExp(r'<domain[^>]*>([^<]+)</domain>')
+          .allMatches(config.readAsStringSync())
+          .map((m) => m.group(1)!.trim())
+          .toSet();
+
+      expect(
+        domains,
+        {
+          '127.0.0.1', // a physical handset, through `adb reverse` over USB
+          '10.0.2.2', // the AVD's alias for the host loopback
+        },
+        reason: 'both are loopback-scoped by construction. A hostname or an IP '
+            'that is not one of these would let a debug build send plaintext to '
+            'a machine on the network, which is a different decision from the '
+            'one this file records',
+      );
+    });
+
+    test('it is referenced from the debug manifest and NOWHERE else', () {
+      expect(
+        manifest('debug'),
+        contains('android:networkSecurityConfig="@xml/network_security_config"'),
+      );
+      // The one that matters. `main` is what a release build merges, so a
+      // reference there would ship the grant.
+      for (final sourceSet in ['main', 'profile']) {
+        expect(
+          manifest(sourceSet),
+          isNot(contains('networkSecurityConfig')),
+          reason: '$sourceSet must not carry it — a release build has to keep '
+              'the platform default of TLS or nothing',
+        );
+      }
+    });
+
+    test('and nothing anywhere opens cleartext wholesale', () {
+      // `android:usesCleartextTraffic="true"` would allow plaintext to ANY
+      // host, which is the shortcut this config exists instead of.
+      for (final sourceSet in ['main', 'debug', 'profile']) {
+        expect(
+          manifest(sourceSet),
+          isNot(contains('usesCleartextTraffic')),
+          reason: 'the domain-scoped config is the whole point; a blanket flag '
+              'would be a much larger grant for the same convenience',
+        );
+      }
+    });
+  });
+
   /// **What a release build actually ships, measured rather than declared.**
   ///
   /// The set above is what this repo asks for. This is what a user grants, and

@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Cleartext HTTP to the Firebase Emulator Suite, and to NOTHING else.
+
+  **This file is in the `debug` source set on purpose and must never move to
+  `main`.** Android has denied cleartext by default since API 28, which is why
+  the first sign-in against the emulator failed with
+
+      [firebase_auth/unknown] Cleartext HTTP traffic to 127.0.0.1 not permitted
+
+  — measured on the POCO F3, 2026-08-21. The emulator suite speaks plain HTTP
+  and cannot be persuaded otherwise, so the choice is between allowing cleartext
+  somewhere or not developing against it at all.
+
+  What makes that safe is the *scope*, twice over:
+
+  1. **Only these two hosts.** A blanket `android:usesCleartextTraffic="true"`
+     would allow plaintext to anywhere, which on an app carrying data about
+     vulnerable people is not a trade worth making for developer convenience.
+     Everything not listed here keeps the platform default: TLS or nothing.
+  2. **Only debug builds.** A release build never merges this file, so the
+     shipped app cannot send cleartext to anything at all — including these two.
+     `test/android_manifest_test.dart` asserts that separation, because it is
+     the kind of thing a well-meaning "move it to main so profile builds work
+     too" would quietly undo.
+
+  The two hosts are the two ways a device reaches the suite, and they are not
+  interchangeable:
+
+      127.0.0.1   a physical handset, through `adb reverse` over USB
+      10.0.2.2    the API 36 AVD, whose alias that is for the host loopback
+
+  Both are loopback-scoped by construction: neither can address a machine
+  anywhere else on the network.
+-->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">127.0.0.1</domain>
+        <domain includeSubdomains="false">10.0.2.2</domain>
+    </domain-config>
+</network-security-config>

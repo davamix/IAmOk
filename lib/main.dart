@@ -1,11 +1,13 @@
 import 'dart:async';
 
 import 'package:android_alarm_manager_plus/android_alarm_manager_plus.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'application/providers.dart';
+import 'application/push_handler.dart';
 import 'application/watcher_reconcile_service.dart';
 import 'data/auth_repository.dart';
 import 'data/firebase_bootstrap.dart';
@@ -48,6 +50,14 @@ Future<void> main() async {
   // its own entry point — see `FirebaseBootstrap`, which is one implementation
   // precisely so that one of them cannot end up pointed somewhere different.
   await FirebaseBootstrap.ensureInitialized();
+
+  // **Registers §4's third entry point, and it has to happen here.** The plugin
+  // records the callback's raw handle so its Android service can start a fresh
+  // engine at that function when the app is not running — so a registration
+  // made anywhere the app might not reach on a cold start is a registration
+  // that is not there when it matters. `pushBackgroundHandler` never runs in
+  // this isolate; this line is only how the platform learns where it lives.
+  FirebaseMessaging.onBackgroundMessage(pushBackgroundHandler);
 
   final store = await LocalStore.open();
 
@@ -190,6 +200,17 @@ class _IAmOkAppState extends ConsumerState<IAmOkApp>
   /// cold start is the *normal* arrival rather than the edge case.
   final _navigator = GlobalKey<NavigatorState>();
 
+  /// A push arriving while the app is **in front of somebody**.
+  ///
+  /// `onBackgroundMessage` does not fire in this case — the two are exclusive,
+  /// and this is the half that has a screen to update.
+  StreamSubscription<RemoteMessage>? _pushes;
+
+  /// Tokens rotate — on a restore, an app-data clear, or at FCM's discretion —
+  /// and a rotation nobody records is a watcher who stops being woken with
+  /// nothing anywhere saying so.
+  StreamSubscription<String>? _tokenRefreshes;
+
   @override
   void initState() {
     super.initState();
@@ -199,7 +220,71 @@ class _IAmOkAppState extends ConsumerState<IAmOkApp>
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _openWatcherList();
       _reconcileWatcherSide();
+      _registerForPush();
     });
+  }
+
+  /// Makes this install reachable by push, and re-registers when the token
+  /// rotates.
+  ///
+  /// **Fired, never awaited.** `getToken()` is a network round trip through Play
+  /// Services; awaiting it here would put tier 2 in front of the first frame, on
+  /// the screen whose whole job is to be there every morning. §3 prices a
+  /// missing push at *latency, never correctness*, so a launch with no signal
+  /// registers nothing and tries again next time.
+  ///
+  /// The refresh listener re-enters the same method rather than saving the token
+  /// the stream handed it. One registration path is worth one extra local call:
+  /// two would be two chances to write a token document that does not match the
+  /// one FCM will deliver to.
+  void _registerForPush() {
+    final services = ref.read(appServicesProvider);
+    unawaited(services.registerForPush());
+    _tokenRefreshes ??= services.push.tokenRefreshes.listen(
+      (_) => unawaited(ref.read(appServicesProvider).registerForPush()),
+    );
+    _pushes ??= FirebaseMessaging.onMessage.listen(
+      (_) => unawaited(_onForegroundPush()),
+    );
+  }
+
+  /// Reconciles both sides because something changed somewhere (§3).
+  ///
+  /// **Nothing is read out of the message**, exactly as in the background
+  /// handler: a push is a nudge carrying no authority, and the strongest way to
+  /// say so is not to look at it.
+  ///
+  /// ## Why this does not reuse [IAmOkApp.repairOnResume]
+  ///
+  /// That predicate exists to stop the shell reconciling when the watcher list
+  /// is showing, because on a **resume** the list has its own lifecycle observer
+  /// that will do it. A push is not a lifecycle event: nothing else fires, so
+  /// standing back here would mean a nudge that changed the very row on screen
+  /// updated nothing at all.
+  ///
+  /// So both branches reconcile, and they differ only in `watcherListShowing` —
+  /// which is `WatcherScreen.isShowing` and nothing else. When the list is up
+  /// the reader is looking at the answer, so the delivery is `redundant` and no
+  /// notification is posted; when it is not, the shell's own path posts.
+  Future<void> _onForegroundPush() async {
+    try {
+      final services = ref.read(appServicesProvider);
+      // Same ordering as launch and resume: links are the input every other
+      // decision derives from, and Phase 6's away nudge changes one.
+      await services.syncLinks();
+      if (!mounted) return;
+      if (WatcherScreen.isShowing) {
+        await ref.read(watcherStateProvider.notifier).refresh();
+      } else {
+        _reconcileWatcherSide();
+      }
+      if (!mounted) return;
+      await ref.read(watchedStateProvider.notifier).refresh();
+    } on Object {
+      // Swallowed for the same reason `_reconcileWatcherSide` swallows: this
+      // runs behind whatever screen the user actually opened, and must never be
+      // able to replace it with an error about a message they did not send.
+    }
   }
 
   /// Carries out [IAmOkApp.repairOnResume]'s answer, and decides nothing itself.
@@ -255,6 +340,8 @@ class _IAmOkAppState extends ConsumerState<IAmOkApp>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     NotificationRouter.instance.tappedLink.removeListener(_openWatcherList);
+    unawaited(_pushes?.cancel());
+    unawaited(_tokenRefreshes?.cancel());
     super.dispose();
   }
 

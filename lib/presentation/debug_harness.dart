@@ -74,6 +74,17 @@ Future<tz.Location> _zone(LocalStore store) async {
   return TimeZones.tryLocation(name) ?? TimeZones.utc;
 }
 
+/// A token, abbreviated, or the honest reason there is not one.
+///
+/// **Abbreviated deliberately.** An FCM token is enough to send a push to
+/// somebody's phone, so the panel that is read out loud during a device session
+/// — and photographed into a phase summary — shows a prefix. *Show the FCM
+/// token* prints it in full, because sending a test push needs the whole string
+/// and there is nowhere else to get it.
+String _tokenLine(String? token) => token == null
+    ? 'NOT REGISTERED - no Play Services, or no network'
+    : '${token.substring(0, 12)}... saved';
+
 /// Every standing warning across every watched link, as one comparable string.
 Future<String> _standing(LocalStore store, String selfUid) async {
   final links = await store.linksWatchedBy(selfUid);
@@ -241,9 +252,45 @@ class _DebugHarnessScreenState extends ConsumerState<DebugHarnessScreen> {
                 timezone: zone ?? 'Etc/UTC',
               );
 
+              // The token, immediately, and under the uid just established.
+              // `AppServices.registerForPush` keys on `selfUid`, which is a
+              // SNAPSHOT taken at launch — so it is still the signed-out
+              // sentinel here and would register nothing. This is the one place
+              // that holds the new uid before a restart.
+              final token = await services.push.register(uid: uid);
+
               return 'signed in as     $uid\n'
                   'users/$uid written\n'
+                  'fcm token        ${_tokenLine(token)}\n'
                   'RESTART the app: selfUid is read once, at launch.';
+            }),
+            _Action('Show the FCM token', () async {
+              // **Tier 2, and the panel has to say so.** No token means pushes
+              // do not arrive; it does not mean the app is wrong — every
+              // watcher still reconciles on app open and at alarm time (§3).
+              //
+              // The full value is printed because there is no other way to get
+              // it: FCM has no emulator, so this always talks to the REAL
+              // project, and sending a test push means handing this string to
+              // something outside the app.
+              final token = await services.push.token();
+              if (token == null) {
+                return 'NO TOKEN - this device cannot be reached by push.\n'
+                    'Needs Play Services and a network. FCM has no emulator, '
+                    'so this path always talks to the REAL project even when '
+                    'everything else is pointed at the suite.';
+              }
+              return 'token, in full\n$token';
+            }),
+            _Action('Register the FCM token again', () async {
+              // Idempotence, the same check the `users/{uid}` write gets. The
+              // rules validate this document's exact field set and require
+              // `updatedAt == request.time`, so a second write proves the
+              // repository and the deployed rules still agree.
+              final uid = services.selfUid;
+              if (uid == LocalStore.signedOutUid) return 'not signed in';
+              final token = await services.push.register(uid: uid);
+              return 'users/$uid/tokens/...  ${_tokenLine(token)}';
             }),
             _Action('Write users/{uid} again — idempotence', () async {
               // The rules freeze `createdAt` on update and require it on
@@ -280,7 +327,13 @@ class _DebugHarnessScreenState extends ConsumerState<DebugHarnessScreen> {
                       "which is ADR-0001s rule applied to links"}';
             }),
             _Action('Sign out — CLEARS the local cache', () async {
-              await services.auth.signOut();
+              // Through `AppServices`, not `auth` directly, because this
+              // install's token document has to go FIRST — after
+              // `clearSelfUid` the rules refuse the delete and the row is
+              // unremovable from this device for good, while the fan-out keeps
+              // sending to a phone that has signed into another account. See
+              // [AppServices.signOut].
+              await services.signOut();
               // Deliberately not tearing the alarms down here. §3: nothing
               // patches state incrementally, so "there are no links now" is
               // expressed by reconciling against an empty desired set — which

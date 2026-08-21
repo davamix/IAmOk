@@ -1,0 +1,115 @@
+import 'package:firebase_messaging/firebase_messaging.dart';
+
+import 'user_repository.dart';
+
+/// This install's FCM registration — the token, and the `users/{uid}/tokens/…`
+/// document that makes it reachable (§7).
+///
+/// ## What this is for, and what it is not
+///
+/// FCM is **tier 2** (§3): a wake-up hint, never the truth. Nothing this class
+/// does affects whether the app is *correct*; it affects whether the app finds
+/// out *early*. If every token here were wrong, every watcher would still
+/// reconcile on app open and again at alarm time, and every warning decision
+/// would come out the same. What would be lost is the one thing tier 2 exists
+/// for — refreshing the local decision cache while the app is not running, which
+/// is what protects an **offline** watcher from a false warning.
+///
+/// That is the reason nothing below is allowed to throw at its caller.
+///
+/// ## No permission is requested here, deliberately
+///
+/// `FirebaseMessaging.requestPermission()` asks for `POST_NOTIFICATIONS` on
+/// Android, which `PermissionService` already owns through
+/// `flutter_local_notifications` — and owns *better*, because asking the
+/// notification manager "will this appear" also catches a switched-off channel,
+/// which no runtime-permission API does. Two sources for one permission is two
+/// answers about whether this phone can speak, and §13's whole argument is that
+/// the answer has to be observed rather than remembered.
+///
+/// It is not needed here in any case: **data-only messages are delivered
+/// regardless of notification permission.** A phone with notifications denied
+/// still wakes, still reconciles, and still refreshes its cache — it just cannot
+/// say anything, which `NotificationDelivery.unavailable` already models.
+class PushRegistration {
+  // Positional, like `AuthRepository(this._store)`: a named parameter cannot
+  // bind to a private field, and the alternative is an initialiser list that the
+  // analyzer flags.
+  PushRegistration(this._users, {FirebaseMessaging? messaging})
+      : _injected = messaging;
+
+  final UserRepository _users;
+
+  // Resolved on use, not in the constructor — the same shape as the
+  // repositories. `FirebaseMessaging.instance` needs Firebase up, and this is
+  // built inside the composition root, which many tests construct without
+  // standing up the platform at all.
+  final FirebaseMessaging? _injected;
+
+  FirebaseMessaging get _messaging => _injected ?? FirebaseMessaging.instance;
+
+  /// This install's current token, or null if the device cannot produce one.
+  ///
+  /// Null is ordinary rather than exceptional: `getToken()` needs Play Services
+  /// and a network round trip, and a phone in a lift has neither. The caller
+  /// treats that as *not registered yet* and tries again next launch.
+  Future<String?> token() async {
+    try {
+      return await _messaging.getToken();
+    } on Object {
+      return null;
+    }
+  }
+
+  /// Records this install's token under [uid], and returns it.
+  ///
+  /// **Never throws.** A failure here means this device is not reachable by
+  /// push, which costs latency and nothing else (§3) — so it must not be able to
+  /// take down a sign-in, a launch, or the screen the caller was building.
+  Future<String?> register({required String uid}) async {
+    final value = await token();
+    if (value == null) return null;
+    try {
+      await _users.saveToken(uid: uid, token: value);
+      return value;
+    } on Object {
+      return null;
+    }
+  }
+
+  /// Drops this install's token document for [uid].
+  ///
+  /// **Called before signing out, and the order is not arbitrary.** The rules
+  /// grant this delete to `isSelf(uid)` only, so a sign-out that ran first would
+  /// leave a document nothing on this device may ever remove — and the fan-out
+  /// would go on sending this person's check-ins to a phone that has signed into
+  /// somebody else's account.
+  ///
+  /// Best-effort even so: the ordinary way a token dies is an uninstall, where
+  /// nothing runs at all. `onCheckInCreated`'s `UNREGISTERED` pruning is the
+  /// backstop, and this only cleans up the cases the app is alive to notice.
+  ///
+  /// The **device token itself is deliberately left alive.** Invalidating it
+  /// with `deleteToken()` would also cost the next account on this phone a fresh
+  /// registration round trip, for no gain: what makes a push reach an account is
+  /// the document, and that is what this removes.
+  Future<void> unregister({required String uid}) async {
+    final value = await token();
+    if (value == null) return;
+    try {
+      await _users.deleteToken(uid: uid, token: value);
+    } on Object {
+      // Swallowed; see above.
+    }
+  }
+
+  /// Tokens rotate — on a restore, an app-data clear, or at FCM's discretion.
+  ///
+  /// A rotation the app does not record is a watcher who stops being woken and
+  /// nothing anywhere saying so, which is §12's silent failure in the one tier
+  /// that is supposed to be noisy. The old document is left behind on purpose:
+  /// this device no longer knows that token, so it cannot prove it is dead, and
+  /// FCM will say `UNREGISTERED` on the next fan-out — which is the authority on
+  /// the question and the one path that prunes.
+  Stream<String> get tokenRefreshes => _messaging.onTokenRefresh;
+}

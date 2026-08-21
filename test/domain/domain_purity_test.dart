@@ -313,26 +313,30 @@ void main() {
     'lib/platform/alarm_ids.dart',
     'lib/platform/notification_service.dart',
     'lib/platform/warning_alarm_scheduler.dart',
+    // Phase 4 step 5. The FCM handler is §4's THIRD entry point, and it
+    // reconciles BOTH sides — so it reaches the watched side's scheduler and
+    // the permission read that side asks for on every reconcile, neither of
+    // which the alarm path ever touched.
+    'lib/application/push_handler.dart',
+    'lib/data/check_in_repository.dart',
+    'lib/platform/alarm_scheduler.dart',
+    'lib/platform/permission_service.dart',
   ];
 
   /// Held to the bare-isolate rule **before** a bare isolate reaches it.
   ///
-  /// The watched side is display-only today (§10): its reminders are
-  /// `zonedSchedule` notifications, no Dart runs when one fires, and
-  /// `WatchedReconcileService` is therefore reached only from the UI. The
-  /// computed closure below is right to say so.
+  /// **Empty since Phase 4 step 5, and that is the outcome rather than a
+  /// tidy-up.** It held exactly one entry — `watched_reconcile_service.dart` —
+  /// on the stated grounds that the watched side was display-only and reached
+  /// only from the UI, but that Phase 4's FCM handler would reach it because an
+  /// incoming nudge reconciles both sides. It does, so the closure below now
+  /// finds it by itself and the exemption is gone.
   ///
-  /// It stays on the list because **Phase 4's FCM background handler reaches
-  /// it** — an incoming "something changed" nudge reconciles both sides — and
-  /// the cost of holding it to the rule now is zero, while the cost of finding
-  /// out later is a `MissingPluginException` in a background engine. Keeping the
-  /// guard is cheaper than remembering to add it.
-  ///
-  /// Anything else appearing here is a question, not a formality: it means the
-  /// list claims coverage of a path that does not exist.
-  const guardedEarly = <String>{
-    'lib/application/watched_reconcile_service.dart',
-  };
+  /// The mechanism stays because the argument for it does. Anything appearing
+  /// here is a **question, not a formality**: it means the list above claims
+  /// coverage of a path that does not exist yet, and a claim of coverage nobody
+  /// re-examines is how a guard quietly stops guarding.
+  const guardedEarly = <String>{};
 
   group('runs in a bare isolate', () {
     for (final path in bareIsolateSafe) {
@@ -369,9 +373,9 @@ void main() {
     /// rule than this one, and listing forty domain files here would bury the
     /// ten that are the actual point.
     test('and the list is the real transitive closure, not a memory', () {
-      final reached = _reachableFrom(
-        'lib/application/warning_alarm_handler.dart',
-      ).where((p) => !p.startsWith('lib/domain/')).toSet();
+      final reached = _reachedByBackgroundIsolates()
+          .where((p) => !p.startsWith('lib/domain/'))
+          .toSet();
 
       expect(reached.difference(bareIsolateSafe.toSet()), isEmpty,
           reason: 'the alarm isolate reaches these and nothing checks them. '
@@ -388,12 +392,30 @@ void main() {
       // The closure is only useful if it is not empty and not one file. This
       // guards the walker itself: a resolver that silently returned nothing
       // would make the assertion above pass perfectly.
-      final reached =
-          _reachableFrom('lib/application/warning_alarm_handler.dart');
+      final reached = _reachedByBackgroundIsolates();
       expect(reached, contains('lib/data/local_store.dart'));
       expect(reached, contains('lib/platform/notification_service.dart'));
       expect(reached.any((p) => p.startsWith('lib/domain/')), isTrue,
           reason: 'the walker must follow the domain barrel too');
+    });
+
+    /// **Every entry point, not the first one.** The closure was computed from
+    /// `warning_alarm_handler.dart` alone while that was the only background
+    /// isolate. Phase 4 added a second, and a closure taken from one of two
+    /// entry points is not a smaller answer — it is a **wrong** one in the
+    /// direction that reads as coverage: everything the FCM handler reaches and
+    /// the alarm does not would have been checked by nothing at all, while both
+    /// assertions above went on passing.
+    test('and every background entry point is in the closure', () {
+      for (final entry in _backgroundEntryPoints) {
+        expect(File(entry).existsSync(), isTrue,
+            reason: 'listed as a background entry point but missing: $entry');
+        expect(_reachedByBackgroundIsolates(), contains(entry));
+      }
+      expect(_backgroundEntryPoints.length, greaterThan(1),
+          reason: 'Phase 4 added the FCM handler beside the alarm one. If this '
+              'is back down to one, an entry point was deleted or renamed and '
+              'the closure silently stopped covering it.');
     });
   });
 
@@ -426,11 +448,7 @@ void main() {
     /// inherits the rule, which is why this scans every background entry point
     /// rather than only the alarm one.
     test('no background entry point closes it', () {
-      const backgroundEntryPoints = <String>[
-        'lib/application/warning_alarm_handler.dart',
-      ];
-
-      for (final path in backgroundEntryPoints) {
+      for (final path in _backgroundEntryPoints) {
         final file = File(path);
         expect(file.existsSync(), isTrue,
             reason: '$path is listed here but does not exist — if a background '
@@ -470,6 +488,25 @@ void main() {
     });
   });
 }
+
+/// §4's background entry points — the isolates with no screen and no UI to
+/// inherit anything from.
+///
+/// Two things key on this list, and they are the two failures that have actually
+/// happened on this path: what the bare-isolate import bans are checked against,
+/// and which files must never `close()` the shared sqflite connection.
+///
+/// **Adding a third entry point means adding it here.** Everything else follows
+/// from the imports; this is the only hand-written part, and a missing line here
+/// is a whole isolate nothing checks.
+const _backgroundEntryPoints = <String>[
+  'lib/application/warning_alarm_handler.dart',
+  'lib/application/push_handler.dart',
+];
+
+/// The union of what every background entry point reaches.
+Set<String> _reachedByBackgroundIsolates() =>
+    {for (final entry in _backgroundEntryPoints) ..._reachableFrom(entry)};
 
 /// Every project file reachable from [entry] by following `import`s.
 ///

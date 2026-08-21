@@ -80,6 +80,21 @@ dependencies:
   google_sign_in: ^7.2.0
   cloud_firestore: ^6.8.0
 
+  # Tier 2 (§3): a wake-up hint, and NOT load-bearing. If every push were
+  # dropped the system stays correct and only gets slower — the watcher
+  # reconciles on app open and again at alarm time. It earns its place for one
+  # reason: it is the only way to refresh the local decision cache while the app
+  # is not running, which is what protects an OFFLINE watcher from a false
+  # warning.
+  #
+  # It brings the THIRD background entry point with it (§4), which is why
+  # `lib/application/push_handler.dart` is written from the same template as the
+  # alarm one and is held to the same bare-isolate rules by
+  # `test/domain/domain_purity_test.dart`. Note in particular that no background
+  # isolate may `close()` the store — on Android all three share one sqflite
+  # connection.
+  firebase_messaging: ^16.0.4
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

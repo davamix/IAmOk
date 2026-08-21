@@ -195,6 +195,20 @@ permission actually arrives here is from a transitive AAR. Six permissions becam
 
 The six from Phase 3 are unchanged and still justified in §13.
 
+**Re-measured 2026-08-21 after step 5 added `firebase_messaging`: thirteen became fourteen.**
+
+| Permission | Contributed by | Used by this app |
+|---|---|---|
+| `com.google.android.c2dm.permission.RECEIVE` | `firebase-messaging:25.1.1` | **yes** — tier 2 (§3) |
+
+It is a **signature-level permission owned by Google Play Services**, not a user-facing one: it
+grants the app nothing except the right to receive messages Play Services delivers, it appears on no
+install screen, and there is nothing for a user to accept or decline. So it raises none of the
+question the biometric pair below does — it is the permission for the feature it was added with.
+
+`WAKE_LOCK` did not change: `firebase-messaging` merges it, and this app's own source manifest has
+declared it since Phase 3 for the alarm that wakes the watcher's isolate.
+
 **What replaces the old claim, and it is narrower.** The app can transmit, and does. What still
 holds, and is what the T-ratings above actually need:
 

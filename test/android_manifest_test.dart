@@ -192,6 +192,22 @@ void main() {
   /// DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION   androidx (self-scoped)
   /// ```
   ///
+  /// **Re-measured the same day, after step 5 added `firebase_messaging`.** One
+  /// more, and only one:
+  ///
+  /// ```
+  /// com.google.android.c2dm.permission.RECEIVE   firebase-messaging 25.1.1
+  /// ```
+  ///
+  /// Signature-level and owned by Play Services: it appears on no install
+  /// screen and there is nothing for a user to accept or decline, so it raises
+  /// none of the question the biometric pair does. `WAKE_LOCK` is unchanged —
+  /// `firebase-messaging` merges it, and the source manifest has declared it
+  /// since Phase 3 for the alarm that wakes the watcher's isolate.
+  ///
+  /// This is the routine the docstring above predicts: a plugin was added, the
+  /// release build was run, and the diff is one line rather than a guess.
+  ///
   /// **The two biometric permissions are a live question for Phase 8**, not a
   /// curiosity. This app has no biometric feature and never asks for one; they
   /// come from a library behind `firebase_auth`. An app for elderly people

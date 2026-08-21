@@ -7,6 +7,7 @@ import '../data/debug_backend_override.dart';
 import '../data/firestore_check_in_reader.dart';
 import '../data/link_repository.dart';
 import '../data/local_store.dart';
+import '../data/push_registration.dart';
 import '../data/user_repository.dart';
 import '../domain/domain.dart';
 import '../platform/alarm_scheduler.dart';
@@ -107,6 +108,45 @@ class AppServices {
 
   /// `users/{uid}` and its token subcollection (§7). UI isolate only.
   UserRepository get users => UserRepository();
+
+  /// This install's FCM registration (§7, tier 2). UI isolate only.
+  ///
+  /// The background isolates never register anything: a token is a fact about
+  /// *this install*, established while somebody is signed in, and the isolates
+  /// that could run without one have nothing to do with acquiring it.
+  PushRegistration get push => PushRegistration(users);
+
+  /// Makes this install reachable by push, and never fails its caller.
+  ///
+  /// **Fired, not awaited, by every caller** — the same rule as the check-in
+  /// write, for a weaker version of the same reason. `getToken()` is a network
+  /// round trip through Play Services, so awaiting it on a phone with no signal
+  /// would delay a launch for tier 2, which §3 prices at *latency, never
+  /// correctness*. Nothing on any screen depends on the answer.
+  ///
+  /// Signed out is not an error and not a no-op worth reporting: there is no
+  /// `users/{uid}` to file a token under, and the next sign-in registers.
+  Future<String?> registerForPush() async {
+    if (!signedIn) return null;
+    return push.register(uid: selfUid);
+  }
+
+  /// Signs out, **taking this install's push registration with it first**.
+  ///
+  /// The order is the whole reason this exists rather than the two calls being
+  /// made wherever a sign-out happens. `firestore.rules` grants the token delete
+  /// to `isSelf(uid)` only, so signing out first leaves a document *nothing on
+  /// this device may ever remove* — and `onCheckInCreated` would go on sending
+  /// this person's check-ins to a phone that has since signed into somebody
+  /// else's account. Neither party would see anything wrong.
+  ///
+  /// The delete is best-effort ([PushRegistration.unregister] swallows), because
+  /// a sign-out must complete regardless. FCM's own `UNREGISTERED` pruning is
+  /// what eventually clears a row this could not.
+  Future<void> signOut() async {
+    if (signedIn) await push.unregister(uid: selfUid);
+    await auth.signOut();
+  }
 
   /// **The tier-1 read, as every isolate composes it** — Firestore, with the
   /// harness able to stand in front of it in a debug build and nowhere else.

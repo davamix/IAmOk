@@ -1,9 +1,7 @@
 /**
  * Cloud Functions for I Am Ok — ARCHITECTURE.md §9.
  *
- * Three are required and one is optional; none is built yet. This file exists so
- * the **emulator suite has something to load**, which is what makes the local
- * loop complete before anything is pointed at the live project.
+ * Three are required and one is optional; the first of them is here.
  *
  * ## Two rules that hold for every function added here
  *
@@ -26,17 +24,18 @@
  * | `onAwayChanged`   | `users/{uid}/shared/away` written    | 6     |
  * | `redeemInvite`    | callable                            | 5     |
  *
- * `onCheckInCreated` must send **high priority**, and that is not a detail:
- * `firebase_messaging` bypasses the JobScheduler hop with `startService()` only
- * for high-priority messages, and ADR-0008's revisit turns on whether a
- * background isolate can be woken inside deep Doze. A normal-priority message
- * would inherit the very defect the measurement is trying to escape.
- *
  * Deliberately absent: a scheduled "who didn't check in" function. §9 and
  * ADR-0007 record what that costs and why the escape hatch stays shut.
  */
 
-import { setGlobalOptions } from 'firebase-functions/v2';
+import { initializeApp } from 'firebase-admin/app';
+import { getFirestore } from 'firebase-admin/firestore';
+import { getMessaging } from 'firebase-admin/messaging';
+import { logger, setGlobalOptions } from 'firebase-functions/v2';
+import { onDocumentCreated } from 'firebase-functions/v2/firestore';
+
+import type { PushSender } from './check_in_fan_out';
+import { checkInFactFrom, fanOutCheckIn, isDayKey } from './check_in_fan_out';
 
 /**
  * `europe-west1`, co-located with Firestore, and **not** a per-function default
@@ -48,3 +47,85 @@ import { setGlobalOptions } from 'firebase-functions/v2';
  * every read of an EU citizen's check-in history across the Atlantic.
  */
 setGlobalOptions({ region: 'europe-west1', maxInstances: 10 });
+
+// Once, at module load, for every function in this file. The Admin SDK picks up
+// `FIRESTORE_EMULATOR_HOST` from the environment by itself, which is what lets
+// the emulator suite run this code unmodified.
+initializeApp();
+
+/**
+ * FCM, resolved **at the send** rather than when the fan-out is composed.
+ *
+ * Not a style preference. There is no FCM emulator, so `getMessaging()` is the
+ * one Admin SDK service the local loop cannot satisfy — and the local loop is
+ * where this function is developed. Deferring it means a check-in whose watchers
+ * have no registered device never touches FCM at all, which is what makes
+ * `tools/functions-test.ps1`'s trigger check a clean run with no credentials
+ * anywhere rather than a run whose only signal is an authentication error.
+ */
+const sender: PushSender = {
+  sendEach: (messages) => getMessaging().sendEach(messages),
+};
+
+/**
+ * A check-in landed; nudge every accepted watcher of the person who tapped.
+ *
+ * ## `onDocumentCreated`, not `onDocumentWritten`, and §7 depends on it
+ *
+ * The document id **is** the day, so a second tap on the same day is an
+ * *update* and does not fire this at all. That is where the app's
+ * once-per-day-push semantics come from: no duplicate nudge, and no dedupe
+ * logic anywhere in the codebase.
+ *
+ * ## Not retried, deliberately
+ *
+ * v2 triggers do not retry unless asked, and this one must not ask. A retried
+ * fan-out re-sends a nudge whose only effect is a reconcile the device would
+ * have done anyway at alarm time (§3), so retrying buys nothing — while a poison
+ * event that fails forever would burn instances against `maxInstances` and delay
+ * every *other* person's nudge. The watcher's own pull is the safety net, and it
+ * is a better one than a retry queue.
+ *
+ * ## Everything it can fail at, it swallows
+ *
+ * A throw here is invisible: no screen, no user, and the only reader of the log
+ * is whoever is already debugging. What matters is that a failure to *push* is
+ * never allowed to look like a failure to *check in* — the check-in document is
+ * already written and durable before this runs, and it is the thing the whole
+ * app decides from.
+ */
+export const onCheckInCreated = onDocumentCreated(
+  'checkins/{uid}/days/{date}',
+  async (event) => {
+    const watchedUid = event.params.uid;
+    const date = event.params.date;
+
+    // Both guards re-validate what the rules already require, because functions
+    // bypass the rules and an admin-written document is not held to them.
+    if (!isDayKey(date)) {
+      logger.warn('onCheckInCreated: ignoring non-day document id', { date });
+      return;
+    }
+
+    const data = event.data?.data();
+    if (data === undefined) {
+      logger.warn('onCheckInCreated: created event carried no data', {
+        watchedUid,
+        date,
+      });
+      return;
+    }
+
+    try {
+      const result = await fanOutCheckIn(
+        { db: getFirestore(), sender },
+        checkInFactFrom(watchedUid, date, data),
+      );
+      logger.info('onCheckInCreated: fanned out', { watchedUid, date, ...result });
+    } catch (error) {
+      // Counts and ids only. **Never a token** — a token is enough to send a
+      // push to somebody's phone, and a log is not the place to keep one.
+      logger.error('onCheckInCreated: fan-out failed', { watchedUid, date, error });
+    }
+  },
+);

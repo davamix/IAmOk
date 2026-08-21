@@ -28,6 +28,7 @@
       ],
       "ignore": [
         "node_modules",
+        "test",
         ".git",
         "firebase-debug.log",
         "firebase-debug.*.log",

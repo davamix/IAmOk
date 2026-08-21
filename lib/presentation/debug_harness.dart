@@ -9,6 +9,7 @@ import 'package:timezone/timezone.dart' as tz;
 import '../application/providers.dart';
 import '../copy/notification_copy.dart';
 import '../data/check_in_reader.dart';
+import '../data/firebase_bootstrap.dart';
 import '../data/local_store.dart';
 import '../domain/domain.dart';
 import '../platform/alarm_ids.dart';
@@ -189,6 +190,45 @@ class _DebugHarnessScreenState extends ConsumerState<DebugHarnessScreen> {
                   'real now         ${const SystemClock().now()}\n'
                   'stored offset    $offset\n'
                   'device timezone  $zone';
+            }),
+          ]),
+
+          // **Phase 4's identity, and where this build is pointed.**
+          //
+          // Sign-in has no screen of its own yet — the screen inventory puts
+          // onboarding in Phase 5 and does not specify one, and inventing an
+          // un-designed elderly-facing sign-in now would be a surface the UI/UX
+          // guidelines have never approved, replaced within a phase. So it is
+          // driven from here, where nothing is user-visible and no copy is owed.
+          _section('Identity — Phase 4', [
+            _Action('Show identity and backend', () async {
+              final stored = await services.store.selfUid();
+              return 'backend          ${FirebaseBootstrap.describe}\n'
+                  // Both, on purpose. `stored` is what every isolate decides
+                  // with; `live` is what the security rules will judge. They
+                  // agree in every healthy state, and when they do NOT the
+                  // symptom is every read coming back permission-denied — which
+                  // ADR-0004 turns into an access-lost notice about somebody's
+                  // relative. Two lines here is the cheapest way to tell that
+                  // apart from a genuine backend fault.
+                  'stored uid       ${stored ?? '-'}\n'
+                  'live uid         ${services.auth.currentUid ?? '-'}\n'
+                  'display name     ${services.auth.displayName ?? '-'}';
+            }),
+            _Action('Sign in', () async {
+              final uid = await services.auth.signIn();
+              if (uid == null) return 'cancelled — no account chosen';
+              return 'signed in as     $uid\n'
+                  'RESTART the app: selfUid is read once, at launch.';
+            }),
+            _Action('Sign out — CLEARS the local cache', () async {
+              await services.auth.signOut();
+              // Deliberately not tearing the alarms down here. §3: nothing
+              // patches state incrementally, so "there are no links now" is
+              // expressed by reconciling against an empty desired set — which
+              // is what the restart below does.
+              return 'signed out, links and cache cleared\n'
+                  'RESTART the app to reconcile the alarms away.';
             }),
           ]),
 

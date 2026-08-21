@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../data/auth_repository.dart';
 import '../data/check_in_reader.dart';
 import '../data/local_store.dart';
 import '../domain/domain.dart';
@@ -28,6 +29,7 @@ class AppServices {
     required this.permissions,
     required this.clockService,
     required this.selfUid,
+    required this.auth,
   });
 
   final LocalStore store;
@@ -37,10 +39,25 @@ class AppServices {
   final PermissionService permissions;
   final ClockService clockService;
 
-  /// Phase 2 has no backend and no sign-in, so identity is a fixed local uid.
-  /// Phase 4 replaces this with the Firebase uid, which survives reinstall and
-  /// phone replacement so links never break (§1).
+  /// **Whose links these are** — the Firebase uid, read from `LocalStore` at
+  /// launch, or [LocalStore.signedOutUid] when nobody is signed in.
+  ///
+  /// Read from the store rather than from `FirebaseAuth` even here, where both
+  /// are available, so that the UI and the alarm isolate are answering from the
+  /// *same* row. Two sources agreeing today is not the same as two sources that
+  /// cannot disagree — and the whole reason this value is on disk is that §4's
+  /// isolates share no memory. [LocalStore.selfUid] carries the argument for
+  /// which failure shape that buys.
+  ///
+  /// It is a snapshot: signing in or out rebuilds `AppServices`, because
+  /// changing identity changes every answer below it.
   final String selfUid;
+
+  /// Google Sign-In → the Firebase uid (§6). UI isolate only.
+  final AuthRepository auth;
+
+  /// Whether anybody is signed in. Nothing is watched, armed or owed otherwise.
+  bool get signedIn => selfUid != LocalStore.signedOutUid;
 
   WatchedReconcileService get watchedReconcile => WatchedReconcileService(
         store: store,

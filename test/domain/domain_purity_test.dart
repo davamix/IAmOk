@@ -291,6 +291,13 @@ void main() {
     'lib/application/watched_reconcile_service.dart',
     'lib/application/watcher_reconcile_service.dart',
     'lib/data/check_in_reader.dart',
+    // Phase 4. The alarm isolate reads Firestore before it decides whether to
+    // speak (§10), so it brings Firebase up itself — and it is on this list
+    // rather than exempted from it because "the Firebase SDK is fine in a
+    // background isolate" is exactly the kind of belief this guard exists to
+    // check. What it must not acquire is a widget tree, a Riverpod provider or
+    // `flutter_timezone`; the bans below are what say so.
+    'lib/data/firebase_bootstrap.dart',
     'lib/data/local_store.dart',
     'lib/copy/notification_copy.dart',
     'lib/platform/clock.dart',

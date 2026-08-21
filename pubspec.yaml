@@ -55,6 +55,30 @@ dependencies:
   # reaches must be bare-isolate safe: no Flutter, no Riverpod, no
   # flutter_timezone. `test/domain/domain_purity_test.dart` holds that list.
   android_alarm_manager_plus: ^4.0.7
+  # Firebase (§15). Phase 4's backbone.
+  #
+  # These reach ALL THREE isolates, which is the thing to hold on to when
+  # changing anything here: the alarm isolate reads Firestore as the signed-in
+  # user (§10's verify-before-speaking), so it initialises Firebase itself and
+  # shares no memory with the UI that did the same. `FirebaseBootstrap` is the
+  # one implementation of that, called from each entry point.
+  #
+  # They also bring `INTERNET` into the merged manifest, through
+  # `play-services-basement`. `docs/security/threat-model.md` leaned on its
+  # absence until Phase 4 and no longer does — the claim was re-derived rather
+  # than inherited, and `test/android_manifest_test.dart` says so.
+  firebase_core: ^4.13.0
+  firebase_auth: ^6.5.7
+
+  # Identity (§1). Google Sign-In: free, one tap on Android, and the uid survives
+  # a reinstall or a new phone, so links never break.
+  #
+  # **`serverClientId` must be the WEB OAuth client**, not the Android one —
+  # using the Android client there produces a silent failure with no useful
+  # error. The value is in `AuthRepository`, and it is not a secret: both client
+  # ids ship inside the APK.
+  google_sign_in: ^7.2.0
+  cloud_firestore: ^6.8.0
 
 dev_dependencies:
   flutter_test:

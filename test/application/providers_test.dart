@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:i_am_ok/application/providers.dart';
+import 'package:i_am_ok/data/auth_repository.dart';
 import 'package:i_am_ok/data/local_store.dart';
 import 'package:i_am_ok/domain/domain.dart';
 import 'package:i_am_ok/platform/alarm_scheduler.dart';
@@ -119,6 +120,7 @@ void main() {
       permissions: PermissionService(notifications),
       clockService: const ClockService(),
       selfUid: LocalStore.defaultSelfUid,
+        auth: AuthRepository(store),
     );
   });
 
@@ -248,6 +250,7 @@ void main() {
               permissions: PermissionService(notifications),
               clockService: const _MadridClockService(),
               selfUid: LocalStore.defaultSelfUid,
+        auth: AuthRepository(store),
             ),
           ),
         ],
@@ -323,6 +326,7 @@ void main() {
               permissions: PermissionService(notifications),
               clockService: const _ThrowingZoneClockService(),
               selfUid: LocalStore.defaultSelfUid,
+        auth: AuthRepository(store),
             ),
           ),
         ],

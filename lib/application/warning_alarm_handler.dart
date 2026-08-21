@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 
 import '../data/check_in_reader.dart';
+import '../data/firebase_bootstrap.dart';
 import '../data/local_store.dart';
 import '../platform/clock.dart';
 import '../platform/notification_service.dart';
@@ -75,6 +76,13 @@ import 'watcher_reconcile_service.dart';
 /// still gets a clean attempt because nothing is cached in memory at all.
 @pragma('vm:entry-point')
 Future<void> warningAlarmCallback(int id) async {
+  // **This isolate reads Firestore**, so it brings Firebase up itself — §4: the
+  // three isolates share no memory, and nothing the UI initialised is visible
+  // here. One shared function rather than a second copy of the same three lines,
+  // because the failure a divergent copy produces is not a crash: it is this
+  // isolate quietly talking to production while the UI talks to the emulator.
+  await FirebaseBootstrap.ensureInitialized();
+
   final store = await LocalStore.open();
   // Each isolate creates its own plugin instance and its own channels.
   // `onTap` is deliberately not wired: a background isolate that posts a
@@ -115,5 +123,18 @@ Future<void> warningAlarmCallback(int id) async {
     lockOwner: 'alarm',
   );
 
-  await service.reconcile(selfUid: LocalStore.defaultSelfUid);
+  // **From disk, not from `FirebaseAuth.instance.currentUser`.** Both are
+  // available in this isolate now that Firebase is up, and they fail
+  // differently: a `currentUser` that has not finished being restored comes back
+  // null, this reconcile finds zero links, does nothing, and reports success —
+  // the silence §12 calls the one failure this app cannot detect in itself. A
+  // stale row, by contrast, gets `permission-denied` on every read, which
+  // ADR-0004 maps to refused and which posts a notice. Loud beats quiet here.
+  // `LocalStore.selfUid` carries the full argument.
+  //
+  // Signed out is a real state and reconciles to nothing, which is correct:
+  // no links, no alarms, nothing owed.
+  final selfUid = await store.selfUid() ?? LocalStore.signedOutUid;
+
+  await service.reconcile(selfUid: selfUid);
 }

@@ -7,6 +7,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'application/providers.dart';
 import 'application/watcher_reconcile_service.dart';
+import 'data/auth_repository.dart';
+import 'data/firebase_bootstrap.dart';
 import 'data/local_store.dart';
 import 'domain/domain.dart';
 import 'platform/alarm_scheduler.dart';
@@ -40,6 +42,12 @@ Future<void> main() async {
   // callback is never invoked, which is a silent failure of exactly the kind
   // this side exists to avoid.
   await AndroidAlarmManager.initialize();
+
+  // **In every isolate, not only this one.** The alarm isolate reads Firestore
+  // before it decides whether to speak (§10), so it calls the same function from
+  // its own entry point — see `FirebaseBootstrap`, which is one implementation
+  // precisely so that one of them cannot end up pointed somewhere different.
+  await FirebaseBootstrap.ensureInitialized();
 
   final store = await LocalStore.open();
 
@@ -81,7 +89,12 @@ Future<void> main() async {
     // Shared with the alarm isolate through LocalStore, because the two share
     // no memory and an isolate looking up a different uid finds zero links,
     // reconciles nothing, and reports success.
-    selfUid: LocalStore.defaultSelfUid,
+    //
+    // **A snapshot taken here, before `runApp`.** Identity decides every answer
+    // below it, so signing in or out rebuilds this whole object rather than
+    // mutating one field under a tree that has already read it.
+    selfUid: await store.selfUid() ?? LocalStore.signedOutUid,
+    auth: AuthRepository(store),
   );
 
   // **The device's zone and clock format, cached before anything reconciles.**

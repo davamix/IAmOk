@@ -7,13 +7,23 @@ import 'package:test/test.dart';
 
 /// **The permissions a release build declares, asserted against the manifest.**
 ///
-/// `docs/security/threat-model.md` leans on one fact: a **release** build has no
-/// `INTERNET` permission, so nothing it holds can leave the device. That is what
-/// lets Phase 3 say "no logging, no analytics, nothing transmits" and mean it
-/// rather than hope it. Until the Phase 3 gate, nothing asserted it — no test, no
-/// lint, no script — and the precedent for it changing silently is in this
-/// project's own manifest: `flutter_local_notifications` merged `VIBRATE` in
-/// uninvited during Phase 2 and it had to be declared after the fact.
+/// Through Phase 3 this file guarded one claim: a **release** build has no
+/// `INTERNET` permission, so nothing it holds can leave the device. **Phase 4
+/// ended that**, exactly as `deploy-notes.md` predicted it would — `firebase_auth`,
+/// `cloud_firestore` and `google_sign_in` all declare `INTERNET`, and measuring
+/// the merged release manifest on 2026-08-21 confirmed it is now there.
+///
+/// The claim was **re-derived rather than deleted**, and the new one is narrower
+/// and true: see `docs/security/threat-model.md`. What this file guards now is
+/// the *closed set* — the permissions a release build asks for are exactly the
+/// ones somebody decided to ask for.
+///
+/// The precedent for that set changing silently is in this project's own
+/// manifest twice over: `flutter_local_notifications` merged `VIBRATE` in
+/// uninvited during Phase 2, and Phase 4's measurement found
+/// **`USE_BIOMETRIC` and `USE_FINGERPRINT`** arriving from
+/// `androidx.biometric`, pulled in transitively behind `firebase_auth`, for a
+/// feature this app does not have.
 ///
 /// ## What this can and cannot see
 ///
@@ -37,23 +47,30 @@ void main() {
   String manifest(String sourceSet) =>
       File('android/app/src/$sourceSet/AndroidManifest.xml').readAsStringSync();
 
-  test('the release manifest declares no INTERNET permission', () {
-    // `main` is what a release build merges; there is no `src/release/`.
+  test('the SOURCE manifest still declares no INTERNET of its own', () {
+    // Deliberately kept, and deliberately weaker than it used to be. A release
+    // build now HOLDS `INTERNET`, merged in from Firebase — that is measured and
+    // recorded. What this still says is that nobody added it here by hand, which
+    // matters because the source manifest is the one place a change is a
+    // decision rather than a consequence of a dependency.
+    //
+    // The instruction the old version of this test carried — "when Firebase
+    // arrives, delete this and re-derive the claim in the threat model rather
+    // than letting it rot" — was followed on 2026-08-21.
     expect(
       manifest('main'),
       isNot(contains('android.permission.INTERNET')),
-      reason: 'threat-model.md states a release build cannot transmit, and this '
-          'is the line that makes it true. Phase 4 adds Firebase, which brings '
-          'INTERNET with it — when that happens, delete this test and re-derive '
-          'the claim in the threat model rather than letting it rot.',
+      reason: 'the app declares no INTERNET itself; it inherits one. If this '
+          'ever becomes a deliberate declaration, say why here and in '
+          'threat-model.md',
     );
   });
 
-  test('and debug and profile still do', () {
-    // Not tidiness — asserting the negative above is only meaningful if the
-    // positive is present somewhere. If these ever lost it, the test above would
-    // pass for the wrong reason: nothing anywhere declaring it, and a developer
-    // wondering why their debug build cannot reach the emulator.
+  test('and debug and profile still declare it explicitly', () {
+    // Not tidiness. These exist for the Flutter tooling — the VM service, hot
+    // reload — and are the reason a debug build could always reach a local
+    // emulator. Losing them would break `tools/emulators.ps1` in a way that
+    // looks like a networking problem.
     for (final sourceSet in ['debug', 'profile']) {
       expect(manifest(sourceSet), contains('android.permission.INTERNET'),
           reason: '$sourceSet needs it for the Flutter tooling');
@@ -83,5 +100,49 @@ void main() {
           'thing this asserts against — including one merged in by a plugin and '
           'then copied up into the source manifest',
     );
+  });
+
+  /// **What a release build actually ships, measured rather than declared.**
+  ///
+  /// The set above is what this repo asks for. This is what a user grants, and
+  /// the two differ by seven permissions that arrived from dependencies — which
+  /// is the whole reason the merged report matters and the source manifest is
+  /// only half the guard.
+  ///
+  /// **A test cannot produce this.** It needs `flutter build apk --release`,
+  /// which writes files, so the measurement is a command in
+  /// `docs/infrastructure/deploy-notes.md` and the result is recorded here as
+  /// evidence with a date on it. Recorded rather than asserted, honestly: what
+  /// follows is a **finding from 2026-08-21**, not something re-checked on every
+  /// run.
+  ///
+  /// ```
+  /// INTERNET                 firebase-auth, firestore, google_sign_in
+  /// ACCESS_NETWORK_STATE     firebase-auth, firestore
+  /// USE_BIOMETRIC            androidx.biometric 1.1.0  <- unused by this app
+  /// USE_FINGERPRINT          androidx.biometric 1.1.0  <- unused by this app
+  /// READ_GSERVICES           com.google.android.recaptcha 18.6.1
+  /// DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION   androidx (self-scoped)
+  /// ```
+  ///
+  /// **The two biometric permissions are a live question for Phase 8**, not a
+  /// curiosity. This app has no biometric feature and never asks for one; they
+  /// come from a library behind `firebase_auth`. An app for elderly people
+  /// requesting fingerprint access with no fingerprint feature is a Play review
+  /// question at best, and at worst it is what a careful family member reads on
+  /// the install screen and declines.
+  ///
+  /// They are removable with `tools:node="remove"` in the source manifest. That
+  /// is **deliberately not done yet**: it is a change on the sign-in path, and
+  /// stripping permissions from the auth libraries before the happy path has
+  /// ever been proven on hardware would confound the first real measurement.
+  /// Decide it at Phase 8, where the Play permission story is written anyway,
+  /// with a device run behind it.
+  test('the merged-release finding above has a home and a date', () {
+    // A comment nothing points at is a comment nobody re-reads. This asserts
+    // only that the document carrying the standing claim still exists, so the
+    // finding cannot be orphaned by a rename.
+    expect(File('docs/security/threat-model.md').existsSync(), isTrue);
+    expect(File('docs/infrastructure/deploy-notes.md').existsSync(), isTrue);
   });
 }

@@ -161,8 +161,9 @@ of which days an identifiable elderly person living alone was *not* verified fin
 the asset this document already rates High by inference, and arguably the more revealing half.
 
 **Not exploitable today.** `allowBackup="false"` and `@xml/data_extraction_rules` keep it off Drive
-and out of device-to-device transfer, the app sandbox is the boundary, and no release build can
-transmit anything (see below).
+and out of device-to-device transfer, and the app sandbox is the boundary. The third leg of that
+argument — *no release build can transmit anything* — **is gone as of Phase 4**; see below for what
+replaced it.
 
 **No prune is proposed here, deliberately.** The ledger is unbounded *because* corrections are
 unbounded: §10 can retract a warning for any past day, and integrity outranks storage. A prune with
@@ -172,27 +173,58 @@ as **owed** rather than quietly decided. Before Phase 8's privacy policy has to 
 one: a stated bound (days older than the oldest day any reconcile can still decide about), or
 "retained indefinitely, and here is why".
 
-#### Nothing leaves the device in Phase 3 — and that expires in Phase 4
+#### The app can now transmit — measured 2026-08-21, and the old claim is retired
 
-Verified at the gate rather than assumed: no `print`/`debugPrint`/`dart:developer`, no analytics or
-crash reporter, no `dart:io`, `http` or socket anywhere in `lib/` — and the **release build declares
-no `INTERNET` permission**. A release build physically cannot transmit.
+Through Phase 3 this section said *nothing leaves the device*, and it rested on one fact: the
+release build declared **no `INTERNET` permission**, so it physically could not transmit. It also
+said, in as many words, that Phase 4 would remove that and the claim would have to be re-derived
+from the code rather than inherited. This is that re-derivation.
 
-That last one is checked against the **merged** release manifest, not just the source, because the
-way a permission actually arrives here is from a transitive AAR — `flutter_local_notifications`
-merged `VIBRATE` in uninvited during Phase 2. Built at the Phase 3 gate on 2026-08-19,
-`manifest-merger-release-report.txt` names no `INTERNET` contributor and the merged manifest carries
-exactly six: `POST_NOTIFICATIONS`, `RECEIVE_BOOT_COMPLETED`, `USE_EXACT_ALARM`,
-`SCHEDULE_EXACT_ALARM`, `VIBRATE`, `WAKE_LOCK`.
+**Measured, not assumed.** `flutter build apk --release` on 2026-08-21, reading
+`manifest-merger-release-report.txt` — the merged manifest, not the source, because the way a
+permission actually arrives here is from a transitive AAR. Six permissions became **thirteen**:
 
-`test/android_manifest_test.dart` holds the half a test can reach — the source manifests and that
-closed set — and says in its own docstring that it cannot see a transitive AAR. The merge check is a
-command in [../infrastructure/deploy-notes.md](../infrastructure/deploy-notes.md), owed whenever a
-plugin is added.
+| Permission | Contributed by | Used by this app |
+|---|---|---|
+| `INTERNET` | `google_sign_in_android`, `firebase-auth`, `firebase-firestore` | **yes** — the whole of §3 |
+| `ACCESS_NETWORK_STATE` | `firebase-auth`, `firebase-firestore` | indirectly, by the SDKs |
+| `USE_BIOMETRIC` | `androidx.biometric:1.1.0`, behind `firebase-auth` | **no** |
+| `USE_FINGERPRINT` | `androidx.biometric:1.1.0`, behind `firebase-auth` | **no** |
+| `READ_GSERVICES` | `com.google.android.recaptcha:18.6.1` | **no** |
+| `…DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION` | AndroidX, self-scoped | n/a |
 
-That last line is load-bearing and Phase 4 removes it: adding Firebase adds `INTERNET`. From then on
-"nothing leaves the device" has to be re-derived from the code rather than inherited from this
-review.
+The six from Phase 3 are unchanged and still justified in §13.
+
+**What replaces the old claim, and it is narrower.** The app can transmit, and does. What still
+holds, and is what the T-ratings above actually need:
+
+- **Everything it transmits goes to one place**: `i-am-ok-c74ca`, over TLS, to the collections §7
+  defines. There is no analytics SDK, no crash reporter, no logging endpoint — still verified by
+  grep at this gate: no `print`, no `debugPrint`, no `dart:developer`, no `http`, no socket anywhere
+  in `lib/`.
+- **What it sends is what §7 lists and nothing more**: a display name, a per-day timestamp, an away
+  period, a link, an FCM token. The `warnings_shown` ledger above — the record of which days a
+  person was *not* verified fine — **stays on the watcher's device and is never uploaded**. That is
+  worth stating explicitly, because it is the most revealing thing this app holds and the one a
+  reader would assume syncs.
+- **The rules are what stop it going anywhere else**, not the manifest. That is the trade Phase 4
+  makes: the control moves from *it cannot* to *it is not allowed to*, and the thing enforcing it is
+  `firestore.rules` plus, later, App Check.
+
+**Two permissions this app does not use, and they are a Phase 8 question.** `USE_BIOMETRIC` and
+`USE_FINGERPRINT` arrive from `androidx.biometric` behind `firebase_auth`. This app has no biometric
+feature and never asks for one. An app for elderly people requesting fingerprint access with no
+fingerprint feature is a Play review question at best, and at worst it is what a careful family
+member reads on the install screen and declines. They are removable with `tools:node="remove"`;
+that is **deliberately not done yet**, because stripping permissions from the auth libraries before
+the sign-in path has ever been proven on hardware would confound the first real measurement. Decide
+it at Phase 8, with a device run behind it.
+
+`test/android_manifest_test.dart` holds the half a test can reach — the source manifests and their
+closed set — and carries the merged-release finding above with its date. It says in its own
+docstring that it cannot see a transitive AAR: that needs a release build, and the command is in
+[../infrastructure/deploy-notes.md](../infrastructure/deploy-notes.md), owed whenever a plugin is
+added.
 
 ---
 

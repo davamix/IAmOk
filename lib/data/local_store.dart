@@ -41,17 +41,31 @@ class LocalStore {
 
   static const String defaultDatabaseName = 'i_am_ok.db';
 
-  /// Phase 3 has no sign-in, so identity is a fixed local uid.
+  /// Phase 3's fixed local uid, kept **only** to read a store written before
+  /// Phase 4 signed anybody in.
   ///
-  /// It lives here, on the one thing every isolate opens, because the **alarm
-  /// isolate and the UI must agree whose links these are** — and they have no
-  /// other way to agree, sharing no memory (§4). Two literals in two composition
-  /// roots would drift, and the symptom would be an alarm isolate that finds
-  /// zero links, reconciles nothing, and reports success.
-  ///
-  /// Phase 4 replaces this with the Firebase uid, which survives reinstall and
-  /// phone replacement so links never break (§1).
+  /// Identity is now the Firebase uid — see [selfUid]. Rows keyed to this string
+  /// belong to a device that has not signed in since, and no reconcile will ever
+  /// find them again, because the signed-in uid is what every query asks for.
+  /// That is the intended outcome and not a migration: they are fake links to a
+  /// fake person, created by the harness.
   static const String defaultSelfUid = 'local-watched-user';
+
+  /// The uid **nothing is keyed to** — signed out, expressed as a value.
+  ///
+  /// Deliberately not `null`. Every query that takes a uid — `linksWatchedBy`,
+  /// `linksWatching`, both `reconcile`s — answers *nothing* for this one, which
+  /// is exactly right when nobody is signed in: no links, so no alarms, so
+  /// nothing to say. A nullable uid would push the same answer out to two dozen
+  /// call sites as a guard each of them has to remember, and the one that forgot
+  /// would throw inside an alarm isolate rather than quietly do nothing.
+  ///
+  /// It is safe as a sentinel because it **cannot collide**: Firebase uids are
+  /// never empty, and links are written only by `redeemInvite`.
+  ///
+  /// Note the asymmetry with a *missing* uid on a signed-in device, which is the
+  /// dangerous case and is a different thing entirely — see [selfUid].
+  static const String signedOutUid = '';
 
   final Database _db;
 
@@ -390,6 +404,7 @@ class LocalStore {
   static const String _keyWarningAlarmsExact = 'warning_alarms_exact';
   static const String _keyLinkReconcileFailed = 'link_reconcile_failed';
   static const String _keyUses24HourClock = 'uses_24_hour_clock';
+  static const String _keySelfUid = 'self_uid';
 
   Future<String?> _setting(String key) async {
     final rows = await _db.query(
@@ -425,6 +440,71 @@ class LocalStore {
 
   Future<void> setDeviceTimezone(String zone) =>
       _putSetting(_keyDeviceTimezone, zone);
+
+  /// **Whose links these are** — the Firebase uid, written by the UI on sign-in
+  /// and read by every isolate.
+  ///
+  /// This replaces [defaultSelfUid], and it lives here for the reason that
+  /// constant did: the alarm isolate and the UI must agree, and they share no
+  /// memory (§4). What is new in Phase 4 is that the answer is no longer a
+  /// literal — it is an account.
+  ///
+  /// ## Why not read `FirebaseAuth.instance.currentUser` in the isolate
+  ///
+  /// It is available there: the alarm isolate initialises Firebase anyway,
+  /// because §10 has it read Firestore before deciding whether to speak. It is
+  /// not used, and the reason is the **shape of each failure**.
+  ///
+  /// `currentUser` is restored from disk during `initializeApp`. If it comes
+  /// back null when a bare isolate asks — a restore still in flight, a token the
+  /// SDK decided to re-fetch — the reconcile finds **zero links, does nothing,
+  /// and reports success**. Nothing is logged, nothing is shown, and the dead
+  /// man's switch is simply not armed. That is the silence §12 calls the one
+  /// failure this app cannot detect in itself.
+  ///
+  /// This row cannot be missing while a user is signed in. If it were ever
+  /// *stale* — an account switch the UI failed to record — the reads for those
+  /// links come back `permission-denied`, which ADR-0004 maps to **refused**,
+  /// which posts the access-lost notice and turns §13's panel red. Wrong and
+  /// loud beats absent and quiet, on this side.
+  ///
+  /// Null means signed out, which is a real state and not an error: nothing is
+  /// watched, nothing is armed, and reconcile has nothing to do.
+  Future<String?> selfUid() => _setting(_keySelfUid);
+
+  Future<void> setSelfUid(String uid) => _putSetting(_keySelfUid, uid);
+
+  /// Clears the uid **and everything decided on its behalf**.
+  ///
+  /// The per-link cache has to go with the account, because every row in it
+  /// belongs to the uid that is leaving: `warningsShownFor`, the cached away
+  /// period, the pending warnings. Leaving them would let the next account
+  /// inherit standing warnings about a person it has never heard of — and, worse,
+  /// inherit the *alarms*, since `pending_alarms` is what the next reconcile
+  /// diffs against.
+  ///
+  /// **The device facts are deliberately kept**: the zone and the 12/24-hour
+  /// setting are properties of the phone, not of the account, and dropping them
+  /// would put the next session back on ADR-0002's documented UTC fallback until
+  /// the first resume. That is the fresh-install window `main()` closes on
+  /// purpose.
+  ///
+  /// Tearing the platform alarms down is **not** done here and must not be: §3's
+  /// rule is that nothing patches state incrementally, so the caller reconciles
+  /// afterwards and the empty desired set cancels them.
+  Future<void> clearSelfUid() => _db.transaction((txn) async {
+        await txn.delete('settings', where: 'key = ?', whereArgs: [_keySelfUid]);
+        for (final table in [
+          'warnings_shown',
+          'watcher_cache',
+          'pending_alarms',
+          'check_ins',
+          'links',
+          'self_away',
+        ]) {
+          await txn.delete(table);
+        }
+      });
 
   /// The debug harness's forced-date offset, in milliseconds.
   ///

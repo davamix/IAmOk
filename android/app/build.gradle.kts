@@ -1,5 +1,9 @@
 plugins {
     id("com.android.application")
+    // After the Android plugin and before Flutter's, which is where the
+    // FlutterFire setup puts it and where it can see the android block it
+    // generates resources for.
+    id("com.google.gms.google-services")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
 }

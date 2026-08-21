@@ -791,7 +791,7 @@ survival — and it has not been met by a platform limit, only by one plugin's h
 
 | Concern | Package |
 |---|---|
-| Firebase | `firebase_core`, `firebase_auth`, `cloud_firestore`, `firebase_messaging` |
+| Firebase | `firebase_core`, `firebase_auth`, `cloud_firestore`, `firebase_messaging`, `firebase_app_check` |
 | Sign-in | `google_sign_in` |
 | Display alarms + boot restore | `flutter_local_notifications` |
 | Logic-bearing alarms | `android_alarm_manager_plus` |
@@ -800,6 +800,14 @@ survival — and it has not been met by a platform limit, only by one plugin's h
 | Permissions | `permission_handler` — **deferred to Phase 7**, see below |
 | Connectivity | `connectivity_plus` |
 | State | `flutter_riverpod` |
+
+**`firebase_app_check` was missing from this table until Phase 4 step 6**, which is a documentation
+bug rather than a decision: App Check has been named in PLAN.md step 6, in
+[security/threat-model.md](../security/threat-model.md) and in the infrastructure notes since Phase 0.
+Added here rather than left to disagree with them. It ships in **monitoring mode only** and
+**protects nothing yet** — enforcing before clients are attesting would refuse every read, which
+ADR-0004 maps to *refused*, which is the access-lost notice arriving at every family at once. Until
+enforcement is enabled the rules are the whole defence, and no surface may imply otherwise.
 
 `permission_handler` is **not** in the Phase 2 build. `permission_handler_android` 14.0.0 does not
 compile below API 37 (it references `Manifest.permission.ACCESS_LOCAL_NETWORK` and

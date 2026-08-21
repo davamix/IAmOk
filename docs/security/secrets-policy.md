@@ -20,6 +20,7 @@ specific, and the reasoning for each entry is stated.
 | Firebase Admin SDK service-account JSON | `.local/`, downloaded only when a task needs it | Server-side credential. It bypasses security rules entirely — full read/write on Firestore and the ability to send FCM to any device. |
 | Google Play publishing service-account JSON | `.local/` | Can publish releases as the owner. |
 | Any `.env` file, any personal access token | `.local/` or the environment | — |
+| **App Check debug secret** (the UUID `DebugAppCheckProvider` prints to logcat) | Nowhere. Read it from logcat when needed, paste it into the console, and let it go. | Once registered it makes one install **attest unconditionally** — it is an allow-list entry that bypasses Play Integrity, so committing one would hand anybody who reads the repo a way past App Check the moment enforcement is turned on. It is regenerated whenever app data is cleared, so there is nothing worth keeping. |
 
 `.local/` is the private, never-committed working area for this repo. It is git-ignored as a whole
 directory. Nothing inside it is ever referenced by a committed path.

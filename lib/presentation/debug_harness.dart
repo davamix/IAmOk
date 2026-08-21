@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:firebase_app_check/firebase_app_check.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -281,6 +282,34 @@ class _DebugHarnessScreenState extends ConsumerState<DebugHarnessScreen> {
                     'everything else is pointed at the suite.';
               }
               return 'token, in full\n$token';
+            }),
+            _Action('Show App Check — monitoring only', () async {
+              // **This control cannot be a green tick, and should not read like
+              // one.** App Check is in MONITORING mode: it blocks nothing, and
+              // until enforcement is enabled the rules are the whole defence
+              // (`docs/security/threat-model.md`). A failure here costs a metric.
+              //
+              // In a debug build the provider is `AndroidDebugProvider`, which
+              // attests nothing — it prints a UUID to logcat that a human pastes
+              // into the Firebase console, after which that one install is
+              // trusted. So a failure is the EXPECTED state until somebody has
+              // done that, and saying so here is the difference between a
+              // finding and an afternoon.
+              try {
+                final token = await FirebaseAppCheck.instance.getToken();
+                return token == null
+                    ? 'no token — nothing is being attested\n'
+                        'monitoring mode, so nothing is blocked either'
+                    : 'token acquired (${token.length} chars)\n'
+                        'this install is attesting; the console shows it under '
+                        'App Check > Requests';
+              } on Object catch (error) {
+                return 'no token: $error\n\n'
+                    'EXPECTED until the debug token is registered. Find it with\n'
+                    '  adb logcat | Select-String DebugAppCheckProvider\n'
+                    'and add it in the Firebase console under App Check.\n'
+                    'Nothing is blocked either way — monitoring mode.';
+              }
             }),
             _Action('Register the FCM token again', () async {
               // Idempotence, the same check the `users/{uid}` write gets. The

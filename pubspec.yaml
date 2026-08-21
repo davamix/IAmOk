@@ -95,6 +95,21 @@ dependencies:
   # connection.
   firebase_messaging: ^16.0.4
 
+  # Phase 4 step 6 (§8, threat-model.md). **Monitoring mode only**, and the order
+  # is the whole point: enforcing before clients are sending App Check tokens
+  # locks the app out of its own backend. The client ships first, the console
+  # watches the metrics, and enforcement is turned on in a later phase once real
+  # traffic is attested.
+  #
+  # It is NOT a control yet, and the threat model says so in as many words —
+  # until enforcement is enabled the rules are the whole defence. Nothing here
+  # may be described as protecting anything.
+  #
+  # Not in §15's package table, which predates the decision; PLAN.md step 6 and
+  # `docs/infrastructure/deploy-notes.md` are where it was chosen. §15 amended
+  # to match rather than left to disagree.
+  firebase_app_check: ^0.4.6
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

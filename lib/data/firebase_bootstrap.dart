@@ -1,6 +1,8 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_app_check/firebase_app_check.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:flutter/foundation.dart';
 
 /// Brings Firebase up in **whichever isolate is asking**, and points it at the
 /// emulator suite when this build was compiled for one.
@@ -73,6 +75,63 @@ abstract final class FirebaseBootstrap {
       await Firebase.initializeApp();
     }
     _useEmulators();
+    await _activateAppCheck();
+  }
+
+  static bool _appCheckActivated = false;
+
+  /// Starts sending App Check tokens — **and protects nothing yet.**
+  ///
+  /// ## The order is the decision (PLAN.md step 6)
+  ///
+  /// App Check is provisioned in **monitoring mode only**. Enforcing it before
+  /// clients are attesting would lock the app out of its own backend — every
+  /// read refused, which ADR-0004 maps to *refused*, which is the access-lost
+  /// notice arriving at every family at once. So the client ships first, the
+  /// console watches real traffic, and enforcement is a later phase's decision
+  /// once the metrics say attested traffic is what is actually arriving.
+  ///
+  /// Until then `docs/security/threat-model.md` is right that **the rules are
+  /// the whole defence**, and nothing here may be described as protecting
+  /// anything.
+  ///
+  /// ## Two providers, and the debug one is not a weaker Play Integrity
+  ///
+  /// `AndroidProvider.debug` does not attest anything: it prints a UUID to
+  /// logcat that a human pastes into the Firebase console, after which that one
+  /// install is trusted unconditionally. That is a **backdoor with a list**, and
+  /// it is acceptable only because it is compiled out — the branch is chosen by
+  /// `kDebugMode`, a const, so a release build cannot reach it and the tree
+  /// shaker removes it. Same argument as `AuthRepository._emulatorCredential`,
+  /// which mints an identity without a password behind a compile-time const.
+  ///
+  /// ## Failure is swallowed, deliberately
+  ///
+  /// A device with no Play Services, an out-of-date Play Store, or a rooted ROM
+  /// cannot produce an attestation. In monitoring mode that costs a metric and
+  /// nothing else — so it must not be able to fail a launch, an alarm, or an FCM
+  /// wake-up. §3's rule about tier 2 applies here for a stronger reason: this is
+  /// tier *zero*, and the app is fully correct without it.
+  ///
+  /// Guarded by a flag rather than by `Firebase.apps`, because this is a
+  /// per-isolate SDK setting and each of §4's three isolates has to activate its
+  /// own.
+  static Future<void> _activateAppCheck() async {
+    if (_appCheckActivated) return;
+    _appCheckActivated = true;
+    try {
+      await FirebaseAppCheck.instance.activate(
+        // `providerAndroid`, not the deprecated `androidProvider` — the latter
+        // is removed in a future major and this is a new call site, so there is
+        // no reason to write the version that has to be migrated later.
+        providerAndroid: kDebugMode
+            ? const AndroidDebugProvider()
+            : const AndroidPlayIntegrityProvider(),
+      );
+    } on Object {
+      // Swallowed; see above. There is no surface that could honestly explain
+      // this to anybody, and nothing depends on the answer.
+    }
   }
 
   static bool _wired = false;

@@ -58,6 +58,13 @@ app.*.map.json
 # (functions/). Nothing secret, just large and regenerable from package.json.
 **/node_modules/
 
+# The Functions' TypeScript output. **Anchored with a leading slash, and it must
+# stay that way**: a bare `lib/` here would also match this repo's Dart source
+# directory, and a fresh clone would have no app at all. That is the exact shape
+# of the failure tools/check-secrets-ignored.ps1's second half exists to catch,
+# so both halves are asserted there.
+/functions/lib/
+
 # ── Secrets ───────────────────────────────────────────────────────────────────
 # Rationale for every line here: docs/security/secrets-policy.md
 # Verify with: pwsh -File tools/check-secrets-ignored.ps1

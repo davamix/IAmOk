@@ -79,23 +79,63 @@ something breaks at a bad moment.
 Deploy rules **before** the client code that depends on them. A client shipped against rules that
 are not live yet fails in a way that looks like a client bug.
 
-## Emulators — Phase 4
+## Emulators — running, 2026-08-21
 
-Rules and Functions are tested against the emulator suite, never against the live project.
+Rules and Functions are tested against the emulator suite, **never against the live project**, and
+from Phase 4 the client is developed against it too.
 
 ```powershell
-firebase emulators:start --only firestore,functions,auth --project i-am-ok-c74ca
+pwsh -File tools/emulators.ps1                    # auth + firestore + functions
+pwsh -File tools/emulators.ps1 -Fresh             # ignore any saved state
+pwsh -File tools/emulators.ps1 -Device 1720f883   # ...and expose it to that handset
+pwsh -File tools/rules-test.ps1                   # the rules suite, start to shutdown
 ```
 
-**Not runnable yet.** There is no `firebase.json` and no `functions/` directory, so this fails
-today with a directory error — both arrive in Phase 4.
+**Verified end to end**: the suite starts and all three ports accept connections — auth 9099,
+firestore 8080, functions 5001 — with the Functions definitions loaded from source. Probed by
+connecting to each port from inside `emulators:exec`, not read off the startup banner.
 
-**Two prerequisites for this machine**, worth knowing before the first attempt rather than after:
+**The project id is `demo-i-am-ok`, not `i-am-ok-c74ca`**, and that is the safety property rather
+than a naming preference. Firebase tooling treats a `demo-` prefix as a guaranteed-offline project:
+no credentials are used and the SDKs refuse to reach production for it even when something is
+misconfigured. Nothing local can write to the real database by accident.
 
-- The Firestore emulator needs a **JDK on `PATH`**, and `java` is *not* on `PATH` here. The Android
-  Studio JBR at `D:\Android\Android Studio\jbr` is the one to point at.
+**Two prerequisites for this machine**, both handled by the scripts rather than left as knowledge:
+
+- The Firestore emulator needs a **JDK on `PATH`**, and `java` is *not* on `PATH` here. Both scripts
+  set it from the Android Studio JBR at `D:\Android\Android Studio\jbr`.
 - Emulator export directories are git-ignored (`firebase-export-*/`, `emulator-data/`) because an
   `--export-on-exit` of real data would put check-in history in the repo.
+
+### The local runtime is Node 24; the deployed one is Node 22
+
+Measured, not assumed — the emulator says so on every start:
+
+```
+!  functions: Your requested "node" version "22" doesn't match your global version "24".
+   Using node@24 from host.
+```
+
+`functions/package.json` pins `"engines": {"node": "22"}`, which is what Cloud Functions deploys
+against. So **the emulator runs a newer runtime than production**, which is the classic direction
+for "works locally": a Node 24 API that does not exist in 22 passes here and fails after deploy.
+`tsc` cannot catch it — `@types/node` is not installed and the target is `es2023`, not a Node
+version. Accepted for now because these functions do little beyond the Admin SDK; if that stops
+being true, install Node 22 alongside and select it, rather than relaxing the engine pin.
+
+### Reaching the emulators from a device
+
+They bind to **127.0.0.1 only**, deliberately: a database with no authentication listening on every
+interface of a home network is not something to arrange by accident.
+
+| | How |
+|---|---|
+| **API 36 AVD** | `10.0.2.2` — the emulator's built-in alias for the host loopback |
+| **POCO F3** | `tools/emulators.ps1 -Device 1720f883` sets up `adb reverse` over USB, after which the phone's own `127.0.0.1` reaches this machine |
+
+`adb reverse` rather than a LAN bind: it opens no port to the network, it dies with the cable, and
+everything else in this project already drives the POCO over USB. It does **not** survive a
+reconnect — re-run the script if the device is unplugged.
 
 ## Prerequisites still outstanding
 
@@ -106,6 +146,21 @@ All Phase 4, all from [firebase-setup-prompt.md](firebase-setup-prompt.md):
 - **2nd-gen Functions APIs** — Cloud Functions, Cloud Build, Artifact Registry, Eventarc, Cloud
   Run, Pub/Sub, and the **Cloud Storage GCP API for build artifacts**. A 2nd-gen deploy fails
   confusingly if any one of them is missing; enable all of them before the first attempt.
+
+  > **Still reading `SERVICE_DISABLED` on 2026-08-21**, checked twice seven minutes apart after the
+  > owner enabled it:
+  >
+  > ```
+  > firebase functions:list --project i-am-ok-c74ca
+  > 403 … "Cloud Functions API has not been used in project i-am-ok-c74ca before or it is disabled"
+  > reason: SERVICE_DISABLED   service: cloudfunctions.googleapis.com
+  > ```
+  >
+  > Google's own message allows for propagation lag, so this is recorded rather than concluded.
+  > **Re-check with the command above before the first deploy** — and note it probes the *v1*
+  > endpoint while our functions are 2nd-gen, which is not the discrepancy it looks like: both
+  > generations live behind the same `cloudfunctions.googleapis.com` service. None of the emulator
+  > work above depends on it.
 - **FCM v1 confirmed**, legacy server key confirmed unused.
 - **App Check** with Play Integrity, registered and set to **monitoring only**. Enforcing before
   the client sends App Check tokens locks the app out of its own backend.

@@ -82,6 +82,8 @@ $mustBeIgnored = @(
     # earlier.
     'rules-tests/node_modules/x'
     'functions/node_modules/x'
+    # The Functions' TypeScript output.
+    'functions/lib/index.js'
 )
 
 # Committed on purpose. See docs/security/secrets-policy.md §2.
@@ -96,6 +98,12 @@ $mustBeTrackable = @(
     'firebase.json'
     'firestore.rules'
     'firestore.indexes.json'
+    # **The Dart source directory**, asserted because the rule that ignores the
+    # Functions' build output is one missing slash away from matching it. A bare
+    # `lib/` in .gitignore would hide the entire app from a fresh clone while
+    # every other check here still reported OK.
+    'lib/main.dart'
+    'functions/src/index.ts'
 )
 
 $failures = @()

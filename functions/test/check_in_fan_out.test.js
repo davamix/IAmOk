@@ -437,6 +437,57 @@ describe('fanOutCheckIn — pruning dead tokens', () => {
     assert.equal((await db.collection(`users/${ANA}/tokens`).get()).size, 3);
   });
 
+  it('a sendEach that THROWS still reports who we tried to reach', async () => {
+    // The failure this was written for: no FCM credentials, which is the
+    // permanent state of the local loop because FCM has no emulator. Before
+    // `transportError` existed the trigger logged "fan-out failed" and nothing
+    // else — so "the family were not nudged" could not be told apart from
+    // "nobody is linked" without a second investigation.
+    await seedLink({ watcherUid: ANA });
+    await seedToken(ANA, 'token-ana');
+
+    const sender = {
+      calls: [],
+      async sendEach(messages) {
+        this.calls.push(messages);
+        throw new Error('Credential implementation provided to initializeApp()');
+      },
+    };
+    const result = await fanOutCheckIn({ db, sender }, fact());
+
+    assert.equal(result.acceptedLinks, 1);
+    assert.equal(result.tokens, 1);
+    assert.equal(result.sent, 0);
+    assert.equal(result.failed, 1);
+    assert.match(result.transportError, /Credential implementation/);
+  });
+
+  it('a batch that never reached FCM prunes nothing', async () => {
+    // The fleet-wide rule from the other side. A throw says nothing about any
+    // token in the batch — treating it as a verdict would deregister every
+    // watcher in the fleet the first time a credential expired.
+    await seedLink({ watcherUid: ANA });
+    await seedToken(ANA, 'token-a');
+    await seedToken(ANA, 'token-b');
+
+    const sender = { async sendEach() { throw new Error('network down'); } };
+    const result = await fanOutCheckIn({ db, sender }, fact());
+
+    assert.equal(result.pruned, 0);
+    assert.equal((await db.collection(`users/${ANA}/tokens`).get()).size, 2);
+  });
+
+  it('a successful fan-out carries no transportError at all', async () => {
+    // So the trigger's `=== undefined` test means what it says, and an ordinary
+    // day does not log at warn level.
+    await seedLink({ watcherUid: ANA });
+    await seedToken(ANA, 'token-ana');
+
+    const result = await fanOutCheckIn({ db, sender: recordingSender() }, fact());
+
+    assert.equal('transportError' in result, false);
+  });
+
   it('a failure for one watcher does not stop another being told', async () => {
     await seedLink({ watcherUid: ANA });
     await seedLink({ watcherUid: BETO });

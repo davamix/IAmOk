@@ -2,6 +2,9 @@
 
 **Date:** 2026-08-20 · **Status:** **Accepted** — chosen by the owner over the two alternatives,
 and **revisited in Phase 4** on a named trigger, not on a feeling. See *Revisit trigger*.
+**The trigger fired on 2026-08-21 and both its questions passed**; the decision stands until the
+owner picks a successor, because the choice between the two alternatives is theirs and not a
+measurement. See *THE TRIGGER HAS FIRED*.
 **Phase:** 3 (measured on hardware, five runs)
 **Affects:** [ARCHITECTURE.md](../ARCHITECTURE.md) §9, §10, §13, §14
 
@@ -165,6 +168,52 @@ argument for option 2 weakens considerably. If (1) also passes, option 1 becomes
 this ADR should be superseded rather than amended.
 
 **Until then the decision stands and the app may not promise a delivery time.**
+
+### THE TRIGGER HAS FIRED — measured 2026-08-21, and both questions passed
+
+Run on the POCO F3 with stock power settings, the app **killed**, and the device in **forced deep
+Doze** (`dumpsys deviceidle get deep` = `IDLE` at every sample across the window). Full write-up,
+including the method and why the evidence is what it is, in
+[`docs/testing/device-matrix.md`](../../testing/device-matrix.md).
+
+**(2) Does high-priority data-only FCM wake the background isolate in deep Doze on this handset?**
+**Yes.** The platform grants a ~20-second temporary allowlist and names the reason itself:
+`reason:high-prio FCM`. No JobScheduler job is created at all — delivery goes through
+`startService()`, exactly as measurement B predicted. **Mutation-checked**: the identical run with
+`priority: 'normal'` produced no allowlist grant, no process, and no reconcile, and restoring `'high'`
+restored the result. The priority is load-bearing.
+
+**(1) Can a Flutter background engine start *and complete a Firestore read* inside that window?**
+**Yes, with a wide margin** — 2 974 ms from the check-in being created to the reconcile *starting*,
+against a ~20 s window, with the read completing after that. The window is twice the ~10 s this ADR
+assumed.
+
+**One thing is not settled, and it is the thing this ADR itself flagged.** The read went to the
+emulator over `adb reverse` — a loopback socket, not a radio — and this ADR's own words are that *"a
+network round trip on a cold radio in Doze is a different order of cost"*. Doze's restrictions are
+per-uid and loopback is ordinarily exempt, so the run cannot distinguish *the allowlist granted
+network* from *loopback was never blocked*. The allowlist grant was directly observed, which weakens
+that objection but does not close it.
+
+### What follows, and what is deliberately NOT decided here
+
+This ADR says that if both pass it *"should be superseded rather than amended"*. **The measurement
+half of that is done; the decision half is the owner's**, because superseding means choosing between
+the two alternatives above and they are not equivalent in cost:
+
+- **Option 1 — deliver from the receiver.** Now demonstrably viable *for the FCM path*. But this
+  app's warning is armed by `android_alarm_manager_plus`, and what makes that late is that the plugin
+  hands its work to JobScheduler instead of using the allowlist its own broadcast receiver was
+  granted (measurement A). Taking this option means replacing or forking that plugin — a real cost,
+  on the one path where a false or missing warning matters most.
+- **Option 2 — §9's scheduled server-side Function.** The objection ADR-0007 records is unchanged and
+  is not a cost question: **a server deciding "no check-in" cannot see the watcher's local away
+  cache**, so §10's verify-before-speaking design would have two deciders and could produce two
+  answers about whether someone's relative is all right.
+
+So: the trigger has fired, the facts are in, and **this ADR stays Accepted until the owner picks a
+successor**. What has changed is that the app now *could* promise a delivery time on this handset —
+not that it does.
 
 ## What this does not close
 

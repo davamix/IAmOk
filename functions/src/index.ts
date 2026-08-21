@@ -121,10 +121,19 @@ export const onCheckInCreated = onDocumentCreated(
         { db: getFirestore(), sender },
         checkInFactFrom(watchedUid, date, data),
       );
-      logger.info('onCheckInCreated: fanned out', { watchedUid, date, ...result });
+      // **One line either way, and it always carries the counts.** A transport
+      // fault comes back in `transportError` rather than as a throw, precisely
+      // so that "the family were not nudged" can be told apart from "nobody is
+      // linked" without a second investigation — see [FanOutResult].
+      const line = { watchedUid, date, ...result };
+      if (result.transportError === undefined) {
+        logger.info('onCheckInCreated: fanned out', line);
+      } else {
+        logger.warn('onCheckInCreated: fanned out, transport failed', line);
+      }
     } catch (error) {
-      // Counts and ids only. **Never a token** — a token is enough to send a
-      // push to somebody's phone, and a log is not the place to keep one.
+      // Only a Firestore fault reaches here now. Counts and ids only — **never
+      // a token**, which is enough to send a push to somebody's phone.
       logger.error('onCheckInCreated: fan-out failed', { watchedUid, date, error });
     }
   },

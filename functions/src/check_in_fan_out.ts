@@ -123,6 +123,28 @@ export interface FanOutResult {
   readonly sent: number;
   readonly failed: number;
   readonly pruned: number;
+
+  /**
+   * Why the transport itself failed, if it did — credentials, a network fault,
+   * a batch FCM rejected outright.
+   *
+   * **This field exists because of what the counts looked like without it.**
+   * A `sendEach` that throws used to propagate, so the trigger logged
+   * `fan-out failed` and *nothing else*: not how many watchers were found, not
+   * how many devices were registered, not whether the link query had even
+   * matched. Those are the whole diagnosis. "The family were not nudged" has two
+   * completely different causes — **nobody is linked** and **we could not
+   * reach FCM** — and one line that cannot tell them apart sends whoever is
+   * debugging to the wrong half of the system. Measured on the POCO F3,
+   * 2026-08-21, where the emulator has no FCM credentials by construction and
+   * the failure was the expected outcome.
+   *
+   * A message, never an object: `sendEach` throws for credential and transport
+   * faults, which carry no token — per-token verdicts arrive in `responses`,
+   * not as a throw — and a log is not the place to keep something that can send
+   * a push to somebody's phone.
+   */
+  readonly transportError?: string;
 }
 
 /**
@@ -191,7 +213,8 @@ export async function fanOutCheckIn(
     return { acceptedLinks: links.length, tokens: 0, sent: 0, failed: 0, pruned: 0 };
   }
 
-  const { sent, failed, dead } = await send(deps.sender, recipients, fact);
+  const { sent, failed, dead, transportError } =
+    await send(deps.sender, recipients, fact);
   const pruned = await pruneDeadTokens(deps.db, dead);
 
   return {
@@ -200,6 +223,7 @@ export async function fanOutCheckIn(
     sent,
     failed,
     pruned,
+    ...(transportError === undefined ? {} : { transportError }),
   };
 }
 
@@ -333,14 +357,34 @@ async function send(
   sender: PushSender,
   recipients: Recipient[],
   fact: CheckInFact,
-): Promise<{ sent: number; failed: number; dead: Recipient[] }> {
+): Promise<{
+  sent: number;
+  failed: number;
+  dead: Recipient[];
+  transportError?: string;
+}> {
   let sent = 0;
   let failed = 0;
   const dead: Recipient[] = [];
+  let transportError: string | undefined;
 
   for (let start = 0; start < recipients.length; start += SEND_BATCH_LIMIT) {
     const batch = recipients.slice(start, start + SEND_BATCH_LIMIT);
-    const response = await sender.sendEach(batch.map((r) => messageFor(r, fact)));
+
+    let response: BatchResponse;
+    try {
+      response = await sender.sendEach(batch.map((r) => messageFor(r, fact)));
+    } catch (error) {
+      // **Counted, recorded, and NOT rethrown.** A transport fault is a fact
+      // about FCM, not about this fan-out: the counts above it are still true
+      // and are the diagnosis. The remaining batches are still attempted, in
+      // case the fault was specific to this one — and nothing is pruned, because
+      // a batch that never reached FCM has told us nothing about any token in
+      // it. That last part is the fleet-wide rule again, from the other side.
+      failed += batch.length;
+      transportError ??= error instanceof Error ? error.message : String(error);
+      continue;
+    }
 
     // Indexed rather than zipped because `BatchResponse` guarantees the
     // responses are in the order the messages went out, and that ordering is the
@@ -357,7 +401,7 @@ async function send(
     });
   }
 
-  return { sent, failed, dead };
+  return { sent, failed, dead, transportError };
 }
 
 /**

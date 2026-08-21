@@ -845,6 +845,86 @@ un-deferring §9's scheduled server-side function, and ADR-0007 is the record of
       zone, resume, and confirm `device_timezone` updated **and** the alarms re-armed at the new wall
       time.
 
+## ADR-0008's deciding measurement — run 2026-08-21, and it answers both questions
+
+**Phase 4 step 7, and exit criterion 2, run as one measurement rather than as a tick.** POCO F3,
+Android 13 / HyperOS 1.0, **stock power settings**, app **killed**, device in **forced deep Doze**.
+The `onCheckInCreated` fan-out running in the local functions emulator sent a **real** FCM message —
+FCM has no emulator, so this half is always the live service.
+
+### The result, and the mutation that proves it means something
+
+Three runs of the same script, differing only in the Function's `android.priority`:
+
+| `priority` | `deviceidle tempwhitelist` | process started | `watcher_cache.last_reconcile_at` |
+|---|---|---|---|
+| `'high'` | **granted, ~20 s** | yes | **moved** |
+| `'normal'` | never, polled every 2 s for 40 s | **none** | **0 ms** |
+| `'high'` (restored) | granted, ~20 s | yes | moved |
+
+The platform states the reason in words, which is as direct as this gets:
+
+```
+UID=10612: +18s445ms - broadcast:u0a189:com.google.android.c2dm.intent.RECEIVE,reason:high-prio FCM
+UID=10612:  +1s551ms - broadcast:u0a189:com.google.android.c2dm.intent.RECEIVE,reason:high-prio FCM
+(gone by the next sample)
+```
+
+`dumpsys deviceidle get deep` read `IDLE` at every sample from +0 s to +40 s, so the device did not
+leave deep Doze at any point in the window. **`priority: 'high'` is therefore load-bearing and not a
+detail** — the normal-priority run is the same code, the same device, the same Doze, and it produced
+nothing at all.
+
+### Why `last_reconcile_at` is the evidence, and not a log line or a notification
+
+`WatcherCache.applyRead` returns the cache **untouched** unless the read succeeded, and stamps
+`lastReconcileAt` only inside that branch. So the value moving proves **both** of ADR-0008's
+questions at once: a Flutter engine started, *and* it completed a Firestore read. Nothing else could
+have moved it — the process was killed, the warning alarm is armed for 10:00, and the watched side's
+reminders are display-only notifications that run no Dart at all.
+
+The store is read by **pulling the database**, never by opening the app: opening it reconciles, which
+would manufacture the very state change being measured.
+
+```
+run-as io.github.davamix.i_am_ok base64 databases/i_am_ok.db   # then decode and PRAGMA integrity_check
+```
+
+That is the inverse of the documented write technique, and it works where `run-as … sqlite3` does
+not — there is no `sqlite3` binary on this device.
+
+### The numbers
+
+```
+check-in created (device clock)  ->  reconcile STARTED          2 974 ms
+                                     allowlist window            ~20 000 ms
+FCM receiver -> Dart VM up                                       ~1 000 ms
+Dart VM up -> FlutterFirebaseMessagingBackgroundService started  ~1 050 ms
+```
+
+`lastReconcileAt` is `clock.now()` taken at the *top* of reconcile, so 2 974 ms is delivery + engine
+start + store open, with roughly seventeen seconds of allowlist still to run. The read itself
+completed after that, and the proof it completed at all is that the cache row was rewritten.
+
+**Foreground, for completeness** — a different code path, `onMessage` in the UI isolate rather than
+`onBackgroundMessage`: reconciled in **397 ms**, with the process id unchanged before and after. The
+unchanged pid is the part that matters; a new one would mean the background isolate did the work and
+this proved nothing.
+
+### What this does NOT settle, and it is the one thing left
+
+**The Firestore read went to the emulator over `adb reverse` — a loopback socket, not a radio.**
+ADR-0008 raises exactly this: *"a network round trip on a cold radio in Doze is a different order of
+cost"*. Doze's network restrictions are applied per-uid and loopback is ordinarily exempt, so this
+run cannot distinguish *the allowlist granted network* from *loopback was never blocked*.
+
+The allowlist grant was directly observed, which weakens the objection considerably but does not
+close it. **Closing it requires the same measurement against the LIVE project**, on a cold radio,
+which is the first genuinely good reason this phase has had to point the app at production.
+
+Until that runs, the honest statement is: **question 2 is answered yes; question 1 is answered yes
+for everything except the real-radio round trip.**
+
 ## What one phone and an emulator can prove — decided 2026-08-20
 
 PLAN.md's Phase 4 exit criterion is *"a tap on one **physical phone** quietly updates a **second

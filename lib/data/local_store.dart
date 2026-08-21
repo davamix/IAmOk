@@ -672,6 +672,16 @@ class LocalStore {
   /// land between them. The uids are not in the UPDATE set: they are what the
   /// id is derived from, so a row whose uids changed is a different link.
   Future<void> upsertLink(Link link) {
+    return _db.transaction((txn) => _upsertLinkIn(txn, link));
+  }
+
+  /// [upsertLink]'s statement, callable from inside an existing transaction.
+  ///
+  /// Factored out for [replaceLinksFor], which has to upsert several links and
+  /// prune the rest atomically. Two copies of this would be two chances to write
+  /// the delete-first version, which is the one that destroys the standing
+  /// warnings.
+  static Future<void> _upsertLinkIn(DatabaseExecutor txn, Link link) async {
     final values = <String, Object?>{
       'status': link.status.name,
       'watched_name': link.watchedName,
@@ -683,27 +693,61 @@ class LocalStore {
       'accepted_at': link.acceptedAt?.toUtc().millisecondsSinceEpoch,
     };
 
-    return _db.transaction((txn) async {
-      // An UPDATE leaves the row in place, so nothing cascades — which is the
-      // whole point. `INSERT OR REPLACE` deletes first, and `watcher_cache`
-      // and `warnings_shown` cascade on delete, so a link rewrite would take
-      // every standing warning and the access-lost cadence anchor with it.
-      final changed = await txn.update(
-        'links',
-        values,
-        where: 'id = ?',
-        whereArgs: [link.id],
-      );
-      if (changed > 0) return;
+    // An UPDATE leaves the row in place, so nothing cascades — which is the
+    // whole point. `INSERT OR REPLACE` deletes first, and `watcher_cache`
+    // and `warnings_shown` cascade on delete, so a link rewrite would take
+    // every standing warning and the access-lost cadence anchor with it.
+    final changed = await txn.update(
+      'links',
+      values,
+      where: 'id = ?',
+      whereArgs: [link.id],
+    );
+    if (changed > 0) return;
 
-      await txn.insert('links', {
-        'id': link.id,
-        'watched_uid': link.watchedUid,
-        'watcher_uid': link.watcherUid,
-        ...values,
-      });
+    await txn.insert('links', {
+      'id': link.id,
+      'watched_uid': link.watchedUid,
+      'watcher_uid': link.watcherUid,
+      ...values,
     });
   }
+
+  /// Makes the stored links for [uid] match [links] exactly — Phase 4's sync.
+  ///
+  /// **Upsert then prune, in one transaction**, and never a delete-then-insert.
+  /// The rows that hang off a link cascade on delete: `watcher_cache` carries the
+  /// standing warnings and the access-lost cadence anchor, and `warnings_shown`
+  /// is what stops a warning being posted twice. Rewriting a link the blunt way
+  /// would take all of that with it, and the visible symptom would be every
+  /// standing warning firing again the next morning — a fresh round of false
+  /// claims to a family, produced by a sync. [upsertLink] avoids that by
+  /// updating in place, and this reuses its statement rather than a second copy.
+  ///
+  /// **The prune is what makes a revocation on another device arrive here**, and
+  /// it is the reason this takes the whole desired set rather than one link at a
+  /// time: a link the server no longer returns must go, or the alarm isolate
+  /// keeps warning about somebody this user no longer watches.
+  ///
+  /// It is **only ever called with a set the server actually returned** — see
+  /// `LinkRepository.syncInto`, which does nothing at all on a failed read. A
+  /// failed read here would mean an empty set, which would delete every link on
+  /// the device and disarm the whole dead man's switch.
+  Future<void> replaceLinksFor(String uid, List<Link> links) =>
+      _db.transaction((txn) async {
+        for (final link in links) {
+          await _upsertLinkIn(txn, link);
+        }
+
+        final keep = links.map((l) => l.id).toList();
+        final placeholders = List.filled(keep.length, '?').join(', ');
+        await txn.delete(
+          'links',
+          where: '(watched_uid = ? OR watcher_uid = ?)'
+              '${keep.isEmpty ? '' : ' AND id NOT IN ($placeholders)'}',
+          whereArgs: [uid, uid, ...keep],
+        );
+      });
 
   Future<List<Link>> allLinks() async =>
       (await _db.query('links', orderBy: 'id')).map(_linkFrom).toList();

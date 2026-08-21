@@ -115,6 +115,14 @@ Future<void> main() async {
   // callers and it was written out twice — see [AppServices.cacheDeviceFacts].
   await services.cacheDeviceFacts();
 
+  // **Links before anything reconciles.** They are the input every other
+  // decision derives from — who the watched side names, and which warning
+  // alarms the watcher side arms — so reconciling first would decide against
+  // the picture the previous session left behind. On a failed read it does
+  // nothing and the previous picture is what gets used, which is the correct
+  // outcome and the reason `syncInto` returns a bool rather than throwing.
+  await services.syncLinks();
+
   runApp(
     ProviderScope(
       overrides: [appServicesProvider.overrideWithValue(services)],
@@ -229,6 +237,10 @@ class _IAmOkAppState extends ConsumerState<IAmOkApp>
   Future<void> _onResumed() async {
     final services = ref.read(appServicesProvider);
     await services.cacheDeviceFacts();
+    // Same ordering as launch, and for the same reason: a link revoked while
+    // this app was backgrounded has to be gone before the reconcile below
+    // decides what to arm.
+    await services.syncLinks();
     if (!mounted) return;
     if (!IAmOkApp.repairOnResume(
       state: AppLifecycleState.resumed,

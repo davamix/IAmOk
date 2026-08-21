@@ -95,10 +95,39 @@ pwsh -File tools/rules-test.ps1                   # the rules suite, start to sh
 firestore 8080, functions 5001 — with the Functions definitions loaded from source. Probed by
 connecting to each port from inside `emulators:exec`, not read off the startup banner.
 
-**The project id is `demo-i-am-ok`, not `i-am-ok-c74ca`**, and that is the safety property rather
-than a naming preference. Firebase tooling treats a `demo-` prefix as a guaranteed-offline project:
-no credentials are used and the SDKs refuse to reach production for it even when something is
-misconfigured. Nothing local can write to the real database by accident.
+### The emulator runs as `i-am-ok-c74ca` — corrected 2026-08-21, after a false green
+
+This said `demo-i-am-ok`, on the reasoning that Firebase treats a `demo-` prefix as a
+guaranteed-offline project. **That reasoning does not apply to the app**, and acting on it produced
+a device run that proved less than it appeared to.
+
+The app takes its project id from `android/app/google-services.json` — that is how
+`Firebase.initializeApp()` finds anything — so it reads and writes under **`i-am-ok-c74ca`**
+whatever the emulator was started with. The Firestore emulator serves every project id it is asked
+for, in separate namespaces, and **loads `firestore.rules` into only the one named by `--project`.**
+
+So with `demo-i-am-ok`, every read and write the app made was judged by the emulator's permissive
+default rules. Proved rather than suspected, by mutating the rules and re-probing:
+
+| | `demo-i-am-ok` | `i-am-ok-c74ca` |
+|---|---|---|
+| started as `demo-i-am-ok` | opening `invites/` **took effect** | opening `invites/` **changed nothing** |
+| started as `i-am-ok-c74ca` | changed nothing | **took effect** |
+
+`tools/emulators.ps1` now passes `--project i-am-ok-c74ca`, and `tools/seed-link.ps1` defaults to
+the same namespace — seeding into any other produces a link the app cannot see.
+
+**What actually keeps the app off production** is not the project id. It is `FirebaseBootstrap`
+calling `useAuthEmulator` and `useFirestoreEmulator`, which happens only when `IAMOK_EMULATOR_HOST`
+was set at compile time, plus the debug-only cleartext grant without which those calls cannot
+connect at all. The emulator itself never reaches production whatever it is called.
+
+`tools/rules-test.ps1` still uses `demo-i-am-ok`, and there it is a real guarantee: that suite hands
+its own project id to `initializeTestEnvironment`, so the rules and the namespace cannot disagree.
+
+> **The two suites cannot run at once** — they want the same ports. Stop
+> `tools/emulators.ps1` before `tools/rules-test.ps1`, or the second fails with a port already in
+> use.
 
 **Two prerequisites for this machine**, both handled by the scripts rather than left as knowledge:
 

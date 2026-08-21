@@ -292,12 +292,21 @@ void main() {
     'lib/application/watcher_reconcile_service.dart',
     'lib/data/check_in_reader.dart',
     // Phase 4. The alarm isolate reads Firestore before it decides whether to
-    // speak (§10), so it brings Firebase up itself — and it is on this list
+    // speak (§10), so it brings Firebase up itself — and these are on this list
     // rather than exempted from it because "the Firebase SDK is fine in a
     // background isolate" is exactly the kind of belief this guard exists to
-    // check. What it must not acquire is a widget tree, a Riverpod provider or
+    // check. What they must not acquire is a widget tree, a Riverpod provider or
     // `flutter_timezone`; the bans below are what say so.
+    //
+    // `debug_backend_override.dart` imports `package:flutter/foundation.dart`
+    // for `kDebugMode`, which is deliberate and safe: `foundation` carries no
+    // widget tree and no binding, and `warning_alarm_handler.dart` itself has
+    // imported it since Phase 3 for exactly the same constant. The bans below
+    // name `material`, `widgets`, `cupertino` and `dart:ui` one at a time rather
+    // than banning `package:flutter` wholesale, for this case.
+    'lib/data/debug_backend_override.dart',
     'lib/data/firebase_bootstrap.dart',
+    'lib/data/firestore_check_in_reader.dart',
     'lib/data/local_store.dart',
     'lib/copy/notification_copy.dart',
     'lib/platform/clock.dart',

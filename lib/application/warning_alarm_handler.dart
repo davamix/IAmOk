@@ -1,7 +1,8 @@
 import 'package:flutter/foundation.dart';
 
-import '../data/check_in_reader.dart';
+import '../data/debug_backend_override.dart';
 import '../data/firebase_bootstrap.dart';
+import '../data/firestore_check_in_reader.dart';
 import '../data/local_store.dart';
 import '../platform/clock.dart';
 import '../platform/notification_service.dart';
@@ -107,7 +108,15 @@ Future<void> warningAlarmCallback(int id) async {
   final service = WatcherReconcileService(
     store: store,
     clock: clock,
-    reader: SimulatedCheckInReader(store),
+    // **Composed here, not shared with the UI's copy.** §4: this isolate sees
+    // nothing the UI built. The two roots agreeing is a property of both being
+    // written the same way, which is why the pieces are small enough to read
+    // side by side — and why the clock passed in is this isolate's, including
+    // the harness offset it read off disk two lines up.
+    reader: DebugBackendOverride(
+      store: store,
+      real: FirestoreCheckInReader(now: clock.now),
+    ),
     notifications: notifications,
     alarms: AndroidWarningAlarmScheduler(
       warningAlarmCallback,

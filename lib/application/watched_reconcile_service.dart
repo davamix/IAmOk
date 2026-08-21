@@ -1,7 +1,9 @@
+import 'dart:async';
 import 'dart:math';
 
 import 'package:timezone/timezone.dart' as tz;
 
+import '../data/check_in_repository.dart';
 import '../data/local_store.dart';
 import '../domain/domain.dart';
 import '../platform/alarm_scheduler.dart';
@@ -128,12 +130,35 @@ class WatchedReconcileService {
     required this.clock,
     required this.alarms,
     required this.notificationsEnabled,
+    this.checkIns,
+    this.selfUid = LocalStore.signedOutUid,
     this.lockOwner = 'ui',
   });
 
   final LocalStore store;
   final Clock clock;
   final AlarmScheduler alarms;
+
+  /// Where a tap goes after it has been recorded locally (§7).
+  ///
+  /// **Nullable, and null is a real state rather than a missing dependency.**
+  /// Nobody is signed in — so there is no `users/{uid}` to file a check-in
+  /// under, and no link that could carry it to anyone. The tap is still recorded
+  /// in `LocalStore` and the screen still says *"You already tapped today"*,
+  /// because she did, and telling her otherwise would be the app lying about the
+  /// one thing she did.
+  ///
+  /// It is also null in every test that does not care, which keeps the
+  /// hundreds of existing ones honest: they assert the local half, which is the
+  /// half that decides what the screen shows.
+  final CheckInRepository? checkIns;
+
+  /// Whose check-ins these are. [LocalStore.signedOutUid] when nobody is.
+  ///
+  /// Carried on the service rather than taken per call, unlike `reconcile`'s
+  /// parameter, because the *write* needs it and the write happens inside
+  /// [tap]. Passing it twice would be two chances for them to differ.
+  final String selfUid;
 
   /// Names the caller in the reconcile lease, so a held lock is legible in a
   /// `dump()` instead of being an opaque token.
@@ -293,7 +318,28 @@ class WatchedReconcileService {
     // The day is decided **here, on the device, at tap time** — §11. Deriving
     // it from a server timestamp would file a 23:50 tap that synced at 08:00 on
     // the following day, which §17 rates "High — silently wrong data".
-    await store.recordCheckIn(CheckIn.forTap(now: now, zone: zone));
+    final checkIn = CheckIn.forTap(now: now, zone: zone);
+    await store.recordCheckIn(checkIn);
+
+    // **Fired, not awaited, and the local record above is why that is safe.**
+    //
+    // Firestore's own persistence queues this and replays it when the connection
+    // returns; the future it hands back completes only once the *server* has it.
+    // Awaiting that on a phone with no signal would hang the tap — the one
+    // action this app asks of an elderly person, on the screen whose entire job
+    // is to work every morning. HANDOVER.md's instruction not to build a retry
+    // queue is the same decision from the other side: the SDK is the queue.
+    //
+    // Errors are swallowed for the same reason. A write that cannot leave the
+    // device is not a failed tap, and there is no honest message to show about
+    // it here: the watcher's own reconcile is what notices a day that never
+    // arrived, and it has four carefully distinguished ways of saying so.
+    final repository = checkIns;
+    if (repository != null && selfUid != LocalStore.signedOutUid) {
+      unawaited(
+        repository.write(selfUid, checkIn).catchError((Object _, StackTrace _) {}),
+      );
+    }
 
     return reconcile(selfUid: selfUid);
   }

@@ -4,11 +4,35 @@
 #   pwsh -File tools/emulators.ps1 -Fresh             # ignore any saved state
 #   pwsh -File tools/emulators.ps1 -Device 1720f883   # ...and expose it to that handset
 #
-# **Nothing here touches the live project.** The suite runs under the project id
-# `demo-i-am-ok`; Firebase tooling treats a `demo-` prefix as a
-# guaranteed-offline project, so no credentials are used and the SDKs refuse to
-# reach production for it even when something is misconfigured. That is the same
-# guarantee tools/rules-test.ps1 relies on, for the same reason.
+# **Nothing here touches the live project.** Emulators are local processes; the
+# `--project` flag below names a *namespace*, not a destination.
+#
+# ## Why that flag is `i-am-ok-c74ca` and not `demo-i-am-ok` — measured 2026-08-21
+#
+# It was `demo-i-am-ok` first, on the reasoning that Firebase treats a `demo-`
+# prefix as guaranteed-offline. **That reasoning did not apply to the app**, and
+# assuming it did produced a false green.
+#
+# The app takes its project id from `android/app/google-services.json` — it has
+# to, that is how `Firebase.initializeApp()` finds anything — so it writes into
+# the emulator under **`i-am-ok-c74ca`** whatever this flag says. The Firestore
+# emulator serves every project id it is asked for, in separate namespaces, and
+# **loads `firestore.rules` into only the one it was started with.**
+#
+# So with `demo-i-am-ok` here, the app's reads and writes were being judged by
+# the emulator's permissive default rules. Proved rather than suspected: opening
+# `invites/` in `firestore.rules` and re-probing changed the answer under
+# `demo-i-am-ok` and changed nothing under `i-am-ok-c74ca`. Every device run in
+# that configuration would have confirmed the write path and told us nothing
+# about authorisation — while looking exactly like a pass.
+#
+# What actually keeps the app off production is not this flag. It is
+# `FirebaseBootstrap` calling `useAuthEmulator` and `useFirestoreEmulator`, which
+# only happens when `IAMOK_EMULATOR_HOST` was set at compile time, plus the
+# debug-only cleartext grant without which those calls cannot connect at all.
+# `tools/rules-test.ps1` still uses `demo-i-am-ok`, and there it is a real
+# guarantee: that suite supplies its own project id to
+# `initializeTestEnvironment`, so the rules and the namespace cannot disagree.
 #
 # ## Why a script rather than a bare `firebase emulators:start`
 #
@@ -107,7 +131,9 @@ Write-Host ''
 $emulatorArgs = @(
     'emulators:start'
     '--only', 'auth,firestore,functions'
-    '--project', 'demo-i-am-ok'
+    # The namespace the app itself uses. See the note at the top of this file:
+    # anything else and the rules load somewhere the app never looks.
+    '--project', 'i-am-ok-c74ca'
     '--export-on-exit', $data
 )
 

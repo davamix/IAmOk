@@ -1,8 +1,13 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../data/auth_repository.dart';
+import '../data/check_in_repository.dart';
 import '../data/check_in_reader.dart';
+import '../data/debug_backend_override.dart';
+import '../data/firestore_check_in_reader.dart';
+import '../data/link_repository.dart';
 import '../data/local_store.dart';
+import '../data/user_repository.dart';
 import '../domain/domain.dart';
 import '../platform/alarm_scheduler.dart';
 import '../platform/clock.dart';
@@ -64,6 +69,56 @@ class AppServices {
         clock: clock,
         alarms: alarms,
         notificationsEnabled: permissions.notificationsEnabled,
+        // Null when nobody is signed in, and the service treats that as "record
+        // it locally and sync nothing" rather than as an error. A tap on a
+        // signed-out phone is still a tap: the screen must still say
+        // "You already tapped today", because the person did.
+        checkIns: signedIn ? CheckInRepository() : null,
+        selfUid: selfUid,
+      );
+
+  /// Links, from Firestore into `LocalStore` (§6). UI isolate only.
+  ///
+  /// The background isolates never sync: they read whatever the last successful
+  /// sync left on disk, which is §4's rule that what a bare isolate needs is
+  /// already there. An alarm firing on a link the server revoked an hour ago
+  /// still decides correctly, because §10 step 2 reads `link.status` and the
+  /// read it makes will be refused anyway.
+  LinkRepository get links => LinkRepository();
+
+  /// Refreshes the local link set, and says whether it managed to.
+  ///
+  /// Called on launch and on resume, before either side reconciles — links are
+  /// the input every other decision is derived from, so reconciling first would
+  /// decide against the previous session's picture.
+  ///
+  /// **Never allowed to fail its caller**, the same rule as
+  /// [cacheDeviceFacts]: a sync that throws leaves the last good link set in
+  /// place, which is exactly what should happen, and an exception escaping into
+  /// a provider would replace the screen a person opened with an error about a
+  /// network call they did not make.
+  Future<bool> syncLinks() async {
+    try {
+      return await links.syncInto(store, selfUid);
+    } on Object {
+      return false;
+    }
+  }
+
+  /// `users/{uid}` and its token subcollection (§7). UI isolate only.
+  UserRepository get users => UserRepository();
+
+  /// **The tier-1 read, as every isolate composes it** — Firestore, with the
+  /// harness able to stand in front of it in a debug build and nowhere else.
+  ///
+  /// A getter rather than a field so the clock it closes over is the one this
+  /// `AppServices` holds, including the harness's forced offset. A reader built
+  /// at construction with `DateTime.now` would ask about a different set of days
+  /// from the one the policy then decides about — the two disagreeing about what
+  /// day it is, which is the class of defect §11 exists to prevent.
+  CheckInReader get checkInReader => DebugBackendOverride(
+        store: store,
+        real: FirestoreCheckInReader(now: clock.now),
       );
 
   /// The watcher's logic-bearing alarms. Exposed so the debug harness can arm
@@ -196,26 +251,17 @@ class AppServices {
       WatcherReconcileService(
         store: store,
         clock: clock,
-        // **Not gated on `kDebugMode`, unlike the clock offset — and the
-        // difference is worth stating, because the security review reasonably
-        // asked why.**
+        // Firestore, with the harness able to override it in a debug build
+        // — see [checkInReader] and `DebugBackendOverride`.
         //
-        // `main.dart` gates `debug_clock_offset_ms` so that "zero in every
-        // release build" is enforced by the reading code rather than resting on
-        // the writer being compiled out — a restore or a rooted device could
-        // otherwise put a row there. That argument applies just as well to
-        // `debug_simulated_backend`, which decides whether a family is warned.
-        //
-        // It cannot be applied, because the two are not symmetric: the clock
-        // offset has a real fallback (`Duration.zero`) and this has none. In
-        // Phase 3 the simulated reader **is** the implementation — there is no
-        // Firebase dependency to fall back to — so gating it would leave a
-        // release build with no reader at all rather than with a safe default.
-        //
-        // Phase 4 replaces this line with the real Firestore reader and the
-        // question disappears. If for any reason it does not, gate it then,
-        // when there is something to fall back to.
-        reader: SimulatedCheckInReader(store),
+        // **The `kDebugMode` gate the Phase 3 security review asked for is now
+        // applied.** It could not be then, and the reason was recorded here: the
+        // clock offset has a real fallback (`Duration.zero`) and the simulated
+        // reader had none, because in Phase 3 it *was* the implementation, so
+        // gating it would have left a release build with no reader at all
+        // rather than with a safe default. This paragraph promised the question
+        // would disappear when the real reader arrived. It has.
+        reader: checkInReader,
         notifications: notifications,
         alarms: warningAlarms,
         // One shared derivation, in `NotificationService`, rather than a copy

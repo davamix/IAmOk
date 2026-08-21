@@ -203,7 +203,17 @@ class _DebugHarnessScreenState extends ConsumerState<DebugHarnessScreen> {
           _section('Identity — Phase 4', [
             _Action('Show identity and backend', () async {
               final stored = await services.store.selfUid();
-              return 'backend          ${FirebaseBootstrap.describe}\n'
+              // **The override, first, because it outranks everything below
+              // it.** A `debug_simulated_backend` row answers the tier-1
+              // read instead of Firestore, and until this line existed that
+              // was invisible: the panel said EMULATOR, the reconcile said
+              // the read succeeded, and neither was talking to a backend at
+              // all. Measured on the POCO F3 on 2026-08-21, where a row left
+              // over from the Phase 3 sessions silently answered a reconcile
+              // that was meant to be proving Firestore worked.
+              final simulated = await services.store.simulatedBackendRaw();
+              return 'reads answered by ${simulated == null ? "the backend below" : "THE SIMULATED BACKEND - Firestore is not being asked"}\n'
+                  'backend          ${FirebaseBootstrap.describe}\n'
                   // Both, on purpose. `stored` is what every isolate decides
                   // with; `live` is what the security rules will judge. They
                   // agree in every healthy state, and when they do NOT the
@@ -218,8 +228,56 @@ class _DebugHarnessScreenState extends ConsumerState<DebugHarnessScreen> {
             _Action('Sign in', () async {
               final uid = await services.auth.signIn();
               if (uid == null) return 'cancelled — no account chosen';
+
+              // `users/{uid}`, immediately. Phase 5's `redeemInvite` reads
+              // this document to denormalise `displayName` and `timezone`
+              // onto the link (§7), so a signed-in user without one cannot
+              // be paired with — and the failure would surface there, a
+              // phase away from its cause.
+              final zone = await services.store.deviceTimezone();
+              await services.users.upsert(
+                uid: uid,
+                displayName: services.auth.displayName ?? 'Someone',
+                timezone: zone ?? 'Etc/UTC',
+              );
+
               return 'signed in as     $uid\n'
+                  'users/$uid written\n'
                   'RESTART the app: selfUid is read once, at launch.';
+            }),
+            _Action('Write users/{uid} again — idempotence', () async {
+              // The rules freeze `createdAt` on update and require it on
+              // create, so this is the write that proves the repository can
+              // tell the two apart. Getting it wrong makes every ordinary
+              // app open a permission-denied — which ADR-0004 maps to
+              // REFUSED, which tells a family the app has lost sight of
+              // their relative.
+              final uid = services.selfUid;
+              if (uid == LocalStore.signedOutUid) return 'not signed in';
+              final zone = await services.store.deviceTimezone();
+              await services.users.upsert(
+                uid: uid,
+                displayName: services.auth.displayName ?? 'Someone',
+                timezone: zone ?? 'Etc/UTC',
+              );
+              return 'second write accepted — createdAt preserved';
+            }),
+            _Action('Sync links from Firestore', () async {
+              // The step that makes a seeded link visible to the app.
+              // Links are Function-written (§9), so nothing in this app
+              // creates one — `tools/seed-link.ps1` stands in for
+              // `redeemInvite` until Phase 5.
+              final ok = await services.syncLinks();
+              final watching = await services.store.linksWatching(services.selfUid);
+              final watchedBy = await services.store.linksWatchedBy(services.selfUid);
+              return 'read succeeded   $ok\n'
+                  // Both directions, because a self-link appears in both and
+                  // a one-sided seed shows up here as an asymmetry rather
+                  // than as nothing at all.
+                  'I am watched by ${watching.length}\n'
+                  'I watch          ${watchedBy.length}\n'
+                  '${ok ? "" : "read FAILED - the local set was left alone, "
+                      "which is ADR-0001s rule applied to links"}';
             }),
             _Action('Sign out — CLEARS the local cache', () async {
               await services.auth.signOut();
@@ -387,10 +445,17 @@ class _DebugHarnessScreenState extends ConsumerState<DebugHarnessScreen> {
               );
               return 'away ${today.plusDays(-3)} … ${today.plusDays(3)}';
             }),
-            _Action('Clear the simulated backend', () async {
+            _Action('Clear the simulated backend — back to Firestore', () async {
               await services.store.setSimulatedBackendRaw(null);
-              return 'back to: read succeeds, holding nothing\n'
-                  'which produces a warning — the noisy direction, on purpose';
+              // **This said "back to: read succeeds, holding nothing, which
+              // produces a warning" until Phase 4, and that is no longer
+              // what happens.** Clearing the row now hands the tier-1 read
+              // to Firestore — the real one — so what follows depends on
+              // what the backend actually holds rather than on a default
+              // this file chose. Leaving the old words would have told the
+              // next person the app was making a claim it was not.
+              return 'the tier-1 read goes to Firestore again\n'
+                  '${FirebaseBootstrap.describe}';
             }),
             _Action('Show the simulated backend', () async {
               final raw = await services.store.simulatedBackendRaw();

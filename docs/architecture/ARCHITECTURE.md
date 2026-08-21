@@ -165,9 +165,9 @@ Consequences that shape the design:
 ├─ Data ──────────────────────────────────────────────────────┤
 │  AuthRepository  UserRepository  LinkRepository              │
 │  CheckInRepository  AwayRepository  LocalStore(SQLite)       │
-│  InviteService                                               │
+│  InviteService  PushRegistration  FirebaseBootstrap          │
 ├─ Platform edge ─────────────────────────────────────────────┤
-│  AlarmScheduler  NotificationService  FcmService             │
+│  AlarmScheduler  NotificationService                         │
 │  PermissionService  Clock  ClockService  ConnectivityService │
 ├─ Copy — a leaf, reached by Presentation AND Platform ───────┤
 │  NotificationCopy   TapCopy   WatcherCopy                     │
@@ -203,7 +203,9 @@ thing some readers get.
 | `LocalStore` | Data | SQLite. Per-link `lastConfirmedDate`, `warningsShownFor` (day → **which** warning is standing, [ADR-0004](decisions/0004-refused-is-not-unreachable.md)), `activeFrom`, `watchedTimezone`, cached `awayPeriod`, `accessLostSince` + `accessLostCause` + `accessLostNotifiedOn`; plus `deviceTimezone`, `pendingAlarms`, `lastReconcileAt` (a **timestamp** — §10 renders "offline since 10:14"), and the `reconcileLock` lease ([ADR-0006](decisions/0006-reconcile-is-serialised-on-disk.md)); plus three device-health settings that §13's panel reads in Phase 7 and `dump` shows meanwhile — `warningAlarmsExact` (the exact-alarm degradation actually happened), `linkReconcileFailed` (a link this app silently stopped checking), and `uses24HourClock` (a device fact a bare isolate cannot ask for, cached exactly as `deviceTimezone` is) | **All three** |
 | `AlarmScheduler` | Platform | Schedule / cancel / enumerate alarms; `rescheduleOnReboot` | UI, Alarm |
 | `NotificationService` | Platform | Channels, display, cancel, replace-by-id, tap routing | All three |
-| `FcmService` | Platform | Token lifecycle → Firestore; route foreground + background messages | UI, FCM |
+| `PushRegistration` | Data | This install's FCM token → `users/{uid}/tokens/{token}`, and its removal before a sign-out | UI |
+| `pushBackgroundHandler` | Application | §4's third entry point. Brings Firebase up, reconciles **both** sides, exits. Reads nothing out of the message (§3) | FCM |
+| `FirebaseBootstrap` | Data | One `initializeApp` + emulator wiring + App Check activation, called by every entry point | **All three** |
 | `PermissionService` | Platform | POST_NOTIFICATIONS, exact alarms, battery exemption, auto-revoke exemption | UI |
 | `Clock` | Platform edge | The current instant. Trivial and **plugin-free**. | **All three** |
 | `ClockService` | Platform | Discover the **device facts** a bare isolate cannot ask for — IANA tz and the 12h/24h setting — → `LocalStore` on launch and on resume; device-vs-server skew detection | UI |
@@ -213,6 +215,19 @@ thing some readers get.
 `Reconciler` appearing in all three isolates while depending on nothing is the payoff of the
 layering. It is the same code deciding, whether a human opened the app or an alarm woke a
 bare isolate at 10:00.
+
+**The three rows above replace a single planned `FcmService` at the Platform edge, and the split is
+deliberate rather than drift.** That one component was to own "token lifecycle → Firestore" *and*
+"route foreground + background messages", which are two jobs at two altitudes. Writing
+`users/{uid}/tokens/{token}` is a Firestore write and belongs beside the other repositories in
+**Data** — `cloud_firestore` already lives there in `CheckInRepository`, as `firebase_auth` does in
+`AuthRepository`. Receiving a nudge and reconciling both sides is a **use case**, not a device
+capability, and belongs in Application beside the alarm entry point it is written from. Splitting
+them is what lets the background handler be held to §4's bare-isolate rules by
+`domain_purity_test.dart` while the token code, which only the UI isolate ever runs, is not.
+
+The correction was made in Phase 4 when the code landed, rather than left for a reader to discover
+that a named component does not exist.
 
 `Clock` and `ClockService` are two components rather than one because their isolate requirements
 differ ([ADR-0002](decisions/0002-clock-split.md)). Reading the current instant is core Dart and is

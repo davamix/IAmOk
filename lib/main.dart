@@ -310,9 +310,22 @@ class _IAmOkAppState extends ConsumerState<IAmOkApp>
   /// *the UI* caches on every resume, which is a statement about the isolate and
   /// not about one side's provider.
   ///
-  /// It also fixes an ordering slip: this observer is registered before
-  /// `TapScreen`'s, so the shell's watcher reconcile used to read whatever the
-  /// *previous* resume had cached.
+  /// **What this does and does not order.** Within `_onResumed` the sequence is
+  /// real — it awaits `cacheDeviceFacts()` and `syncLinks()` before reconciling
+  /// anything, so the shell's own pass reads fresh values.
+  ///
+  /// It does **not** order the *screens*. The line below is
+  /// `unawaited(_onResumed())`, which returns at the first `await`, and the
+  /// binding then dispatches this same lifecycle event to `TapScreen`'s and
+  /// `WatcherScreen`'s observers, both of which refresh immediately — against
+  /// the previous session's device facts and links. An earlier version of this
+  /// docstring claimed registration order fixed that; it does not, because
+  /// registration order decides who is *called* first, not who *finishes* first.
+  ///
+  /// Bounded, and recorded as owed in the Phase 4 summary rather than fixed at a
+  /// gate: ADR-0002 already accepts a stale zone for a boundary period, §10 step
+  /// 2 covers a link revoked while backgrounded because the read is refused
+  /// anyway, and the shell's pass corrects both behind the screens.
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state != AppLifecycleState.resumed) return;

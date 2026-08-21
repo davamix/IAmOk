@@ -67,10 +67,24 @@ class _TapScreenState extends ConsumerState<TapScreen>
     // A resume is a full reconcile, not a redraw. Android takes permissions
     // back from apps nobody opens (§13).
     //
-    // The device zone and clock format also change while backgrounded, and are
-    // re-cached by the **app shell** before this runs — it owns that because it
-    // survives Phase 5's routing on role, where this screen may not be mounted
-    // at all. See `_IAmOkAppState.didChangeAppLifecycleState`.
+    // The device zone and clock format also change while backgrounded, and the
+    // **app shell** owns re-caching them — it survives Phase 5's routing on
+    // role, where this screen may not be mounted at all. See
+    // `_IAmOkAppState.didChangeAppLifecycleState`.
+    //
+    // **It does NOT happen before this line, and the comment here used to say it
+    // did.** The shell's handler is `unawaited(_onResumed())`, so it returns at
+    // its first `await` and the binding goes straight on to this observer. This
+    // reconcile therefore runs against the *previous* session's cached zone and
+    // clock format, and the shell's own pass — with the fresh ones — lands
+    // behind it.
+    //
+    // Bounded rather than harmless: ADR-0002 already accepts a stale zone for a
+    // boundary period, and the next resume corrects it. Recorded as owed in the
+    // Phase 4 summary rather than fixed here, because putting the shell's
+    // preparation in front of two screens' observers is a change to the resume
+    // path on a dead man's switch, and it wants its own change with its own
+    // device run.
     if (state == AppLifecycleState.resumed) {
       ref.read(watchedStateProvider.notifier).refresh();
       _scheduleMidnightRefresh();

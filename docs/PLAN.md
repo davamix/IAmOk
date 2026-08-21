@@ -189,11 +189,13 @@ says something **different and honest** when the device cannot reach the network
 
 ## Phase 4 — Firebase backbone
 
-> **In progress. Steps 1, 2 and 3 are done and proven on the POCO F3 against the emulator suite;
-> steps 4-7 are not started.** Start from
-> [phases/phase-4-handover.md](phases/phase-4-handover.md), which carries the current state, the
-> four things that went wrong — two of them **false greens**, work that looked finished and was not
-> — and the prompt to continue.
+> **In progress. Steps 1–7 are built and proven on the POCO F3 against the emulator suite.** What
+> remains is not code: the **first Functions deploy**, **App Check's console half**, the
+> **live-radio** version of step 7's measurement, and the gate review. Start from
+> [phases/phase-4-summary.md](phases/phase-4-summary.md); the earlier
+> [phases/phase-4-handover.md](phases/phase-4-handover.md) carries the four things that went wrong
+> in the first half of the phase — two of them **false greens**, work that looked finished and was
+> not.
 >
 > **[ADR-0009](architecture/decisions/0009-decide-about-every-completed-day.md) also landed here**
 > and was not in this plan: ADR-0008 consequence 4 was owed as a measurement, turned out to be real,
@@ -234,16 +236,28 @@ What remains:
    and silently disables ADR-0001's staleness bound on every reconcile. Map `permission-denied` /
    `unauthenticated` to **refused** and `unavailable` / `deadline-exceeded` to **unreachable**
    ([ADR-0004](architecture/decisions/0004-refused-is-not-unreachable.md)).
-4. `onCheckInCreated` Function, `europe-west1`, data-only FCM fan-out
-5. FCM wiring in both the UI and background isolates
-6. **App Check** (Play Integrity), **monitoring mode only** — enforcing before the client sends
-   tokens would lock the app out of its own backend
-7. **Re-open ADR-0008's delivery-hop question** — the Phase 4 trigger that ADR is written against.
-   Firebase is what makes the two deciding measurements possible: whether high-priority data-only FCM
-   wakes the background isolate in **deep Doze** (which is exit criterion 2 above, and must be run as
-   a measurement rather than a tick), and whether a Flutter engine can start *and* complete a
-   Firestore read inside the ~10-second temporary allowlist. Until then the warning stays late in
-   Doze by decision and the app promises no delivery time.
+4. ~~`onCheckInCreated` Function, `europe-west1`, data-only FCM fan-out~~ **Done** (`e030fea`).
+   High priority, data-only, one collapse key. Only `registration-token-not-registered` prunes a
+   token — `invalid-argument` is returned for a malformed *message* too, and pruning on it would
+   deregister the whole fleet from one bad deploy. **Not deployed**; the emulator is where it has
+   run so far.
+5. ~~FCM wiring in both the UI and background isolates~~ **Done** (`e1d0491`), and the FCM handler
+   is §4's **third** entry point. It reads nothing out of the message, which
+   `push_handler_test.dart` enforces by counting the identifier: the payload looks exactly like the
+   answer the reconcile is about to fetch, and trusting one field would let a forged push move
+   `lastConfirmedDay` for a day nobody tapped.
+6. ~~**App Check** (Play Integrity), **monitoring mode only**~~ **Done** (`3f012f0`) — enforcing
+   before the client sends tokens would lock the app out of its own backend. Client-side only:
+   **registering the debug token and turning enforcement on are still owed**, and until then the
+   rules are the whole defence.
+7. ~~**Re-open ADR-0008's delivery-hop question**~~ **Measured** (`0063888`) — the Phase 4 trigger
+   that ADR is written against, and **both its questions passed**. High-priority data-only FCM wakes
+   the background isolate in forced deep Doze: the platform grants a ~20 s allowlist and names the
+   reason `high-prio FCM`, and a Flutter engine started and began reconciling 2 974 ms in.
+   Mutation-checked — the same run at `priority: 'normal'` produced no allowlist, no process and no
+   reconcile. **Two things remain**: the read went over `adb reverse` loopback rather than a radio,
+   so the live-project version is owed; and choosing ADR-0008's successor is the owner's decision,
+   not a measurement.
 
 **Blaze plan** is required from step 4 onward, along with the 2nd-gen Functions APIs (Cloud
 Functions, Cloud Build, Artifact Registry, Eventarc, Cloud Run, Pub/Sub, Cloud Storage). Free

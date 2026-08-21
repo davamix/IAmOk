@@ -447,8 +447,29 @@ void main() {
     /// Phase 4's FCM entry point will be written from the same template and
     /// inherits the rule, which is why this scans every background entry point
     /// rather than only the alarm one.
-    test('no background entry point closes it', () {
-      for (final path in _backgroundEntryPoints) {
+    /// **Every file a background isolate can REACH, not just the entry points.**
+    ///
+    /// This scanned `_backgroundEntryPoints` alone, which was proportionate
+    /// while the only reachable code was the watcher path. Phase 4's FCM handler
+    /// reconciles both sides, so the closure now pulls in
+    /// `watched_reconcile_service.dart`, `permission_service.dart`,
+    /// `alarm_scheduler.dart` and `check_in_repository.dart` — and the rule that
+    /// cost a day is about **the process**, not about which file the isolate
+    /// happened to enter through. A `close()` three calls deep kills the UI's
+    /// store exactly as thoroughly as one in the entry point.
+    ///
+    /// `local_store.dart` is excluded because it *defines* `close()`. Nothing
+    /// else under `lib/` calls it.
+    test('nothing a background isolate can reach closes it', () {
+      final reachable = _reachedByBackgroundIsolates()
+          .where((p) => p != 'lib/data/local_store.dart')
+          .toList()
+        ..sort();
+      expect(reachable.length, greaterThan(_backgroundEntryPoints.length),
+          reason: 'this must reach past the entry points themselves, which is '
+              'the whole reason it was widened');
+
+      for (final path in reachable) {
         final file = File(path);
         expect(file.existsSync(), isTrue,
             reason: '$path is listed here but does not exist — if a background '

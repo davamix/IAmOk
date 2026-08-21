@@ -105,9 +105,10 @@ dependencies:
   # until enforcement is enabled the rules are the whole defence. Nothing here
   # may be described as protecting anything.
   #
-  # Not in §15's package table, which predates the decision; PLAN.md step 6 and
-  # `docs/infrastructure/deploy-notes.md` are where it was chosen. §15 amended
-  # to match rather than left to disagree.
+  # §15's package table was missing it until this step, which was a
+  # documentation bug rather than a decision — PLAN.md step 6, the threat model
+  # and `docs/infrastructure/deploy-notes.md` have all named it since Phase 0.
+  # §15 now lists it.
   firebase_app_check: ^0.4.6
 
 dev_dependencies:

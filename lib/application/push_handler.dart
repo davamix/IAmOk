@@ -100,8 +100,22 @@ Future<void> pushBackgroundHandler(RemoteMessage message) async {
   // posts a notice. Loud beats quiet here.
   final selfUid = await store.selfUid() ?? LocalStore.signedOutUid;
 
-  await _reconcileWatcherSide(store, clock, notifications, selfUid);
-  await _reconcileWatchedSide(store, clock, notifications, selfUid);
+  // **`finally`, not two bare awaits, and the difference is the whole point of
+  // the paragraph above.** `await A; await B;` means a throw from A skips B
+  // entirely — which is exactly "a watcher-side failure that skipped the watched
+  // side", the thing this was supposed to prevent. The throw surfaces are real
+  // and sit outside `WatcherReconcileService`'s per-link guard:
+  // `store.linksWatchedBy`, `store.uses24HourClock`, `_watcherZone()`, and
+  // `delivery()`'s two plugin round trips.
+  //
+  // It still **propagates** after the watched side has run, which keeps the
+  // alarm handler's policy — a throw here reaches Phase 8's crash reporting
+  // rather than being swallowed into the silence this side cannot detect.
+  try {
+    await _reconcileWatcherSide(store, clock, notifications, selfUid);
+  } finally {
+    await _reconcileWatchedSide(store, clock, notifications, selfUid);
+  }
 }
 
 Future<void> _reconcileWatcherSide(
@@ -148,11 +162,12 @@ Future<void> _reconcileWatchedSide(
     clock: clock,
     alarms: NotificationAlarmScheduler(notifications),
     notificationsEnabled: PermissionService(notifications).notificationsEnabled,
-    // **Null on purpose, and it is not a missing dependency.** `checkIns` is
-    // where a *tap* goes, and no tap happens on this path — nobody is holding
-    // the phone. Passing a repository this side would never call would be an
-    // invitation for a later change to call it, and a check-in written by a
-    // background isolate is a check-in nobody made.
+    // **`checkIns` is deliberately not passed at all**, and its absence is not
+    // a missing dependency. It is where a *tap* goes, and no tap happens on this
+    // path — nobody is holding the phone. It defaults to null, `reconcile()`
+    // never touches it, and passing a repository this side would never call
+    // would be an invitation for a later change to call it. A check-in written
+    // by a background isolate is a check-in nobody made.
     selfUid: selfUid,
     lockOwner: 'fcm',
   );

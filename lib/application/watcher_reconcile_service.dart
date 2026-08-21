@@ -477,10 +477,17 @@ class WatcherReconcileService {
           // fabricated fact about a person, on the message whose entire purpose
           // is to correct one.
           //
-          // So the time is omitted until Phase 4 carries `deviceTappedAt`
-          // through the read, and `correctionBody` renders the no-time variant
-          // recorded in `screens.md`. The retraction is complete without it;
-          // the time was never what made it true.
+          // So the time is omitted and `correctionBody` renders the no-time
+          // variant recorded in `screens.md`. The retraction is complete
+          // without it; the time was never what made it true.
+          //
+          // **This said "until Phase 4 carries `deviceTappedAt` through the
+          // read", and Phase 4 did not.** `FirestoreCheckInReader` returns a
+          // `Set<DayKey>` and nothing more, so the instant is still unavailable
+          // here — the check-in document holds it and the reader discards it.
+          // Carrying it through is a change to the reader's shape, the cache and
+          // the copy, so it is recorded as owed rather than smuggled in beside a
+          // measurement. The no-time variant stays correct meanwhile.
           tappedAt: null,
           watcherZone: watcherZone,
         ),

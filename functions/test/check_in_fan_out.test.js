@@ -435,6 +435,99 @@ describe('fanOutCheckIn — pruning dead tokens', () => {
     assert.equal((await db.collection(`users/${BETO}/tokens`).get()).size, 0);
   });
 
+  it('maps a failure back by POSITION, not by token', async () => {
+    // **The one property the ordinary fixture cannot falsify.** `send` ties a
+    // response to a recipient with `response.responses[index]`, and the recording
+    // sender resolves outcomes by looking the token up — so it produces the right
+    // answer under any mapping the implementation could have used: index, a sort,
+    // a zip, a lookup. The index arithmetic decides WHICH FAMILY MEMBER goes
+    // silent, and it was confirmed by nothing.
+    //
+    // This sender answers by position and knows nothing about tokens, so it
+    // fails for any implementation that is not order-preserving.
+    await seedLink({ watcherUid: ANA });
+    for (const token of ['token-0', 'token-1', 'token-2', 'token-3']) {
+      await seedToken(ANA, token);
+    }
+
+    const failAt = 2;
+    const sender = {
+      calls: [],
+      async sendEach(messages) {
+        this.calls.push(messages);
+        return {
+          responses: messages.map((_, i) =>
+            i === failAt
+              ? { success: false, error: { code: UNREGISTERED } }
+              : { success: true, messageId: `id-${i}` }),
+          successCount: messages.length - 1,
+          failureCount: 1,
+        };
+      },
+    };
+    const result = await fanOutCheckIn({ db, sender }, fact());
+
+    assert.equal(result.pruned, 1);
+    // Firestore returns a collection ordered by document id, and `collectTokens`
+    // preserves it, so position 2 is `token-2`.
+    const sentOrder = sender.calls[0].map((m) => m.token);
+    assert.deepEqual(sentOrder, ['token-0', 'token-1', 'token-2', 'token-3']);
+
+    const left = (await db.collection(`users/${ANA}/tokens`).get()).docs.map((d) => d.id);
+    assert.deepEqual(left.sort(), ['token-0', 'token-1', 'token-3'],
+      'the deleted document must be the one at the failing POSITION');
+  });
+
+  it('prunes a dead token in the SECOND batch', async () => {
+    // Where an off-by-batch index bug lives: the batching test proves 501 tokens
+    // split [500, 1] with everything succeeding, and the pruning tests all run
+    // inside one batch. The crossed case silences one watcher in a large family
+    // while every other test stays green.
+    await seedLink({ watcherUid: ANA });
+    const tokens = Array.from({ length: 501 }, (_, i) => `token-${String(i).padStart(4, '0')}`);
+    for (let start = 0; start < tokens.length; start += 400) {
+      const batch = db.batch();
+      for (const token of tokens.slice(start, start + 400)) {
+        batch.set(db.doc(`users/${ANA}/tokens/${token}`), {
+          platform: 'android',
+          updatedAt: Timestamp.fromDate(new Date('2026-08-20T09:00:00Z')),
+        });
+      }
+      await batch.commit();
+    }
+    const last = tokens[tokens.length - 1];
+
+    const sender = recordingSender({ [last]: UNREGISTERED });
+    const result = await fanOutCheckIn({ db, sender }, fact());
+
+    assert.deepEqual(sender.calls.map((c) => c.length), [500, 1]);
+    assert.equal(result.sent, 500);
+    assert.equal(result.failed, 1);
+    assert.equal(result.pruned, 1);
+    const left = await db.collection(`users/${ANA}/tokens`).get();
+    assert.equal(left.size, 500);
+    assert.equal(left.docs.some((d) => d.id === last), false);
+  });
+
+  it('sends to a two-year-old token rather than skipping it', async () => {
+    // Pins a product decision a plausible future "cleanup" would reverse
+    // silently. §13's watcher — the one who never opens the app — has by
+    // definition the stalest token in the collection, so an age filter would
+    // silence exactly the person FCM is in this design for. Every other test
+    // here seeds the same fresh `updatedAt`, so nothing else would notice.
+    await seedLink({ watcherUid: ANA });
+    await db.doc(`users/${ANA}/tokens/token-ancient`).set({
+      platform: 'android',
+      updatedAt: Timestamp.fromDate(new Date('2024-08-20T09:00:00Z')),
+    });
+
+    const sender = recordingSender();
+    const result = await fanOutCheckIn({ db, sender }, fact());
+
+    assert.equal(result.sent, 1);
+    assert.deepEqual(allMessages(sender).map((m) => m.token), ['token-ancient']);
+  });
+
   it('prunes nothing for any other error code', async () => {
     // THE fleet-wide one. `messaging/invalid-argument` is returned both for a
     // malformed token and for a malformed message — and a malformed message is

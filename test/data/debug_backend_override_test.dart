@@ -91,10 +91,16 @@ void main() {
     // for the harness's own tree-shaking.
     //
     // So the guarantee "a release build never consults the row" rests on
-    // `kDebugMode` being a compile-time constant, and on the source-level check
-    // in `domain_purity_test.dart` that the branch is written that way. This
-    // test exists to say that out loud, so nobody reads the three above as
-    // covering it.
+    // `kDebugMode` being a compile-time constant that the tree shaker folds —
+    // and on **nothing else**. This paragraph used to also claim "the
+    // source-level check in `domain_purity_test.dart` that the branch is written
+    // that way", and there is no such check: that file guards imports, clock
+    // reads and `close()`, and knows nothing about `kDebugMode` branches
+    // anywhere. Corrected at the Phase 4 gate, because a stale claim of coverage
+    // inside a comment whose whole purpose is to stop people over-reading the
+    // tests above it is the worst possible place for one.
+    //
+    // This test exists to say that limit out loud.
     var debug = false;
     assert(() {
       debug = true;

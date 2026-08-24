@@ -3,6 +3,7 @@ library;
 
 import 'dart:io';
 
+import 'package:i_am_ok/application/push_handler.dart';
 import 'package:test/test.dart';
 
 /// **The push carries no authority, checked where it could stop being true.**
@@ -68,6 +69,59 @@ void main() {
     expect(source, contains('WatchedReconcileService('));
   });
 
+  test('it tells the delivery derivation the app is NOT in front of anybody', () {
+    // **A one-word slip here reproduces the worst defect Phase 3 found.**
+    // `NotificationDelivery.from` turns `appInForeground: true` into
+    // `redundant`, and `redundant` has `postsNotification == false` and
+    // `consumesReminder == true` — so the FCM isolate would decide a warning is
+    // owed, record the day as served, and post nothing to anyone. Measured on
+    // the POCO on 2026-08-18 through the app-open path, where
+    // `warningsShownFor` held `warnOnline` with zero notifications sent.
+    //
+    // It is false here by definition: this isolate exists only because a push
+    // arrived while the app was not on screen. `providers_test.dart` asserts the
+    // derivation itself but reads neither entry point.
+    expect(source, contains('appInForeground: false'));
+  });
+
+  test('and so does the alarm handler, which is where it drifted once', () {
+    // Same hole, same cost, and the alarm handler's own docstring admits "this
+    // copy is the one nobody can watch running, and it drifted from its twin
+    // once already". Guarded here rather than in a file of its own because the
+    // property belongs to background entry points as a class.
+    final alarm = _withoutComments(
+      File('lib/application/warning_alarm_handler.dart').readAsStringSync(),
+    );
+    expect(alarm, contains('appInForeground: false'));
+  });
+
+  test('the platform is told where to find it', () {
+    // Delete `FirebaseMessaging.onBackgroundMessage(pushBackgroundHandler)` and
+    // §4's third isolate silently stops existing: every test still passes,
+    // `flutter analyze` is clean, and the only symptom is a watcher who finds
+    // out at alarm time instead of in seconds — the silence §12 calls the one
+    // failure this app cannot detect in itself.
+    //
+    // The registration has to live in `main()` because the plugin records the
+    // callback's raw handle for its Android service to start an engine at, so a
+    // registration the app might not reach on a cold start is one that is not
+    // there when it matters.
+    final main = _withoutComments(File('lib/main.dart').readAsStringSync());
+    expect(main, contains('onBackgroundMessage(pushBackgroundHandler)'));
+  });
+
+  test('the foreground listener discards its message too', () {
+    // The §3 guarantee is asserted hard for the background handler and was
+    // asserted nowhere for the UI isolate — which is the EASIER place to take
+    // the shortcut, because the container, the repositories and the notifier are
+    // all already in scope. In the background handler you would have to build
+    // something first.
+    final main = _withoutComments(File('lib/main.dart').readAsStringSync());
+    expect(main, contains('FirebaseMessaging.onMessage.listen(\n      (_) =>'),
+        reason: 'the listener must discard its RemoteMessage at the listen '
+            'site. Binding it is how a payload starts being trusted.');
+  });
+
   test('it names itself in the reconcile lease', () {
     // ADR-0006 serialises reconciles on disk. The owner string is what makes a
     // held lease legible in a `dump()` instead of an opaque token — and with
@@ -76,6 +130,61 @@ void main() {
     expect("lockOwner: 'fcm'".allMatches(source).length, 2,
         reason: 'both sides must name this isolate, or a dump attributes half '
             'its reconciles to the UI');
+  });
+
+  group('runBothSides — the failure isolation, actually run', () {
+    // Extracted out of the entry point precisely so these four lines exist. The
+    // source lint above says the two services are mentioned; only this says the
+    // second one still runs when the first does not.
+
+    test('both run, in order, when nothing fails', () async {
+      final order = <String>[];
+      await runBothSides(
+        () async => order.add('watcher'),
+        () async => order.add('watched'),
+      );
+      expect(order, ['watcher', 'watched'],
+          reason: 'the watcher side is the reason the OS woke this isolate, and '
+              'a background engine has seconds to live — if only one of the two '
+              'completes it must be the one that decides whether to tell a '
+              'family something');
+    });
+
+    test('the watched side still runs when the watcher side throws', () async {
+      // The defect this replaced: `await A; await B;` skips B entirely, which is
+      // a second failure caused by the first. Phase 6's away nudge lands on the
+      // watched side, so this is the half that must change then.
+      final order = <String>[];
+      await expectLater(
+        runBothSides(
+          () async {
+            order.add('watcher');
+            throw StateError('the store was busy');
+          },
+          () async => order.add('watched'),
+        ),
+        throwsStateError,
+      );
+      expect(order, ['watcher', 'watched']);
+    });
+
+    test('and the throw still escapes, so crash reporting sees it', () async {
+      // `warningAlarmCallback` has no `try` for exactly this reason: a fault in
+      // a background isolate has no screen, no user and no log anyone will read,
+      // so the crash report is the only account there will ever be. Swallowing
+      // here would buy tidiness and cost that.
+      await expectLater(
+        runBothSides(() async => throw StateError('x'), () async {}),
+        throwsStateError,
+      );
+    });
+
+    test('a watched-side throw is not hidden either', () async {
+      await expectLater(
+        runBothSides(() async {}, () async => throw StateError('y')),
+        throwsStateError,
+      );
+    });
   });
 
   test('it never closes the store', () {

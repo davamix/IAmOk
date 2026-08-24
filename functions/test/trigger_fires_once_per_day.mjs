@@ -20,6 +20,19 @@
 // happened would prove nothing, so the expected answer is two lines with two
 // different dates — one per CREATE — and the update in the middle is the case
 // that must add nothing.
+//
+// **And it was mutation-checked by hand once, which the built-in check does not
+// cover.** 2026-08-21: `onDocumentCreated` was temporarily switched to
+// `onDocumentWritten` (with `event.data?.after?.data()`), and the run produced
+// THREE lines — two of them for 2026-08-21 — and `tools/functions-test.ps1`
+// failed on both the count and the date clauses. Reverted immediately.
+//
+// That mutation is deliberately NOT automated. Doing it properly means building
+// a knowingly-wrong `lib/`; the cheap version is an env-var-switched trigger type
+// in production code, which ships a code path whose only purpose is to be wrong,
+// on the trigger that wakes a family's phones. The record above is the honest
+// substitute — the repo's standard is that a mutation is written down, not that
+// every mutation runs on every commit.
 
 import { initializeApp } from 'firebase-admin/app';
 import { getFirestore, Timestamp } from 'firebase-admin/firestore';
@@ -44,22 +57,36 @@ const settle = () => new Promise((resolve) => setTimeout(resolve, SETTLE_MS));
 initializeApp({ projectId });
 const db = getFirestore();
 
-const checkIn = (hour) => ({
-  deviceTappedAt: Timestamp.fromDate(new Date(`2026-08-21T0${hour}:00:00Z`)),
-  receivedAt: Timestamp.fromDate(new Date(`2026-08-21T0${hour}:00:01Z`)),
+// The day is a parameter rather than hard-coded, because a `deviceTappedAt` that
+// says 2026-08-21 inside the day-two document is harmless only while the fact is
+// not logged — and it would quietly break the day-two assertion the moment
+// anyone adds it to the log line.
+const checkIn = (day, hour) => ({
+  deviceTappedAt: Timestamp.fromDate(new Date(`${day}T0${hour}:00:00Z`)),
+  receivedAt: Timestamp.fromDate(new Date(`${day}T0${hour}:00:01Z`)),
   timezone: 'Europe/Madrid',
 });
 
 console.log('probe: creating day one');
-await db.doc(`checkins/${UID}/days/${DAY_ONE}`).set(checkIn(7));
+await db.doc(`checkins/${UID}/days/${DAY_ONE}`).set(checkIn(DAY_ONE, 7));
 await settle();
 
 console.log('probe: tapping again on day one (an UPDATE — must fire nothing)');
-await db.doc(`checkins/${UID}/days/${DAY_ONE}`).set(checkIn(9));
+await db.doc(`checkins/${UID}/days/${DAY_ONE}`).set(checkIn(DAY_ONE, 9));
 await settle();
 
 console.log('probe: creating day two');
-await db.doc(`checkins/${UID}/days/${DAY_TWO}`).set(checkIn(8));
+await db.doc(`checkins/${UID}/days/${DAY_TWO}`).set(checkIn(DAY_TWO, 8));
+await settle();
+
+// `onCheckInCreated`'s own first guard, which nothing else reaches. Functions
+// bypass the rules, so a document id the rules would never allow can still be
+// created by an admin write — `tools/seed-link.ps1` and the Firebase console
+// both write through exactly that door. A day label no client could ever read
+// back is not worth waking a fleet of phones for, and the wrapper asserts the
+// fan-out count stays at two.
+console.log('probe: creating a NON-DAY document id (must fire nothing)');
+await db.doc(`checkins/${UID}/days/not-a-day`).set(checkIn(DAY_TWO, 6));
 await settle();
 
 console.log('probe: done');

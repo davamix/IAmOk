@@ -9,7 +9,7 @@
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",
-    "test": "node --test test/check_in_fan_out.test.js"
+    "test": "node --test --test-concurrency=1 test/*.test.js"
   },
   "dependencies": {
     "firebase-admin": "^13.6.0",

@@ -35,8 +35,13 @@ class PushRegistration {
   // Positional, like `AuthRepository(this._store)`: a named parameter cannot
   // bind to a private field, and the alternative is an initialiser list that the
   // analyzer flags.
-  PushRegistration(this._users, {FirebaseMessaging? messaging})
-      : _injected = messaging;
+  PushRegistration(
+    this._users, {
+    FirebaseMessaging? messaging,
+    // Injectable only so the timeout test does not burn five seconds of real
+    // wall clock — half this suite's runtime for one case.
+    this.deleteTimeout = const Duration(seconds: 5),
+  }) : _injected = messaging;
 
   final UserRepository _users;
 
@@ -45,6 +50,11 @@ class PushRegistration {
   // built inside the composition root, which many tests construct without
   // standing up the platform at all.
   final FirebaseMessaging? _injected;
+
+  /// How long the token-document delete may take before a sign-out gives up on
+  /// it. Public only so the timeout test does not burn five seconds of real wall
+  /// clock — half this suite's runtime for one case.
+  final Duration deleteTimeout;
 
   FirebaseMessaging get _messaging => _injected ?? FirebaseMessaging.instance;
 
@@ -120,9 +130,7 @@ class PushRegistration {
     final value = await token();
     if (value == null) return;
     try {
-      await _users
-          .deleteToken(uid: uid, token: value)
-          .timeout(const Duration(seconds: 5));
+      await _users.deleteToken(uid: uid, token: value).timeout(deleteTimeout);
     } on Object {
       try {
         // The row survived. Make it self-cleaning rather than permanent.

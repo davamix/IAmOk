@@ -137,15 +137,16 @@ void main() {
     // sign-out button that does nothing, forever — and it is worst on exactly
     // the device state where the orphaned row is created.
     final messaging = _FakeMessaging(token: 'tok-abc');
-    final registration = PushRegistration(_HangingUsers(), messaging: messaging);
-
-    await expectLater(
-      registration.unregister(uid: 'uid-ana'),
-      completes,
+    final registration = PushRegistration(
+      _HangingUsers(),
+      messaging: messaging,
+      deleteTimeout: const Duration(milliseconds: 20),
     );
+
+    await expectLater(registration.unregister(uid: 'uid-ana'), completes);
     expect(messaging.deleted, isTrue,
         reason: 'a timeout is a failure like any other, and takes the same path');
-  }, timeout: const Timeout(Duration(seconds: 30)));
+  });
 
   test('a rotated token is re-registered, and the old one is left alone',
       () async {

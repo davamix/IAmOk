@@ -100,21 +100,52 @@ Future<void> pushBackgroundHandler(RemoteMessage message) async {
   // posts a notice. Loud beats quiet here.
   final selfUid = await store.selfUid() ?? LocalStore.signedOutUid;
 
-  // **`finally`, not two bare awaits, and the difference is the whole point of
-  // the paragraph above.** `await A; await B;` means a throw from A skips B
-  // entirely — which is exactly "a watcher-side failure that skipped the watched
-  // side", the thing this was supposed to prevent. The throw surfaces are real
-  // and sit outside `WatcherReconcileService`'s per-link guard:
-  // `store.linksWatchedBy`, `store.uses24HourClock`, `_watcherZone()`, and
-  // `delivery()`'s two plugin round trips.
-  //
-  // It still **propagates** after the watched side has run, which keeps the
-  // alarm handler's policy — a throw here reaches Phase 8's crash reporting
-  // rather than being swallowed into the silence this side cannot detect.
+  await runBothSides(
+    () => _reconcileWatcherSide(store, clock, notifications, selfUid),
+    () => _reconcileWatchedSide(store, clock, notifications, selfUid),
+  );
+}
+
+/// Runs [watcherSide], then [watchedSide] **even if the first threw**, and still
+/// lets the throw out.
+///
+/// ## Why this is a function and not two lines in the entry point
+///
+/// It was two lines, and before that it was two bare `await`s with a docstring
+/// claiming they were isolated from each other — which `await A; await B;` is
+/// precisely not. The architecture review found that by reading, and no test
+/// could have: `pushBackgroundHandler` brings up Firebase, opens the platform
+/// store and initialises a notification plugin, so it cannot be run in the VM at
+/// all, and a source lint that greps for two type names passes whether the order
+/// is swapped, the `finally` reverted, or one call wrapped in `if (false)`.
+///
+/// `docs/testing/strategy.md`'s rule is that if a test needs a device to answer
+/// a question about *logic*, the logic is in the wrong layer — and "does the
+/// second thing still run when the first fails" is logic. Here it is a pure
+/// function over two callbacks, asserted in microseconds.
+///
+/// ## Both halves matter, in opposite directions
+///
+/// **The second must run.** The throw surfaces on the first are real and sit
+/// *outside* `WatcherReconcileService`'s per-link guard — `store.linksWatchedBy`,
+/// `store.uses24HourClock`, `_watcherZone()`, and `delivery()`'s two plugin
+/// round trips. A watcher-side failure that skipped the watched side would be a
+/// second failure caused by the first, and it lands where Phase 6 needs it
+/// least: `onAwayChanged` fans out to the watched person's own device, and their
+/// reminders are the half that must change.
+///
+/// **The throw must still escape.** `warningAlarmCallback` deliberately has no
+/// `try` so that a fault reaches Phase 8's crash reporting rather than being
+/// swallowed into the silence this side cannot detect in itself. Catching here
+/// would buy tidiness and cost the only report anyone will ever get.
+Future<void> runBothSides(
+  Future<void> Function() watcherSide,
+  Future<void> Function() watchedSide,
+) async {
   try {
-    await _reconcileWatcherSide(store, clock, notifications, selfUid);
+    await watcherSide();
   } finally {
-    await _reconcileWatchedSide(store, clock, notifications, selfUid);
+    await watchedSide();
   }
 }
 

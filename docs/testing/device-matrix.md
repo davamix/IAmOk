@@ -883,6 +883,26 @@ questions at once: a Flutter engine started, *and* it completed a Firestore read
 have moved it — the process was killed, the warning alarm is armed for 10:00, and the watched side's
 reminders are display-only notifications that run no Dart at all.
 
+**Except for one thing, which this phase had already been caught by once.**
+`DebugBackendOverride` sits in *front* of the real reader in a debug build and returns a decoded
+`SimulatedBackend` read whenever `debug_simulated_backend` holds a row — no socket, no Firebase —
+and `applyRead` stamps `lastReconcileAt` exactly as it would after a real read. That is precisely
+the leftover-harness-row false green recorded in `phase-4-handover.md`, and the first version of
+this write-up did not mention it.
+
+The measurement script now **refuses to run** unless the pulled database shows
+`debug_simulated_backend` absent *and* `debug_clock_offset_ms` zero — the second because every
+isolate reads that offset, so a forced date left set would make the latency figure arbitrary. Both
+values are printed alongside the result, so the evidence carries its own disproof:
+
+```
+watcher_cache before: 2026-08-21|1787607553723|sim=none|offset=0
+after                 2026-08-21|1787607578726|sim=none|offset=0
+```
+
+Raised by the Phase 4 testing review, which pointed out that the caveat list named the loopback
+question and omitted this one — and that both attack the same half of the result.
+
 The store is read by **pulling the database**, never by opening the app: opening it reconciles, which
 would manufacture the very state change being measured.
 
@@ -905,6 +925,14 @@ Dart VM up -> FlutterFirebaseMessagingBackgroundService started  ~1 050 ms
 `lastReconcileAt` is `clock.now()` taken at the *top* of reconcile, so 2 974 ms is delivery + engine
 start + store open, with roughly seventeen seconds of allowlist still to run. The read itself
 completed after that, and the proof it completed at all is that the cache row was rewritten.
+
+**Re-run 2026-08-24 with the simulated-backend guard in place: 10 359 ms**, on a handset that had
+been idle for three days. The allowlist did not appear until +8 s in that run against +2 s in the
+first, so the extra seven seconds are **FCM delivery**, not the engine. Worth recording as a range
+rather than a single number — *3–10 s from tap to reconcile, against a ~20 s grant* — because a
+reader who takes 2 974 ms as the figure will conclude there is more headroom than there is. The
+margin is comfortable; it is not enormous, and it is dominated by a leg this project does not
+control.
 
 **Foreground, for completeness** — a different code path, `onMessage` in the UI isolate rather than
 `onBackgroundMessage`: reconciled in **397 ms**, with the process id unchanged before and after. The
@@ -958,6 +986,19 @@ FCM work on it**. An AOSP image would have made the whole arrangement impossible
 ### RUNNABLE NOW — POCO + AVD
 
 **Phase 4 — end to end.** All three, with the direction above.
+
+> **Why the first two are still unticked when the section above records them passing.** They are
+> not oversights, and they are not the same gap:
+>
+> - **The AVD never tapped.** Every run so far used an **admin REST write from the host** as the
+>   other endpoint. That is a deliberate substitution and it is the *stronger* choice for the Doze
+>   question — it isolates the receiving side completely — but it is not what these rows say. The
+>   tapping endpoint being a real client, going through `firestore.rules`, is the half still owed.
+> - **The read went over `adb reverse` loopback**, not a radio, so the network half of ADR-0008
+>   question 1 is unproven against the live backend. See the caveat above.
+>
+> Ticking either now would record something that did not happen. Both are cheap once the AVD is
+> running and the Functions are deployed.
 
 - [ ] A tap on one device quietly updates the other — AVD taps → Firestore → `onCheckInCreated` →
       FCM → **POCO**

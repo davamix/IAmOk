@@ -113,8 +113,25 @@ try {
             'the premise ARCHITECTURE.md section 7 rests on when it says no dedupe logic is needed.')
     }
 
+    # The fourth write is a NON-DAY document id, which the rules would never
+    # allow a client to create but an admin write can - `tools/seed-link.ps1` and
+    # the console both go through that door.
+    #
+    # Asserting the fan-out count stayed at two is NOT enough on its own: it
+    # would also pass if the write had silently failed, or if the trigger had not
+    # fired at all. So the guard's own line has to be there, which is what says
+    # the trigger ran AND `isDayKey` is what stopped it.
+    $ignored = @($lines | Select-String -SimpleMatch 'ignoring non-day document id')
+    if ($ignored.Count -ne 1) {
+        Write-Error ("expected exactly one 'ignoring non-day document id' line - the trigger " +
+            "fires for ANY document under days/, and isDayKey is what stops a label no " +
+            "client could ever read back from waking a fleet of phones. Got $($ignored.Count).")
+    }
+    Write-Host "the non-day id was rejected by the guard, not by luck:" -ForegroundColor DarkGray
+    $ignored | ForEach-Object { Write-Host "  $_" -ForegroundColor DarkGray }
+
     Write-Host ''
-    Write-Host 'PASS  once per day, not once per tap' -ForegroundColor Green
+    Write-Host 'PASS  once per day, not once per tap; a non-day id fires nothing' -ForegroundColor Green
 }
 finally {
     Pop-Location

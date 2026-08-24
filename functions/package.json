@@ -9,6 +9,7 @@
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",
+    "pretest": "tsc",
     "test": "node --test --test-concurrency=1 test/*.test.js"
   },
   "dependencies": {

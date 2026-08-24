@@ -8,7 +8,7 @@ non-goals in [HANDOVER.md](HANDOVER.md), which the whole design is built on top 
 
 | | |
 |---|---|
-| Current phase | **Phase 4 — Firebase backbone · steps 1-3 done and proven on hardware, steps 4-7 outstanding.** Rules deployed before any client write existed; Firebase up in all three isolates; sign-in, `users/{uid}`, the check-in write and the real `Source.server` read all driven end to end on the POCO F3 against the emulator suite. **Start from [phases/phase-4-handover.md](phases/phase-4-handover.md)** — it carries the state, four things that went wrong (two of them false greens), and the prompt. Phase 3 is complete: [phases/phase-3-summary.md](phases/phase-3-summary.md). |
+| Current phase | **Phase 4 — Firebase backbone · steps 1-7 built and proven on the POCO F3 against the emulator suite.** What remains is not code: the **first Functions deploy**, **App Check's console half**, the **live-radio** version of ADR-0008's measurement, and the last of the gate reviews. **Start from [phases/phase-4-summary.md](phases/phase-4-summary.md).** [phases/phase-4-handover.md](phases/phase-4-handover.md) is the mid-phase snapshot and is deliberately frozen there — read it for the four things that went wrong, two of them false greens, not for current state. Phase 3 is complete: [phases/phase-3-summary.md](phases/phase-3-summary.md). |
 | Phase history | [phases/](phases/) — one summary per completed phase |
 | Firebase project | `i-am-ok-c74ca` · Firestore `europe-west1` · Native mode · all permanent |
 | Repo | https://github.com/davamix/IAmOk (public) |

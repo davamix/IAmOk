@@ -906,12 +906,19 @@ question and omitted this one — and that both attack the same half of the resu
 The store is read by **pulling the database**, never by opening the app: opening it reconciles, which
 would manufacture the very state change being measured.
 
-```
-run-as io.github.davamix.i_am_ok base64 databases/i_am_ok.db   # then decode and PRAGMA integrity_check
+```powershell
+$adb = 'D:\Android\Sdk\platform-tools\adb.exe'   # NOT on PATH on this machine
+$b64 = & $adb -s 1720f883 shell "run-as io.github.davamix.i_am_ok base64 databases/i_am_ok.db"
+[IO.File]::WriteAllBytes("$env:TEMP\i_am_ok.db",
+    [Convert]::FromBase64String((($b64 -join '') -replace '\s', '')))
+python -c "import sqlite3;print(sqlite3.connect(r'$env:TEMP\i_am_ok.db').execute('PRAGMA integrity_check').fetchone()[0])"
 ```
 
 That is the inverse of the documented write technique, and it works where `run-as … sqlite3` does
-not — there is no `sqlite3` binary on this device.
+not — there is no `sqlite3` binary on this device. **Base64 rather than a redirect**, because
+`run-as` cannot write through one; **`PRAGMA integrity_check` every time**, because a truncated
+pull reads as a database with plausible-looking rows in it. Written out in full because this is the
+*evidence* for ADR-0008's measurement, and evidence nobody can re-run is an assertion.
 
 ### The numbers
 
@@ -926,8 +933,19 @@ Dart VM up -> FlutterFirebaseMessagingBackgroundService started  ~1 050 ms
 start + store open, with roughly seventeen seconds of allowlist still to run. The read itself
 completed after that, and the proof it completed at all is that the cache row was rewritten.
 
-**Re-run 2026-08-24 with the simulated-backend guard in place: 10 359 ms**, on a handset that had
-been idle for three days. The allowlist did not appear until +8 s in that run against +2 s in the
+**Re-run 2026-08-24 with the simulated-backend guard in place, and with App Check in the build:
+10 359 ms**, on a handset that had been idle for three days.
+
+**App Check was NOT in the build that produced 2 974 ms** — step 6 landed after the measurement
+commit, and it now sits on this exact path: `FirebaseBootstrap.ensureInitialized()` awaits
+`_activateAppCheck()` before `LocalStore.open()`, in the FCM background isolate. The controlled
+comparison put it at **roughly +1.9 s** in a cold isolate (2 974 → 4 841 ms, same session, same
+day). That is inside the budget and worth knowing before anyone adds a third thing to this path.
+
+Note also that **no App Check debug token is registered** (`firebase appcheck:debugtokens:list`,
+2026-08-25), so the debug provider's exchange is failing and being swallowed by design. The
+live-radio run still owed below will therefore be the *first* to exercise App Check on a cold radio
+in Doze — register the debug token first, or it measures a retry loop rather than the app. The allowlist did not appear until +8 s in that run against +2 s in the
 first, so the extra seven seconds are **FCM delivery**, not the engine. Worth recording as a range
 rather than a single number — *3–10 s from tap to reconcile, against a ~20 s grant* — because a
 reader who takes 2 974 ms as the figure will conclude there is more headroom than there is. The

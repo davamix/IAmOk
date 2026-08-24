@@ -89,6 +89,7 @@ pwsh -File tools/emulators.ps1                    # auth + firestore + functions
 pwsh -File tools/emulators.ps1 -Fresh             # ignore any saved state
 pwsh -File tools/emulators.ps1 -Device 1720f883   # ...and expose it to that handset
 pwsh -File tools/rules-test.ps1                   # the rules suite, start to shutdown
+pwsh -File tools/functions-test.ps1               # the fan-out suite + the trigger probe
 ```
 
 **Verified end to end**: the suite starts and all three ports accept connections — auth 9099,
@@ -125,9 +126,10 @@ connect at all. The emulator itself never reaches production whatever it is call
 `tools/rules-test.ps1` still uses `demo-i-am-ok`, and there it is a real guarantee: that suite hands
 its own project id to `initializeTestEnvironment`, so the rules and the namespace cannot disagree.
 
-> **The two suites cannot run at once** — they want the same ports. Stop
-> `tools/emulators.ps1` before `tools/rules-test.ps1`, or the second fails with a port already in
-> use.
+> **THREE scripts want the same ports, and only one may run** — `tools/emulators.ps1` (the dev
+> suite), `tools/rules-test.ps1` and `tools/functions-test.ps1`. Stop whichever is up before
+> starting another, or the second fails with *"Port 8080 is not open on localhost"*, which reads
+> like a broken script rather than a busy port. This said "two" until Phase 4 added the third.
 
 **Two prerequisites for this machine**, both handled by the scripts rather than left as knowledge:
 
@@ -176,23 +178,45 @@ All Phase 4, all from [firebase-setup-prompt.md](firebase-setup-prompt.md):
   Run, Pub/Sub, and the **Cloud Storage GCP API for build artifacts**. A 2nd-gen deploy fails
   confusingly if any one of them is missing; enable all of them before the first attempt.
 
-  > **Still reading `SERVICE_DISABLED` on 2026-08-21**, checked twice seven minutes apart after the
-  > owner enabled it:
+  > **The Cloud Functions API is ENABLED — re-measured 2026-08-24/25, three clean runs:**
   >
   > ```
   > firebase functions:list --project i-am-ok-c74ca
-  > 403 … "Cloud Functions API has not been used in project i-am-ok-c74ca before or it is disabled"
-  > reason: SERVICE_DISABLED   service: cloudfunctions.googleapis.com
+  > No functions found in project i-am-ok-c74ca
   > ```
   >
-  > Google's own message allows for propagation lag, so this is recorded rather than concluded.
-  > **Re-check with the command above before the first deploy** — and note it probes the *v1*
-  > endpoint while our functions are 2nd-gen, which is not the discrepancy it looks like: both
-  > generations live behind the same `cloudfunctions.googleapis.com` service. None of the emulator
-  > work above depends on it.
+  > That is a *successful call*, not a 403, and it replaces this block's previous contents — which
+  > recorded `SERVICE_DISABLED` on 2026-08-21 and had been false ever since. It was the checklist
+  > someone would read immediately before the first deploy, saying the opposite of the truth.
+  > (The command probes the *v1* endpoint while our functions are 2nd-gen; not the discrepancy it
+  > looks like, since both generations live behind the same `cloudfunctions.googleapis.com`.)
+  >
+  > **The other six APIs are still UNVERIFIED, and cannot be checked from this machine.** `gcloud`
+  > is not installed, and the Firebase CLI exposes no read for them. So the honest statement is:
+  > one of seven confirmed, six unknown. Establish the rest with a **dry run**, which validates and
+  > builds without deploying and surfaces (and enables) what is missing:
+  >
+  > ```powershell
+  > firebase deploy --only functions --dry-run --project i-am-ok-c74ca
+  > ```
+  >
+  > It is not read-only — its own help says it may enable APIs on the target project — so it is the
+  > owner's call, not something to run while exploring. Blaze status shows at
+  > `console.firebase.google.com/project/i-am-ok-c74ca/usage/details`.
 - **FCM v1 confirmed**, legacy server key confirmed unused.
 - **App Check** with Play Integrity, registered and set to **monitoring only**. Enforcing before
   the client sends App Check tokens locks the app out of its own backend.
+
+  > **Phase 4 ships the client half; the console half is still owed**, and it has a structural gate
+  > nothing here had recorded. In order: register the Android app with the Play Integrity provider ·
+  > register this install's **debug token**, which `AndroidDebugProvider` prints to logcat and which
+  > `firebase appcheck:debugtokens:list` confirmed is **not registered** as of 2026-08-25 · leave
+  > enforcement off everywhere · watch the metrics until attested traffic is what actually arrives.
+  >
+  > **Play Integrity requires the app to be known to Google Play.** A sideloaded, debug-signed build
+  > cannot produce a valid verdict, so release attestation does not work until the app reaches at
+  > least an internal test track. Enforcement is therefore a Phase 8-or-later decision for a reason
+  > that has nothing to do with metrics, and should not be scheduled earlier than it can work.
 - **Delete protection and point-in-time recovery are both OFF.** Read from
   `firestore:databases:get` on 2026-08-15: `DELETE_PROTECTION_DISABLED`,
   `POINT_IN_TIME_RECOVERY_DISABLED`, version retention 3600s. Cheap hardening on a database
@@ -234,6 +258,15 @@ file here. That is not hypothetical: `flutter_local_notifications` merged `VIBRA
 during Phase 2 and it had to be declared after the fact. So the merged report is the only real
 answer, and it needs a release build, which is why it is a command here rather than a test.
 
-Phase 4 removes the claim rather than the check — `firebase_core` pulls in `play-services-basement`,
-which declares `INTERNET`. When that lands, the threat model's statement has to be re-derived from
-the code rather than inherited, and `android_manifest_test.dart` says so in its own docstring.
+**Phase 4 removed the claim rather than the check, and it is done** — measured 2026-08-21, then
+twice more as plugins arrived. Six permissions became fourteen: `INTERNET` and
+`ACCESS_NETWORK_STATE` from Firebase, `USE_BIOMETRIC`/`USE_FINGERPRINT` from `androidx.biometric`
+behind `firebase_auth` for a feature this app does not have, `READ_GSERVICES` from recaptcha,
+`c2dm.permission.RECEIVE` from `firebase_messaging`, and — a recorded **null result** —
+**nothing at all** from `firebase_app_check`. The re-derived claim lives in
+`docs/security/threat-model.md`; the inventory and its dates live in
+`test/android_manifest_test.dart`.
+
+**Run this whenever a plugin is added**, including when you expect no change — a rule only honoured
+when it finds something stops being run, which is how the App Check measurement came to be skipped
+until the Phase 4 security review asked for it.

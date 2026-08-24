@@ -83,9 +83,20 @@ class UserRepository {
   /// prune by age and by `UNREGISTERED` without rewriting the user document —
   /// and so two installs of the same account do not race each other's array.
   ///
-  /// The document id *is* the token. `updatedAt` is what lets the Function
-  /// decide a token is too old to be worth sending to, which matters because a
-  /// dead token is not an error the sender sees: FCM accepts it and drops it.
+  /// The document id *is* the token.
+  ///
+  /// **`updatedAt` is NOT used to decide a token is too old**, and this said it
+  /// was. `onCheckInCreated` deliberately never filters by age: §13's watcher —
+  /// the one who never opens the app — has by definition the stalest token in
+  /// the collection, so an age filter would silence exactly the person FCM is in
+  /// this design for. FCM's own `UNREGISTERED` is the authority on whether a
+  /// token is dead; a date is a guess about it. See `collectTokens` in
+  /// `functions/src/check_in_fan_out.ts`, which is the only consumer and argues
+  /// the same thing from the other side.
+  ///
+  /// It is still written, because it is the honest record of when this install
+  /// last confirmed its registration and a future decision may want it. What it
+  /// must not become is a send filter.
   ///
   /// Called in Phase 4 step 5, when `firebase_messaging` arrives. It is written
   /// here rather than there because the rules that validate it are already

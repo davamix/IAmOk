@@ -17,6 +17,13 @@
 # Firebase tooling treats as a guaranteed-offline project — no credentials are
 # used and the SDKs will not reach production for it.
 #
+# ## THREE scripts now want ports 8080 / 9099 / 5001, and only one may run
+#
+# `tools/emulators.ps1` (the dev suite), `tools/rules-test.ps1` and this one.
+# Stop whichever is running before starting another; the failure is loud —
+# *"Port 8080 is not open on localhost"* — but it reads like a broken script
+# rather than a busy port.
+#
 # ## The namespace trap does not apply here, and it is worth saying why
 #
 # `tools/emulators.ps1` carries a long note about `--project` naming a namespace
@@ -67,8 +74,29 @@ try {
     Write-Host ''
     Write-Host '1/2  fan-out, against the Firestore emulator' -ForegroundColor Cyan
     firebase emulators:exec --only firestore --project demo-i-am-ok `
-        'npm --prefix functions test'
-    if ($LASTEXITCODE -ne 0) { Write-Error "fan-out tests failed (exit $LASTEXITCODE)" }
+        'npm --prefix functions test' 2>&1 | Tee-Object -Variable fanOutOutput
+    $fanOutExit = $LASTEXITCODE
+
+    # CONTENT FIRST, exit code second - CLAUDE.md: on Windows no Firebase CLI
+    # exit code is a result. These commands print their work and then die with a
+    # libuv assertion in win/async.c, intermittently, on commands well
+    # outside `apps:*`. Judging the code first turns a passing suite into a red
+    # that sends someone looking for a test failure that is not there.
+    $fanOutLines = @($fanOutOutput | ForEach-Object { $_.ToString() })
+    $summary = @($fanOutLines | Select-String -Pattern '^\s*.\s*(pass|fail) \d+')
+    $failed = @($fanOutLines | Select-String -Pattern '(pass|fail) [1-9]\d*' |
+        Where-Object { $_.Line -match 'fail [1-9]' })
+    if ($summary.Count -eq 0) {
+        Write-Error ("the fan-out suite printed no test summary at all (exit $fanOutExit). " +
+            'That is a run that did not happen, not a run that passed.')
+    }
+    if ($failed.Count -gt 0) {
+        Write-Error "fan-out tests FAILED: $($failed[0].Line.Trim())"
+    }
+    if ($fanOutExit -ne 0) {
+        Write-Host ("  note: exit $fanOutExit with a clean summary - the documented Windows " +
+            'libuv crash. The output above is the result.') -ForegroundColor DarkYellow
+    }
 
     Write-Host ''
     Write-Host '2/2  the trigger fires once per day, not once per tap' -ForegroundColor Cyan
@@ -82,13 +110,17 @@ try {
     $triggerExit = $LASTEXITCODE
 
     $lines = @($captured | ForEach-Object { $_.ToString() })
-    if ($triggerExit -ne 0) { Write-Error "the trigger probe failed (exit $triggerExit)" }
 
-    # `probe: done` proves the script itself reached the end. Without it, an
-    # emulator that never dispatched anything and a script that died on its first
-    # write look identical: zero fan-out lines either way.
+    # Again: content first. `probe: done` proves the script itself reached the
+    # end. Without it, an emulator that never dispatched anything and a script
+    # that died on its first write look identical - zero fan-out lines either way.
     if (-not ($lines -match 'probe: done')) {
-        Write-Error 'the probe never reached the end - the counts below would be meaningless'
+        Write-Error ("the probe never reached the end (exit $triggerExit) - the counts " +
+            'below would be meaningless')
+    }
+    if ($triggerExit -ne 0) {
+        Write-Host ("  note: exit $triggerExit though the probe completed - the documented " +
+            'Windows libuv crash.') -ForegroundColor DarkYellow
     }
 
     $fanned = @($lines | Select-String -SimpleMatch 'onCheckInCreated: fanned out')

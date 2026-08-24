@@ -155,6 +155,17 @@ class WatcherReconcileResult {
   ///   meaning of the state — and the list renders the retraction itself: the
   ///   row goes from the warning to *"Everything OK"* in the same reconcile. A
   ///   notification would be telling someone what they are already reading.
+  ///
+  ///   **Phase 4 widened what `redundant` covers, and one case is now weaker
+  ///   than this argument.** It used to mean *the reader just navigated here*,
+  ///   so the change happened under their eyes. A foreground FCM nudge makes it
+  ///   also mean *the list is open and something arrived* — so a TalkBack user
+  ///   who heard "No check-in from Mum yesterday." thirty seconds ago has it
+  ///   silently replaced by "Everything OK", with no announcement and no reason
+  ///   to swipe back. `WatcherScreen` already owns the mechanism
+  ///   (`SemanticsService.sendAnnouncement`), but announcing needs an approved
+  ///   string, which is a `screens.md` decision rather than something to invent
+  ///   in a widget. Raised by the Phase 4 UI/UX review and recorded as owed.
   /// * **`unavailable`.** Nothing can be posted at all, so there is no
   ///   replacement to make.
   ///
@@ -729,6 +740,21 @@ abstract final class WatcherReconciler {
   /// which is both weaker and, by then, false about the earlier verification.
   /// [WarningOutcome.warnOnline] is the only verified warning, so it is the
   /// only one that supersedes.
+  ///
+  /// **This holds within one reconcile, not globally, and Phase 4 added the
+  /// third writer.** ADR-0006 gates only *alarm changes* on the lease — a run
+  /// that cannot take it still reads, decides and speaks — and
+  /// `saveWatcherCache` is last-write-wins. So two reconciles that both load the
+  /// cache before either writes, with different read outcomes, can post at the
+  /// same notification id in the wrong order: a verified warning replaced by a
+  /// hedge from a run that failed its read, on a device that read Firestore
+  /// seconds earlier. ADR-0006 enumerated the two properties holding the
+  /// *access-lost* channel up against exactly this; the warning channel had no
+  /// equivalent note and this docstring asserted the property unconditionally.
+  ///
+  /// Narrow — it needs two reconciles overlapping across a lease boundary — and
+  /// recorded rather than closed. Closing it means re-reading `warningsShownFor`
+  /// immediately before posting instead of trusting the snapshot taken at step 1.
   static bool _supersedes(WarningOutcome next, WarningOutcome standing) =>
       next != standing && next == WarningOutcome.warnOnline;
 

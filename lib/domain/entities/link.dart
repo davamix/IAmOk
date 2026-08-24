@@ -83,8 +83,39 @@ class Link {
   /// which days are eligible for a warning.
   final DayKey activeFrom;
 
-  /// Watcher-local time the warning alarm fires. Watcher-local so a watcher in
-  /// another country is never woken at 03:00 (§11).
+  /// Watcher-local time the warning **alarm** fires. Watcher-local so a watcher
+  /// in another country is never woken at 03:00 by the alarm (§11).
+  ///
+  /// **It does not bound when a warning can be POSTED, and since Phase 4 that
+  /// distinction is visible.** `WarningPolicy` owes a warning the moment `D` is
+  /// complete; this value decides only when the alarm asks. A reconcile
+  /// triggered by anything else posts whenever it lands — and Phase 4 added a
+  /// trigger that fires on **somebody else's action**: an FCM nudge, three to
+  /// ten seconds after any watched person taps.
+  ///
+  /// So a watcher in Los Angeles can be woken at 00:00 PDT because Mum in Madrid
+  /// tapped at 09:00 CEST, by a warning about the day she missed *before* that
+  /// tap. Same-zone version: Mum taps at 06:30 and the family hears about
+  /// yesterday at 06:30 rather than at 10:00. With ADR-0009's catch-up, a phone
+  /// out of contact for a week can post up to seven at that hour.
+  ///
+  /// Two things make this a trade rather than simply a defect, and both cut
+  /// against changing it in a hurry:
+  ///
+  /// - It accelerates delivery **only** for warnings where somebody has just
+  ///   demonstrably proved they are fine. The case that actually matters — she
+  ///   has stopped tapping, so there is no check-in and no push — still waits
+  ///   for the alarm ADR-0008 measured as hours late in Doze.
+  /// - For a watcher of several people it is a real dead-man's-switch
+  ///   improvement: Mum's 07:00 tap wakes the isolate that discovers Granddad
+  ///   has gone silent.
+  ///
+  /// Raised by the Phase 4 UI/UX review, recorded rather than decided, and owed
+  /// to the owner. The alternative is to have the push path defer *posting* —
+  /// never deciding, and never recording the day as settled — until
+  /// `warningLocalTime` has passed, which costs only the second bullet and is a
+  /// change to the one path where silence is the failure this app cannot detect
+  /// in itself.
   final LocalTimeOfDay warningLocalTime;
 
   final DateTime createdAt;

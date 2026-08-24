@@ -279,6 +279,19 @@ added.
 - **App Check enforcement** — turning it from monitoring to enforcing, and how to verify real
   traffic is attested first. Phase 4 ships the client; **registering the debug token and enabling
   enforcement are both still owed**, and until then the rules are the whole defence.
+
+  Two conditions that must be met *before* enforcement, both found at the Phase 4 gate:
+
+  - **Play Integrity requires the app to be known to Google Play.** A sideloaded, debug-signed
+    build cannot produce a valid verdict, so release attestation does not work until the app
+    reaches at least an internal test track. This is a structural gate, not a "wait for metrics"
+    one, and it puts enforcement at Phase 8 or later.
+  - **The refusal-to-copy mapping must be verified against a real rejection on hardware.**
+    `FirestoreCheckInReader._mentionsAppCheck` matches an English substring, and anything
+    unrecognised falls through to *unreachable* — whose approved string claims **this phone has
+    been offline**, which is false when the server was reached and refused. Enforcing before that
+    is checked turns one config change into every watcher in the fleet reading a false statement
+    about their own device.
 - **No volume bound on `onCheckInCreated`** — §8 allows a user `create`, `update` *and* `delete` on
   their own `checkins/{uid}/days/{date}`, and the trigger fires on every create. A create/delete
   loop is therefore an unbounded push generator aimed at that person's **own** watchers' phones and

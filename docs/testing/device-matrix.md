@@ -971,6 +971,47 @@ which is the first genuinely good reason this phase has had to point the app at 
 Until that runs, the honest statement is: **question 2 is answered yes; question 1 is answered yes
 for everything except the real-radio round trip.**
 
+### Does a Doze push show the user anything? Measured 2026-08-25 — and it found something else
+
+The UI/UX review asked the one question ADR-0008's measurement never looked at: the allowlist grant
+and the timing were recorded, but nobody looked at the **screen**. `firebase_messaging` reaches the
+isolate through `startService()`, which on some OEM builds produces a *"running in the background"*
+chip, and a payload with a `notification` block would be system-rendered.
+
+Method: diff the exact **notification keys** for the package before and after, not a count — the tray
+already held a warning from an earlier run, so a count proves nothing — and sample
+`dumpsys activity services` every 2 s through the wake, because a foreground-service chip would
+appear and vanish inside the window.
+
+**The transport is silent.** No foreground service at any sample. Nothing system-rendered from the
+payload, which follows from the fan-out sending no `notification` block at all — quiet-confirm holds
+at the transport level, which is the strongest place it could hold.
+
+**But a notification did appear, and it is the UI/UX review's M2 happening in front of us.**
+
+```
+channel=warnings  importance=5
+android.text = "No check-in from Ana yesterday."
+posted 2026-08-25 00:24:53 CEST
+```
+
+That is the app deciding, correctly, on its own channel, in its own approved copy — the self-linked
+account had not checked in on the last completed day, so a warning was genuinely owed. What is new
+is **when**: `Link.warningLocalTime` is 10:00, and this arrived at **00:24**, because a check-in was
+written and a push woke the isolate. `WarningPolicy` owes a warning the moment `D` is complete;
+`warningLocalTime` bounds only when the *alarm* asks.
+
+So M2 is not a hypothetical any more. A watcher can be woken in the middle of the night by a warning
+about a *past* day, triggered by somebody else tapping. The trade is recorded on
+`Link.warningLocalTime` and is the owner's to settle; this run is the evidence that it is reachable
+in ordinary use rather than only in an unlucky timezone pairing.
+
+**The test premise was wrong first, and that is worth recording too.** The script asserted "today IS
+checked in, so the reconcile has nothing to say" — while the seeded check-in was for 2026-08-21 and
+the device clock had moved on to 2026-08-25. The reconcile was right and the assumption was stale,
+which is the third time this phase that a measurement's premise, not its subject, was the thing at
+fault.
+
 ## What one phone and an emulator can prove — decided 2026-08-20
 
 PLAN.md's Phase 4 exit criterion is *"a tap on one **physical phone** quietly updates a **second

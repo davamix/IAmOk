@@ -539,7 +539,7 @@ The full set. Everything the app says out loud is here.
 | …the unverifiable-away variant of the same | Watcher | *"Can't check on Mum for Friday 14 August — your phone has been offline since Tuesday 10:14. Mum was marked away until Saturday 22 August."* |
 | Late check-in after a warning was shown | Watcher | *"Correction: Mum did check in yesterday, at 23:40."* Replaces the warning by id. |
 | …and the read carries no tap time | Watcher | *"Correction: Mum did check in yesterday."* Same id, same replacement. |
-| …and the day corrected is **not** yesterday | Watcher | *"Correction: Mum did check in on Saturday 15 August."* (with the time clause when Phase 4 supplies one) |
+| …and the day corrected is **not** yesterday | Watcher | *"Correction: Mum did check in on Saturday 15 August."* No time clause — see below. |
 | Away set by a watcher | All other watchers, and the watched person | *"Ana marked Mum away until Sat 22 Aug."* |
 | Away set by the watched person | All watchers | *"Mum is away until Sat 22 Aug."* |
 | Away cancelled | Everyone except whoever cancelled | *"Mum's away period was cancelled — daily check-ins resume today."* |
@@ -588,8 +588,21 @@ than silent ones — alarm fatigue is not a risk at that frequency.
 > no per-check-in timestamp, so the only instant available to the watcher's device is when it
 > managed the read: on a phone that was asleep until morning that is hours out and occasionally the
 > wrong day. A message that exists to withdraw a false claim about a person may not make a new one
-> to do it, so until Phase 4 carries `deviceTappedAt` through, the second variant is what ships.
-> The retraction is complete without the time; the time was never what made it true.
+> to do it, so the second variant is what ships. The retraction is complete without the time; the
+> time was never what made it true.
+>
+> **This said "until Phase 4 carries `deviceTappedAt` through", and Phase 4 did not.**
+> `FirestoreCheckInReader` returns a bare `Set<DayKey>` and discards the instant, so the no-time
+> variant is what ships today and for the foreseeable future. Corrected at the Phase 4 gate, because
+> an approved-copy table describing a build that does not exist is worse than one that is merely
+> incomplete — on the single message whose purpose is to withdraw a false claim about a person.
+>
+> **And there is now a trap sitting next to it.** `onCheckInCreated` *does* put `deviceTappedAt` on
+> the wire, and `pushBackgroundHandler` deliberately never reads the message. Someone will notice
+> the field is right there and reach for it precisely because this table says the time is owed. It
+> is **not an acceptable source**: §3 makes a push a nudge carrying no authority, so taking the
+> instant from the payload would let a forged message put a fabricated time into a sentence about
+> whether a person is alive. If the time is ever wanted, it comes through the READ.
 
 > **A correction is only ever spoken when the warning it retracts was actually posted.** If the
 > warning was consumed as `redundant` — the watcher was reading the list, so nothing went to the

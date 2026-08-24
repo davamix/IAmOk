@@ -279,7 +279,11 @@ class _IAmOkAppState extends ConsumerState<IAmOkApp>
         _reconcileWatcherSide();
       }
       if (!mounted) return;
-      await ref.read(watchedStateProvider.notifier).refresh();
+      // `userInitiated: false` — nobody asked for this. A reconcile she did not
+      // trigger must not clear *"That did not save. Please tap again."* from
+      // under her: nothing becomes false, but she loses the one instruction
+      // telling her what to do, on the screen this app exists for.
+      await ref.read(watchedStateProvider.notifier).refresh(userInitiated: false);
     } on Object {
       // Swallowed for the same reason `_reconcileWatcherSide` swallows: this
       // runs behind whatever screen the user actually opened, and must never be

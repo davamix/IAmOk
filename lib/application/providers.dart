@@ -464,11 +464,35 @@ class WatchedStateNotifier extends AsyncNotifier<WatchedState> {
   /// Android takes permissions back from apps nobody opens (§13), and the
   /// device's zone can change while the app is backgrounded, so a resume is a
   /// real reconcile rather than a redraw.
-  Future<void> refresh() async {
+  ///
+  /// [userInitiated] is false when something the person did not do triggered
+  /// this — today only an FCM nudge (`_onForegroundPush`). It decides one thing:
+  /// whether *"That did not save. Please tap again."* survives.
+  ///
+  /// **A reconcile she did not ask for must not delete the one instruction she
+  /// has.** `tapFailed` is transient screen state rather than something stored,
+  /// so a plain refresh clears it: her tap fails, the red line appears, and a
+  /// push arriving three seconds later removes it with no user action. Nothing
+  /// becomes *false* — the target stays enabled and correct — she simply loses
+  /// the sentence telling her what to do, on the screen this app exists for.
+  ///
+  /// On a **resume** clearing it is right: she has come back to the screen and
+  /// the reconcile is the fresh answer. That is why this is a parameter rather
+  /// than a blanket carry-forward.
+  ///
+  /// Near-unreachable in Phase 4 — a watched person receives no push unless they
+  /// also watch someone — and reachable in Phase 6, when `onAwayChanged` fans
+  /// out to the watched person's own device.
+  Future<void> refresh({bool userInitiated = true}) async {
     final services = ref.read(appServicesProvider);
-    state = await AsyncValue.guard(
+    final hadFailedTap = !userInitiated && (state.value?.tapFailed ?? false);
+    final next = await AsyncValue.guard(
       () => services.watchedReconcile.reconcile(selfUid: services.selfUid),
     );
+    final value = next.value;
+    state = hadFailedTap && value != null
+        ? AsyncData(value.copyWith(tapFailed: true))
+        : next;
   }
 
   /// Records the tap, then reconciles — which cancels the rest of today's

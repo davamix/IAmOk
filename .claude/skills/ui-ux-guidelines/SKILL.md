@@ -37,8 +37,16 @@ one fires is a correctness requirement rather than copy polish:
 |---|---|
 | verified, and she did not check in | *"No check-in from Mum yesterday."* |
 | could not **reach** the server | *"No check-in received from Mum yesterday — your phone has been offline since 22:10."* |
-| has a cached away it cannot re-verify | *"Can't check on Mum — your phone has been offline since Tuesday 10:14. She was marked away until Saturday 22 August."* |
-| was **refused** by the server (ADR-0004) | *"Can't check on Mum — I Am Ok has lost access to her check-ins. Open the app to see what to do. Your phone last saw a check-in on Saturday 15 August."* |
+| has a cached away it cannot re-verify | *"Can't check on Mum — your phone has been offline since Tuesday 10:14. Mum was marked away until Saturday 22 August."* |
+| was **refused** by the server (ADR-0004) | *"Can't check on Mum — I Am Ok has lost access to the check-ins. Open the app to see what to do. Your phone last saw a check-in on Saturday 15 August."* |
+
+**The two rows above carry no pronoun for the watched person, and that is the point.** Both said
+*"She"* / *"her"* until the Phase 3 gate: the model has no gender for anyone, `watchedName` is
+denormalised onto the link, and a watched **father** was getting the wrong word in a message about
+whether he was all right. The shipped strings interpolate the name or drop the possessive
+entirely — see `NotificationCopy._awayClause` and `accessLostBody`. This table said otherwise until
+the Phase 4 gate, which is worse than a stale doc: it is the table implementers are told to use
+verbatim.
 
 Silence would be a silent failure; a flat "she didn't check in" is a claim the device cannot
 support; and **"your phone has been offline" is a claim about the *device* that is false whenever

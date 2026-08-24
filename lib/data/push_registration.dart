@@ -65,7 +65,13 @@ class PushRegistration {
   /// treats that as *not registered yet* and tries again next launch.
   Future<String?> token() async {
     try {
-      return await _messaging.getToken();
+      // **Bounded, because a sign-out awaits this too.** `getToken()` is a
+      // network round trip through Play Services and carries no timeout of its
+      // own; unbounded, it is one of the two calls that made
+      // `unregister`'s "it must not be able to hang" untrue while the docstring
+      // claimed otherwise. On a launch a hang would merely delay tier 2 forever;
+      // on a sign-out it is a button that never finishes.
+      return await _messaging.getToken().timeout(deleteTimeout);
     } on Object {
       return null;
     }
@@ -106,6 +112,13 @@ class PushRegistration {
   ///
   /// So it is bounded, and the timeout is treated as a failure like any other.
   ///
+  /// **All three calls on this path are bounded, not just the delete.** The UI/UX
+  /// review found that this paragraph was true of the call it sat above and false
+  /// of the two around it: `getToken()` and the fallback `deleteToken()` were
+  /// unbounded, so the real ceiling was not five seconds but unlimited. When
+  /// Phase 5 builds a sign-out surface the worst case is a button that does
+  /// nothing on a screen somebody is using to hand a phone over.
+  ///
   /// ## On failure the DEVICE TOKEN is invalidated, and that inverts the
   /// argument this docstring used to make
   ///
@@ -133,8 +146,11 @@ class PushRegistration {
       await _users.deleteToken(uid: uid, token: value).timeout(deleteTimeout);
     } on Object {
       try {
-        // The row survived. Make it self-cleaning rather than permanent.
-        await _messaging.deleteToken();
+        // The row survived. Make it self-cleaning rather than permanent —
+        // bounded like everything else on this path, because this is the
+        // fallback for a step that already failed and a sign-out must complete
+        // either way.
+        await _messaging.deleteToken().timeout(deleteTimeout);
       } on Object {
         // Nothing left to try, and a sign-out must still complete.
       }

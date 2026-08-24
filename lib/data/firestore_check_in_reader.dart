@@ -212,6 +212,26 @@ class FirestoreCheckInReader implements CheckInReader {
         _ => const FirestoreRead.unreachable(),
       };
 
+  /// **A substring match on an English message, and it is a gate condition on
+  /// App Check enforcement rather than a defect today.**
+  ///
+  /// An unrecognised refusal falls through to `unreachable`, whose approved
+  /// string is *"your phone has been offline since 22:10."* — a claim about the
+  /// **device** that is false whenever the server was reached and said no. That
+  /// is exactly what the UI/UX guidelines forbid, and §17 rates a config error
+  /// that becomes a fleet-wide false alarm as the worst class this app has.
+  ///
+  /// Harmless while App Check is in monitoring mode, because nothing is refused.
+  /// It stops being harmless the day enforcement is enabled: a reworded SDK
+  /// message, or a code like `resource-exhausted`, and every watcher reads a
+  /// false statement about their own phone instead of the actionable *"Update
+  /// I Am Ok in the Play Store."*
+  ///
+  /// **Before enforcement is turned on, this mapping must be verified against a
+  /// real rejection on hardware** — not against a substring, and not against a
+  /// unit test that constructs the exception it expects. Recorded in
+  /// `docs/security/threat-model.md`'s open list. Raised by the Phase 4 UI/UX
+  /// review.
   static bool _mentionsAppCheck(FirebaseException e) =>
       (e.message ?? '').toLowerCase().contains('app check');
 

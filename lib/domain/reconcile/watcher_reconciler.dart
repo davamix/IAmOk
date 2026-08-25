@@ -165,8 +165,10 @@ class WatcherReconcileResult {
   ///   to swipe back. `WatcherScreen` already owns the mechanism
   ///   (`SemanticsService.sendAnnouncement`).
   ///
-  ///   **DECIDED by the owner, 2026-08-25: announce it.** Not yet implemented —
-  ///   see the Phase 4 summary. The trigger is narrow on purpose: a person's
+  ///   **DECIDED by the owner and BUILT, 2026-08-25: announce it** —
+  ///   `WatcherState.userInitiated` plus `WatchedPersonState.checkedInSince`,
+  ///   verified on the POCO F3 with TalkBack running. The trigger is narrow on
+  ///   purpose: a person's
   ///   rendered status **changed** *and* the refresh was not user-initiated.
   ///   Announcing every refresh is noise, and on a resume the reader is arriving
   ///   at the screen anyway. The approved string is in `screens.md`; only the

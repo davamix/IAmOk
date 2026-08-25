@@ -110,8 +110,9 @@ class Link {
   ///   improvement: Mum's 07:00 tap wakes the isolate that discovers Granddad
   ///   has gone silent.
   ///
-  /// **DECIDED by the owner, 2026-08-25: a push may not post a warning before
-  /// `warningLocalTime`.** Not yet implemented — see the Phase 4 summary.
+  /// **DECIDED by the owner and BUILT, 2026-08-25: a push may not post a warning
+  /// before `warningLocalTime`** — [ADR-0010][], enforced by
+  /// `WatcherReconcileService._notBefore` and proven on the POCO F3 the same day.
   ///
   /// The rule is *post only when `now >= today's warningLocalTime` in the
   /// watcher's zone*, which keeps the second bullet for the rest of the day: a
@@ -123,12 +124,17 @@ class Link {
   /// makes**, on a path that bypassed it — the invariant held until Phase 4 only
   /// because the alarm was the single unattended caller.
   ///
-  /// **The trap, and it is the whole risk of the change.** A suppressed run must
-  /// still decide, must still re-arm, and must **not** record the day in
-  /// `warningsShownFor` — otherwise the alarm finds it settled and says nothing,
-  /// which is a lost warning. Do not invent a state for that:
+  /// **The trap, and it is the whole risk of the change — it is closed, not
+  /// avoided.** A suppressed run must still decide, must still re-arm, and must
+  /// **not** record the day in `warningsShownFor`, or the alarm finds it settled
+  /// and says nothing, which is a *lost* warning. No state was invented for it:
   /// `NotificationDelivery.unavailable` already means *not posted, not consumed,
-  /// still owed at the next reconcile*, and it already has tests.
+  /// still owed at the next reconcile*. Anyone changing that path should read
+  /// `_notBefore` and the four separate assertions in
+  /// `watcher_reconcile_service_test.dart` before assuming it is safe to settle a
+  /// day early.
+  ///
+  /// [ADR-0010]: ../../../docs/architecture/decisions/0010-a-push-may-not-post-a-warning-early.md
   final LocalTimeOfDay warningLocalTime;
 
   final DateTime createdAt;

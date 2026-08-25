@@ -1098,6 +1098,64 @@ default build does not use, so this run proves *that* it spoke and *when*, not *
 asserted against the `SystemChannels.accessibility` platform message in `watcher_screen_test.dart`,
 including the case where a warning lapses without a check-in and must **not** be announced.
 
+### Announcements at API 36 — measured 2026-08-25 20:04, and the claim is false as stated
+
+The post-gate review raised a real risk: Android 16 deprecates accessibility announcements, and if
+that deprecation is a **no-op** then `WatcherCopy.checkedIn` and `WatcherCopy.showingPerson` are both
+silent on current Android with nothing in the app or the suite able to see it. Settled on the
+`Medium_Phone_API_36.0` AVD.
+
+**They still speak.** Android 16, `ro.build.version.sdk=36`, TalkBack 16.0.0, and — read from
+`dumpsys package`, not from `build.gradle.kts` — the **installed** app reports `targetSdk=36`. The
+premise is verified from the platform, because the premise is the thing this measurement is about.
+
+| | Announce dispatched | TalkBack speech focus | TTS synthesis |
+|---|---|---|---|
+| **Stimulus** — notification payload naming a real link | 1 | 1 | 1 |
+| **Control** — identical intent, payload naming no link | **0** | **0** | **0** |
+| Stimulus, repeated | 1 | 1 | 1 |
+| Control, repeated | **0** | **0** | **0** |
+
+The whole chain inside 8 ms, and the platform names its own API level in the middle of it:
+
+```
+20:04:36.931 W/AccessibilityBridge: Using AnnounceSemanticsEvent for accessibility is deprecated
+                                    on Android. Migrate to using semantic properties…
+20:04:36.934 I/MediaFocusControl:   requestAudioFocus() AA=USAGE_ASSISTANCE_ACCESSIBILITY/
+                                    CONTENT_TYPE_SPEECH … callingPack=…marvin.talkback … sdk=36
+20:04:36.939 I/GoogleTTSServiceImpl: Synthesis request for locale eng-USA
+20:04:38.126 I/MediaFocusControl:   abandonAudioFocus()          <- spoke for 1.2 s
+```
+
+**The control is what makes it evidence, and this one is exact.** Both runs are the same
+`am start -a SELECT_NOTIFICATION` against the same activity, differing in **one string** — the
+payload. A payload naming no link makes `_onTapped` return at its `index < 0` guard, so the app
+resumes identically and announces nothing. It produced total silence: no dispatch, no focus, no
+synthesis. Driving the tap by replicating the notification's own intent
+(`flutter_local_notifications` uses action `SELECT_NOTIFICATION` with extras `payload` and
+`notificationId`) is what made an exactly-matched pair possible at all — a finger on the shade
+changes the window as well as the payload.
+
+**Two things that are true, and neither is "it works, move on".**
+
+**1. `targetSdk` was never the trigger.** The deprecation is on Android's *behavior changes: all
+apps* page, not the *apps targeting Android 16* page — it applies on Android 16 by **OS version**,
+whatever the app targets. Pinning `targetSdk` at 35 would not have avoided it, and the original
+write-up said it would.
+
+**2. Flutter already reports this API as unsupported on Android — on every version.** The engine's
+`AccessibilityBridge` sets `NO_ANNOUNCE` unconditionally on Android, so
+`MediaQuery.supportsAnnounceOf` is **false here and always has been**, and Flutter's own widgets
+(`InputDecorator`, `CalendarDatePicker`, `Autocomplete`) branch on it to `Semantics(liveRegion: true)`
+instead. `SemanticsService.sendAnnouncement`'s docstring says to check that flag before calling —
+this app does not, and both call sites would be no-ops the day the engine stops dispatching rather
+than merely warning. It still dispatches today, and logs the warning above while doing it.
+
+So the finding is not *"the risk was imaginary"*. It is *"the mechanism works today, and both the
+platform and the framework have said in writing not to rely on it"* — which is the argument for
+`liveRegion`, and the reason the OK → warning announcement is a mechanism question and not only a
+copy one.
+
 ### Three HyperOS behaviours that cost time in this session
 
 **`deviceidle force-idle` will not reach deep idle from a screen-off device.** It stops at
@@ -1195,15 +1253,11 @@ FCM work on it**. An AOSP image would have made the whole arrangement impossible
       armed. The same store then **posted** *"No check-in from Granddad yesterday."* at 08:01 when the
       alarm reached the watcher's own hour. Full table and the two things it does not establish — no
       forced deep Doze, and a resident process on the second half — in the section above.
-- [ ] **Announcements still reach TalkBack at `targetSdk 36`** — owed, and it is not a polish check.
-      Android 16 may no longer dispatch `TYPE_ANNOUNCEMENT` for apps targeting API 36; `targetSdk =
-      36` is confirmed in `android/app/build.gradle.kts`, the behaviour is not. The run below that
-      proved announcements work was on the POCO F3 at **API 33**. If the change is real, **two**
-      shipped features are silent on current Android with nothing in the app or the suite able to see
-      it: `WatcherCopy.checkedIn`, and `WatcherCopy.showingPerson` — the screen-reader half of what
-      the *lost access* notification promises when it says *"Open the app to see what to do."* Use
-      the `Medium_Phone_API_36.0` AVD and the method in the section below, **including the control
-      run that must produce silence**. The fallback is `Semantics(liveRegion: true)` on the row.
+- [x] **Announcements still reach TalkBack at `targetSdk 36`** — 2026-08-25 20:04, on the
+      `Medium_Phone_API_36.0` AVD (Android 16, `ro.build.version.sdk=36`, TalkBack 16.0.0). **They do.
+      The risk was real to raise and is false as stated**; neither shipped feature is silent. Method,
+      the matched control, and the two things that are true and still matter are in *Announcements at
+      API 36* below.
 - [x] **A row that changes under a screen reader is announced** — 2026-08-25 08:10, with **TalkBack
       running**. A foreground push flipped a row from *"No check-in from Pop yesterday."* to
       *"Everything OK…"* (read out of the accessibility tree, before and after) and TalkBack took

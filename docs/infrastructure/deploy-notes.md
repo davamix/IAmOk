@@ -168,6 +168,41 @@ interface of a home network is not something to arrange by accident.
 everything else in this project already drives the POCO over USB. It does **not** survive a
 reconnect — re-run the script if the device is unplugged.
 
+### The local Functions emulator CAN send real FCM, with no credentials set up
+
+Measured 2026-08-21, and worth knowing before anyone goes looking for a service-account key.
+
+**There is no FCM emulator and there never will be** — sending a push is the one thing in this
+project that cannot be exercised locally. The expectation was therefore that `onCheckInCreated`
+running in the emulator would fail at the transport with an authentication error, and that a real
+end-to-end test would need either `gcloud auth application-default login` or an Admin SDK key in
+`.local/`.
+
+**Neither is needed.** With `gcloud` **not installed** and **no ADC file present**
+(`%APPDATA%/gcloud/application_default_credentials.json` does not exist), the emulator fetched a
+token and delivered:
+
+```
+!  Google API requested!
+   - URL: "https://oauth2.googleapis.com/token"
+>  {"acceptedLinks":1,"tokens":1,"sent":1,"failed":0,"pruned":0,…,"message":"onCheckInCreated: fanned out"}
+```
+
+The message arrived on the POCO F3. The **mechanism is inferred rather than verified**: the Firebase
+CLI is logged in as `davamix@gmail.com`, and firebase-tools appears to hand the functions emulator
+credentials derived from that login. What is *measured* is the outcome — a real push, from a local
+function, with nothing provisioned by hand.
+
+Two consequences:
+
+- The local loop reaches **further than expected**: everything except the transport is emulated, and
+  the transport is real. That is what made ADR-0008's deciding measurement possible without
+  deploying anything.
+- **It also means a careless local run can send real pushes to real devices.** Today that is only
+  ever this project's own handset, because the token comes from `users/{uid}/tokens/…` in the
+  *emulated* Firestore. It stops being harmless the moment the emulator is pointed at a namespace
+  holding real tokens.
+
 ## Prerequisites still outstanding
 
 All Phase 4, all from [firebase-setup-prompt.md](firebase-setup-prompt.md):

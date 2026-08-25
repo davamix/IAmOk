@@ -1,6 +1,6 @@
 # Phase 4 — Firebase backbone · summary
 
-**Date:** 2026-08-25 · **921 Dart tests**, **30 Functions tests**, `flutter analyze` clean, secrets
+**Date:** 2026-08-25 · **954 Dart tests**, **30 Functions tests**, `flutter analyze` clean, secrets
 guard clean.
 
 **Status: implemented and reviewed at the gate. All five reviewers have run and every finding is
@@ -49,7 +49,7 @@ POCO F3** on 2026-08-25:
 
 | Change | What |
 |---|---|
-| **ADR-0010 — a push may not post a warning early** | `WatcherReconcileService._notBefore` downgrades the **warning** channel to `unavailable` until `now >= warningLocalTime` in the watcher's zone. Suppresses the post; leaves the day owed, the alarm armed and the row honest. Access-lost is not gated; corrections are, and that is recorded as a decision. |
+| **ADR-0010 — a push may not post a warning early** | `WatcherDelivery.notBefore` downgrades the **warning** channel to `unavailable` until `now >= warningLocalTime` in the watcher's zone. Suppresses the post; leaves the day owed, the alarm armed and the row honest. Access-lost is not gated; corrections are, and that is recorded as a decision. |
 | **A row that changes under a screen reader is announced** | `WatcherState.userInitiated` (false only for a foreground push) plus `WatchedPersonState.checkedInSince`, which asks the **cache** whether the warned day is now confirmed rather than inferring it from the row going quiet. One approved string; the two candidates in `screens.md` still do not ship. |
 
 ---
@@ -115,7 +115,8 @@ the *alarm* asks, not when a warning may be posted. **Decided and now built** �
 [ADR-0010](../architecture/decisions/0010-a-push-may-not-post-a-warning-early.md). The warning
 channel is handed `NotificationDelivery.unavailable` before the reader's hour, which is the one
 substitution that suppresses the post while leaving the day **owed**: nothing recorded, ADR-0009's
-pointer not advanced, the 10:00 alarm still armed. Not yet run on hardware.
+pointer not advanced, the 10:00 alarm still armed. Held at 07:49 and spoken at 08:01 on the POCO
+F3 the same day.
 
 **5. The deploy checklist asserted the opposite of the truth.** `deploy-notes.md` still said
 `functions:list` returns `SERVICE_DISABLED`; it has been enabled since 2026-08-21. That is the file
@@ -180,9 +181,10 @@ rather than amended". The measurement half is done. The choice is not:
   someone's relative is all right.
 
 **2 and 3 were DECIDED — 2026-08-25 — and are now BUILT.** A push may not post a warning before
-`warningLocalTime` (ADR-0010, one static function in `WatcherReconcileService`, eleven tests,
-mutation-checked), and a row that changes under a screen reader is announced
-(`WatcherState.userInitiated` + `WatchedPersonState.checkedInSince`, six widget tests). Both were
+`warningLocalTime` (ADR-0010, one pure function on `WatcherDelivery`, twelve service tests plus
+fourteen unit tests, mutation-checked), and a row that changes under a screen reader is announced
+(`WatcherState.userInitiated` + `WatchedPersonState.checkedInSince`, ten widget tests and
+fourteen at the value level). Both were
 made conditional on a device run and **neither has had one**. Option 1's cost — item 1 above — is
 the decision still open, and the owner asked for the number before any ADR is drafted.
 
@@ -275,7 +277,8 @@ Start it detached with output redirected to a file.
 >
 > **Everything with code in it is done.** Steps 4–7 are built and reviewed at the gate; the two
 > changes the owner approved on 2026-08-25 are built, mutation-checked in the VM, and **proven on the
-> POCO F3** the same day. 921 Dart tests, 30 Functions tests, `flutter analyze` clean, debug APK
+> POCO F3** the same day, then re-reviewed. 954 Dart tests, 30 Functions tests, `flutter analyze`
+> clean, debug APK
 > builds. ADR-0008's deciding measurement passed both its questions in forced deep Doze,
 > mutation-checked against `priority: 'normal'`.
 >

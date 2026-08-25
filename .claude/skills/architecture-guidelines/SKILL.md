@@ -142,7 +142,7 @@ has been *refused* is not offline and must not say it is. Which one fires is a c
 requirement, not copy polish.
 
 **Deciding is not posting** (ADR-0010). A warning decided before `warningLocalTime` in the
-**watcher's** zone is not posted — `WatcherReconcileService._notBefore` hands the warning channel
+**watcher's** zone is not posted — `WatcherDelivery.notBefore` hands the warning channel
 `NotificationDelivery.unavailable`, which is the state that suppresses the post while leaving the day
 **owed**. That hour bounded only the *alarm* for three phases, so FCM — which fires on somebody
 else's tap — woke a family at 00:24. The access-lost channel is not gated; a refusal has no hour.

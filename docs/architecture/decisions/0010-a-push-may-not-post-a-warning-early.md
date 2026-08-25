@@ -37,7 +37,7 @@ warning per missed day, oldest first, so the same push posts up to seven notific
 Before that hour the reconcile still runs in full; only the *posting* is held.
 
 It is implemented as a **delivery downgrade**, not as a new branch and not as a new state:
-`WatcherReconcileService._notBefore` hands the domain `NotificationDelivery.unavailable` on the
+`WatcherDelivery.notBefore` hands the reconciler `NotificationDelivery.unavailable` on the
 warning channel, which already means exactly *not posted, not consumed, still owed at the next
 reconcile*. Four consequences follow from that one substitution, and all four are required:
 

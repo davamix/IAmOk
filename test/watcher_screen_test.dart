@@ -937,8 +937,20 @@ void main() {
 
       await pump(tester, [
         // The read succeeded and the away covers the day: nothing warns, and
-        // nobody checked in.
-        person(cache: const WatcherCache.empty()),
+        // nobody checked in **on the warned day**.
+        //
+        // **`WatcherCache.empty()` was too weak here**, and the test's own name
+        // said why without noticing: an empty cache has no `lastConfirmedDay` at
+        // all, so the null check alone was sufficient and the day comparison the
+        // guard is actually about was never evaluated. Mutating it to
+        // `return confirmed != null;` passed the entire suite.
+        //
+        // A stale-but-real check-in is the production shape: she tapped on the
+        // 14th, went away on the 15th, the phone could not verify, and the read
+        // now succeeds with the away covering the 16th. That is the case where
+        // *"Mum checked in. Everything OK."* would be a fabricated claim about a
+        // person, spoken to the reader least able to check it.
+        person(cache: WatcherCache(lastConfirmedDay: DayKey(2026, 8, 14))),
       ], userInitiated: false);
       await tester.pumpAndSettle();
 
@@ -1044,6 +1056,33 @@ void main() {
           reason: 'the row did go quiet — this is not a case of nothing '
               'happening');
       expect(spoken, isEmpty);
+      handle.dispose();
+    });
+
+    testWidgets('two rows settling at once name both, oldest row first',
+        (tester) async {
+      // **Pinning a behaviour that was decided by a `for` loop rather than by
+      // anyone.** `screens.md`'s approved section is silent on it, and the
+      // platform does not reliably queue announcements — so the plausible bad
+      // outcome is a reader hearing about Granddad and never about Mum.
+      //
+      // Nothing false is said either way, which is why this asserts the present
+      // behaviour rather than demanding a different one. It turns "whatever the
+      // loop does" into something a future change has to break on purpose.
+      final spoken = announcementsOn(tester);
+      final handle = tester.ensureSemantics();
+
+      await pump(tester, [warned(), warned(uid: 'gd', name: 'Granddad')]);
+      await pump(tester, [
+        settled(),
+        settled(uid: 'gd', name: 'Granddad'),
+      ], userInitiated: false);
+      await tester.pumpAndSettle();
+
+      expect(spoken, [
+        'Mum checked in. Everything OK.',
+        'Granddad checked in. Everything OK.',
+      ], reason: 'list order, which is the order the rows are read in');
       handle.dispose();
     });
 

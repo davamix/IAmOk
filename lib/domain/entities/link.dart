@@ -115,7 +115,7 @@ class Link {
   ///
   /// **DECIDED by the owner and BUILT, 2026-08-25: a push may not post a warning
   /// before `warningLocalTime`** — [ADR-0010][], enforced by
-  /// `WatcherReconcileService._notBefore` and proven on the POCO F3 the same day.
+  /// [WatcherDelivery.notBefore] and proven on the POCO F3 the same day.
   ///
   /// The rule is *post only when `now >= today's warningLocalTime` in the
   /// watcher's zone*, which keeps the second bullet for the rest of the day: a
@@ -133,7 +133,7 @@ class Link {
   /// and says nothing, which is a *lost* warning. No state was invented for it:
   /// `NotificationDelivery.unavailable` already means *not posted, not consumed,
   /// still owed at the next reconcile*. Anyone changing that path should read
-  /// `_notBefore` and the four separate assertions in
+  /// [WatcherDelivery.notBefore] and the four separate assertions in
   /// `watcher_reconcile_service_test.dart` before assuming it is safe to settle a
   /// day early.
   ///

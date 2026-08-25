@@ -587,7 +587,8 @@ class WatcherReconcileService {
     //    with an empty tray, which is the honest state. See
     //    [WatcherReconcileResult.shouldPostCorrections].
     //
-    //    **[_notBefore] is a third route in, and it is not the same case.**
+    //    **[WatcherDelivery.notBefore] is a third route in, and it is not the
+    //    same case.**
     //    There the warning really was posted and really was read, so the
     //    retraction is genuinely given up rather than merely redundant: the
     //    false claim comes down silently and no sentence says it was withdrawn.

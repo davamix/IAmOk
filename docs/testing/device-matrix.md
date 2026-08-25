@@ -1010,8 +1010,10 @@ reachable in ordinary use rather than only in an unlucky timezone pairing.
 **Implemented 2026-08-25** — [ADR-0010](../architecture/decisions/0010-a-push-may-not-post-a-warning-early.md).
 The warning channel is handed `NotificationDelivery.unavailable` until `now >= warningLocalTime` in
 the watcher's zone, so nothing posts, nothing is recorded, `lastDecidedDay` does not advance, and the
-alarm window is armed unchanged. Eleven tests in `watcher_reconcile_service_test.dart` pin it, and
-five of them fail against a build with the gate removed (mutation-checked 2026-08-25).
+alarm window is armed unchanged. Twelve tests in `watcher_reconcile_service_test.dart` pin the
+composition and fourteen in `notification_delivery_not_before_test.dart` pin the function itself;
+five of the twelve fail against a build with the gate removed, and the zone case fails against one
+that resolves the hour in the watched person's zone (both mutation-checked 2026-08-25).
 
 ### The re-run — 2026-08-25 07:44–08:01, and it holds
 

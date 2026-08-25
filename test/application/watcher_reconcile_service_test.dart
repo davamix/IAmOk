@@ -217,6 +217,197 @@ void main() {
 
   tearDown(() => store.close());
 
+  /// **[WatchedPersonState.rowKind] and [WatchedPersonState.checkedInSince], at
+  /// the level they live at.**
+  ///
+  /// Both were reached only through widget pumps, and a pump can exercise only
+  /// the `(link, cache, decision)` triples somebody thought to hand-author. The
+  /// consequence was measured rather than suspected: five guards, nine pumps,
+  /// and one guard — the day comparison that decides whether *"Mum checked in"*
+  /// is true — never evaluated in its interesting direction. Mutating it to
+  /// `return confirmed != null;` passed all 924 tests.
+  ///
+  /// These are pure functions over explicit inputs in a file the purity guard
+  /// already covers, so they belong here, beside the rest of the composition.
+  group('the row kind, and what may be announced about it', () {
+    Link linkFor({
+      LinkStatus status = LinkStatus.accepted,
+      String name = 'Mum',
+    }) =>
+        Link(
+          watchedUid: 'mum',
+          watcherUid: selfUid,
+          status: status,
+          watchedName: name,
+          watcherName: 'Ana',
+          watchedTimezone: 'Europe/Madrid',
+          activeFrom: day('2026-08-01'),
+          warningLocalTime: const LocalTimeOfDay(10, 0),
+          createdAt: DateTime.utc(2026, 8, 1),
+        );
+
+    WatchedPersonState state({
+      LinkStatus status = LinkStatus.accepted,
+      WatcherCache cache = const WatcherCache.empty(),
+      WarningOutcome outcome = WarningOutcome.silent,
+      DayKey? decisionDay,
+    }) =>
+        WatchedPersonState(
+          link: linkFor(status: status),
+          cache: cache,
+          decision: WarningDecision(
+            outcome: outcome,
+            day: decisionDay ?? d,
+            silenceReason: outcome == WarningOutcome.silent
+                ? SilenceReason.checkInRecorded
+                : null,
+          ),
+        );
+
+    WatchedPersonState warned() => state(
+          cache: WatcherCache(warningsShownFor: {d: WarningOutcome.warnOnline}),
+          outcome: WarningOutcome.warnOnline,
+        );
+
+    group("rowKind is §10's precedence, once", () {
+      test('a revoked link outranks everything, including lost access', () {
+        expect(
+          state(
+            status: LinkStatus.revoked,
+            cache: WatcherCache(
+              accessLostSince: d,
+              accessLostCause: RefusedCause.permissionDenied,
+              warningsShownFor: {d: WarningOutcome.warnOnline},
+            ),
+            outcome: WarningOutcome.warnOnline,
+          ).rowKind,
+          WatchedRowKind.revoked,
+          reason: 'a revoked link refuses every read by definition, so the '
+              'access branch would fire too and send the reader to repair a '
+              'permission fault that does not exist',
+        );
+      });
+
+      test('lost access outranks a standing warning', () {
+        expect(
+          state(
+            cache: WatcherCache(
+              accessLostSince: d,
+              accessLostCause: RefusedCause.unauthenticated,
+              warningsShownFor: {d: WarningOutcome.warnOnline},
+            ),
+            outcome: WarningOutcome.warnOnline,
+          ).rowKind,
+          WatchedRowKind.accessLost,
+          reason: 'ADR-0004: a claim about US outranks a claim about her',
+        );
+      });
+
+      test('a standing warning outranks Everything OK', () {
+        expect(warned().rowKind, WatchedRowKind.warning);
+      });
+
+      test('and Everything OK is what is left', () {
+        expect(state(cache: WatcherCache(lastConfirmedDay: d)).rowKind,
+            WatchedRowKind.ok);
+      });
+
+      test('a SILENT outcome is not a warning', () {
+        // `standingWarning` can answer `silent`, and treating that as a warning
+        // would make the row shout about a day nothing is wrong with.
+        expect(state().rowKind, WatchedRowKind.ok);
+      });
+    });
+
+    group('checkedInSince', () {
+      test('warning → OK with the day confirmed is the case it exists for', () {
+        expect(
+          state(cache: WatcherCache(lastConfirmedDay: d))
+              .checkedInSince(warned()),
+          isTrue,
+        );
+      });
+
+      test('a check-in for a LATER day also retracts it', () {
+        // `>=`, not `==`. The suppression rule is *has she been seen since*, and
+        // a newer check-in settles the question about `D` — the same asymmetry
+        // §10 step 4 draws against the correction path.
+        expect(
+          state(cache: WatcherCache(lastConfirmedDay: today))
+              .checkedInSince(warned()),
+          isTrue,
+        );
+      });
+
+      test('a STALE check-in does not — this is the fabricated-claim guard', () {
+        // **The guard that no widget test evaluated.** She tapped on the 14th,
+        // went away on the 15th, and the away covers the 16th: the row goes
+        // quiet with `lastConfirmedDay` exactly where it was, and *"Mum checked
+        // in"* would be a claim about a day she was away and did not tap.
+        expect(
+          state(cache: WatcherCache(lastConfirmedDay: day('2026-08-14')))
+              .checkedInSince(warned()),
+          isFalse,
+        );
+      });
+
+      test('and neither does no check-in at all', () {
+        expect(state().checkedInSince(warned()), isFalse);
+      });
+
+      test('a row that was not warning before is not a retraction', () {
+        expect(
+          state(cache: WatcherCache(lastConfirmedDay: d))
+              .checkedInSince(state(cache: WatcherCache(lastConfirmedDay: d))),
+          isFalse,
+        );
+      });
+
+      test('still warning afterwards is not a retraction', () {
+        expect(warned().checkedInSince(warned()), isFalse);
+      });
+
+      test('becoming REVOKED is never announced', () {
+        // `screens.md` names the candidate string for this and marks it
+        // deliberately unshipped. It must not arrive by falling through.
+        expect(
+          state(
+            status: LinkStatus.revoked,
+            cache: WatcherCache(lastConfirmedDay: d),
+          ).checkedInSince(warned()),
+          isFalse,
+        );
+      });
+
+      test('becoming LOST ACCESS is never announced', () {
+        expect(
+          state(
+            cache: WatcherCache(
+              lastConfirmedDay: d,
+              accessLostSince: d,
+              accessLostCause: RefusedCause.unauthenticated,
+            ),
+          ).checkedInSince(warned()),
+          isFalse,
+        );
+      });
+
+      test('and a day rollover is not a retraction', () {
+        // Two unsolicited passes across a watched-local midnight: the warning
+        // stood for `D`, the new pass is about `D + 1` and carries a check-in
+        // for it. True sentence, wrong reason, to a reader who cannot glance at
+        // the row to discount it.
+        expect(
+          state(
+            decisionDay: today,
+            cache: WatcherCache(lastConfirmedDay: today),
+          ).checkedInSince(warned()),
+          isFalse,
+        );
+      });
+    });
+  });
+
   group('a warning fires when it should', () {
     test('verified, and no check-in — the plain message', () async {
       await service().reconcile(selfUid: selfUid);
@@ -317,10 +508,15 @@ void main() {
       expect(cache.warningsShownFor, isEmpty,
           reason: 'nothing was delivered, so nothing may be recorded as '
               'standing');
-      expect(cache.lastDecidedDay, isNot(d),
+      expect(cache.lastDecidedDay, isNull,
           reason: 'and ADR-0009\'s pointer must not step over a day nobody was '
               'told about — this is the assertion that separates a LATE warning '
               'from a LOST one');
+      // **`isNot(d)` was too weak here, and the reason text said why without
+      // noticing**: it is satisfied by the real value AND by any day PAST `d`,
+      // which is the lost-warning state itself. The cache is fresh in this
+      // test, so `isNull` is the exact answer; a seeded one would want
+      // `anyOf(isNull, lessThan(d))`.
     });
 
     test('and today\'s own alarm is still armed', () async {
@@ -351,6 +547,34 @@ void main() {
       expect(notifications.calls, ['warn:$mumLink:$d']);
       expect(notifications.bodies['warn:$mumLink:$d'],
           'No check-in from Mum yesterday.');
+    });
+
+    test("the hour is read in the WATCHER's zone, not hers", () async {
+      // **Every other test in this file has watcherZone == watchedZone**, so an
+      // implementation resolving the gate against `link.tryWatchedZone` was
+      // indistinguishable from the correct one under all 924 tests — and it does
+      // not throw, so the unresolvable-zone test below cannot see it either.
+      //
+      // 12:00 Madrid is 00:00 the same day in Honolulu, so the two zones give
+      // opposite answers. Getting it wrong restores ADR-0010's own headline
+      // defect in a new costume: the gate would open at 10:00 Madrid = 01:00
+      // Honolulu and post, while the alarm — armed correctly in the watcher's
+      // zone by `_desiredWarnings` — still sits nine hours away. A gate in one
+      // zone and an alarm in another is precisely what the ADR forbids.
+      //
+      // The unit half is in `notification_delivery_not_before_test.dart`; this
+      // half proves the CALL SITE hands over the right one, which a unit test
+      // cannot see.
+      await store.setDeviceTimezone('Pacific/Honolulu');
+      clock = FixedClock(at(madrid, 2026, 8, 17, 12));
+
+      await service().reconcile(selfUid: selfUid);
+
+      expect(notifications.silent, isTrue,
+          reason: "midnight in Honolulu — the reader's chosen hour is ten "
+              'hours away, whatever time it is where she lives');
+      expect((await store.watcherCache(mumLink)).warningsShownFor, isEmpty,
+          reason: 'and still owed, so the Honolulu alarm will say it');
     });
 
     test('at exactly the warning time it posts', () async {
@@ -475,6 +699,19 @@ void main() {
           reason: 'the tray ends empty and honest, which is the substance of '
               'the retraction');
       expect((await store.watcherCache(mumLink)).lastConfirmedDay, d);
+
+      // **And the hour arriving does not undo it.** This is the one path in the
+      // group where a held day is settled by EVIDENCE rather than by delivery,
+      // and it was the only one without a second half — in a group whose whole
+      // shape is *held at 00:24, spoken at 10:00*. If the gate opening re-posted
+      // the day, or spoke the retraction late, a family would hear at 10:00
+      // about something resolved before they woke up.
+      clock = FixedClock(at(madrid, 2026, 8, 17, 10));
+      notifications.calls.clear();
+      await service().reconcile(selfUid: selfUid);
+
+      expect(notifications.silent, isTrue,
+          reason: 'she checked in — there is nothing left to say, at any hour');
     });
   });
 

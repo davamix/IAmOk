@@ -189,11 +189,14 @@ says something **different and honest** when the device cannot reach the network
 
 ## Phase 4 — Firebase backbone
 
-> **In progress. Steps 1–7 are built and all five reviewers have run at the gate.** Two
-> owner-approved changes are **waiting to be implemented** — a push may not post a warning before
-> `warningLocalTime`, and a row that changes under a screen reader must be announced. After those,
-> what remains is not code: the **first Functions deploy**, **App Check's console half**, and the
-> **live-radio** version of step 7's measurement. Start from
+> **In progress. Steps 1–7 are built, all five reviewers have run, and the two owner-approved
+> changes are built and proven on hardware** — a push may not post a warning before
+> `warningLocalTime` ([ADR-0010](architecture/decisions/0010-a-push-may-not-post-a-warning-early.md)),
+> and a row that changes under a screen reader is announced. Both were measured on the POCO F3 on
+> 2026-08-25, which was the condition of their approval, and re-reviewed afterwards. **Nothing left
+> has code in it**: one open decision (ADR-0008's successor, and the owner asked for option 1's cost
+> first), the **first Functions deploy**, **App Check's console half**, the **live-radio** version of
+> step 7's measurement, and the AVD taps. Start from
 > [phases/phase-4-summary.md](phases/phase-4-summary.md); the earlier
 > [phases/phase-4-handover.md](phases/phase-4-handover.md) carries the four things that went wrong
 > in the first half of the phase — two of them **false greens**, work that looked finished and was

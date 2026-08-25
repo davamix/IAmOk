@@ -86,26 +86,29 @@ class Link {
   /// Watcher-local time the warning **alarm** fires. Watcher-local so a watcher
   /// in another country is never woken at 03:00 by the alarm (§11).
   ///
-  /// **It does not bound when a warning can be POSTED, and since Phase 4 that
-  /// distinction is visible.** `WarningPolicy` owes a warning the moment `D` is
-  /// complete; this value decides only when the alarm asks. A reconcile
-  /// triggered by anything else posts whenever it lands — and Phase 4 added a
-  /// trigger that fires on **somebody else's action**: an FCM nudge, three to
-  /// ten seconds after any watched person taps.
+  /// **It bounds when a warning may be POSTED as well, and that took until
+  /// Phase 4 to become true.** `WarningPolicy` owes a warning the moment `D` is
+  /// complete, and this value used to decide only when the *alarm* asked — so a
+  /// reconcile triggered by anything else posted whenever it landed. Phase 4
+  /// added a trigger that fires on **somebody else's action**: an FCM nudge,
+  /// three to ten seconds after any watched person taps.
   ///
-  /// So a watcher in Los Angeles can be woken at 00:00 PDT because Mum in Madrid
-  /// tapped at 09:00 CEST, by a warning about the day she missed *before* that
-  /// tap. Same-zone version: Mum taps at 06:30 and the family hears about
-  /// yesterday at 06:30 rather than at 10:00. With ADR-0009's catch-up, a phone
-  /// out of contact for a week can post up to seven at that hour.
+  /// What that produced, before ADR-0010: a watcher in Los Angeles woken at
+  /// 00:00 PDT because Mum in Madrid tapped at 09:00 CEST, by a warning about
+  /// the day she missed *before* that tap. Same-zone version: Mum taps at 06:30
+  /// and the family hears about yesterday at 06:30 rather than at 10:00. With
+  /// ADR-0009's catch-up, a phone out of contact for a week posted up to seven
+  /// at that hour. The 00:24 case was measured on hardware, not imagined.
   ///
-  /// Two things make this a trade rather than simply a defect, and both cut
-  /// against changing it in a hurry:
+  /// Two things made it a trade rather than simply a defect, and they are why
+  /// the rule holds back only the hours *before* the chosen time rather than
+  /// ignoring pushes altogether:
   ///
   /// - It accelerates delivery **only** for warnings where somebody has just
   ///   demonstrably proved they are fine. The case that actually matters — she
   ///   has stopped tapping, so there is no check-in and no push — still waits
-  ///   for the alarm ADR-0008 measured as hours late in Doze.
+  ///   for the alarm ADR-0008 measured as hours late in Doze. Nothing about
+  ///   ADR-0010 changes that; it was already the shape of the problem.
   /// - For a watcher of several people it is a real dead-man's-switch
   ///   improvement: Mum's 07:00 tap wakes the isolate that discovers Granddad
   ///   has gone silent.

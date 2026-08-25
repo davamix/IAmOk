@@ -677,88 +677,96 @@ class _PersonRow extends StatelessWidget {
   _RowStatus _status() {
     final cache = person.cache;
 
-    // A revoked link outranks everything, including lost access — §10 step 1
-    // makes a non-accepted link the first branch of the whole decision, and this
-    // is that ordering on the screen.
-    //
-    // **It fell through every branch below and rendered "Everything OK".** For a
-    // link that is armed with no alarms, will never warn, and cannot read
-    // anything, that is the flattest false all-clear this screen can produce.
-    //
-    // Above the access row rather than below it, because a revoked link makes
-    // every later read refused by definition — so the access branch would fire
-    // too, and send the reader off to sign in again and repair a permission
-    // fault that does not exist. The link ended; there is nothing to fix.
-    if (person.link.status == LinkStatus.revoked) {
-      return _RowStatus(
-        // **No "this phone last checked" line here**, alone among the row
-        // states. That line exists to distinguish *working* from *stopped* for a
-        // force-stopped watcher whose rows all still read "Everything OK". On a
-        // revoked link nothing is working by design and the first sentence has
-        // already said so — what the line would add is the suggestion that this
-        // phone checks on her periodically and last managed it on Tuesday.
-        // Worse, a revoked link refuses every read forever, so
-        // `lastReconcileAt` never advances and it would say the same Tuesday in
-        // week twelve.
-        lines: [
-          WatcherCopy.linkEnded(person.name),
-          WatcherCopy.accessLostConsequence(person.name),
-        ],
-        // Not an error. A settled state, not bad news about her — "quiet
-        // confirm, loud miss" keeps alarm styling for a miss. The words carry
-        // it, which they have to in any case: colour is never the only signal.
-        isBad: false,
-      );
-    }
+    // **The precedence is [WatchedPersonState.rowKind]'s, not this widget's.**
+    // It is §10's step order — revoked, then lost access, then a standing
+    // warning, then "Everything OK" — and it was written out here AND inside
+    // `checkedInSince`, with nothing keeping the two in step. `screens.md`
+    // already commits Phase 6 to adding a branch above "Everything OK"; if that
+    // branch landed above the warning case, the announcement and the row would
+    // have disagreed silently, for the one reader who cannot see the row to
+    // check. Switching on the shared value makes that impossible and makes a
+    // new state a compile error here rather than a fall-through.
+    switch (person.rowKind) {
+      // A revoked link outranks everything, including lost access.
+      //
+      // **It fell through every branch below and rendered "Everything OK".** For
+      // a link that is armed with no alarms, will never warn, and cannot read
+      // anything, that is the flattest false all-clear this screen can produce.
+      //
+      // Above the access row rather than below it, because a revoked link makes
+      // every later read refused by definition — so the access branch would fire
+      // too, and send the reader off to sign in again and repair a permission
+      // fault that does not exist. The link ended; there is nothing to fix.
+      case WatchedRowKind.revoked:
+        return _RowStatus(
+          // **No "this phone last checked" line here**, alone among the row
+          // states. That line exists to distinguish *working* from *stopped* for
+          // a force-stopped watcher whose rows all still read "Everything OK".
+          // On a revoked link nothing is working by design and the first
+          // sentence has already said so — what the line would add is the
+          // suggestion that this phone checks on her periodically and last
+          // managed it on Tuesday. Worse, a revoked link refuses every read
+          // forever, so `lastReconcileAt` never advances and it would say the
+          // same Tuesday in week twelve.
+          lines: [
+            WatcherCopy.linkEnded(person.name),
+            WatcherCopy.accessLostConsequence(person.name),
+          ],
+          // Not an error. A settled state, not bad news about her — "quiet
+          // confirm, loud miss" keeps alarm styling for a miss. The words carry
+          // it, which they have to in any case: colour is never the only signal.
+          isBad: false,
+        );
 
-    // Lost access next. It is a fault in THIS app rather than a claim about
-    // her, and it is the state the notification routes here to explain — so it
-    // outranks the rest of the row for the same reason ADR-0004 puts refusal
-    // above the away branch.
-    if (person.hasLostAccess) {
-      return _RowStatus(
-        lines: [
-          WatcherCopy.accessLostLabel(person.name),
-          WatcherCopy.accessLostConsequence(person.name),
-          WatcherCopy.accessLostRemedy(cache.accessLostCause),
-        ],
-        footer: _lastChecked(cache, uses24Hour),
-        isBad: true,
-      );
-    }
+      // Lost access next. It is a fault in THIS app rather than a claim about
+      // her, and it is the state the notification routes here to explain — so
+      // it outranks the rest of the row for the same reason ADR-0004 puts
+      // refusal above the away branch.
+      case WatchedRowKind.accessLost:
+        return _RowStatus(
+          lines: [
+            WatcherCopy.accessLostLabel(person.name),
+            WatcherCopy.accessLostConsequence(person.name),
+            WatcherCopy.accessLostRemedy(cache.accessLostCause),
+          ],
+          footer: _lastChecked(cache, uses24Hour),
+          isBad: true,
+        );
 
-    final standing = person.standingWarning;
-    if (standing != null && standing != WarningOutcome.silent) {
-      return _RowStatus(
-        lines: [
-          NotificationCopy.warningBody(
-            outcome: standing,
-            watchedName: person.name,
-            day: person.decision.day,
-            away: person.decision.away,
-            unverifiedSince: person.decision.unverifiedSince,
-            lastConfirmedDay: cache.lastConfirmedDay,
-            watcherZone: watcherZone,
-            today: today,
-            uses24Hour: uses24Hour,
-          ),
-        ],
-        footer: _lastChecked(cache, uses24Hour),
-        isBad: true,
-      );
-    }
+      case WatchedRowKind.warning:
+        return _RowStatus(
+          lines: [
+            NotificationCopy.warningBody(
+              // Non-null by construction: `rowKind` answers `warning` only when
+              // `standingWarning` is a real outcome.
+              outcome: person.standingWarning!,
+              watchedName: person.name,
+              day: person.decision.day,
+              away: person.decision.away,
+              unverifiedSince: person.decision.unverifiedSince,
+              lastConfirmedDay: cache.lastConfirmedDay,
+              watcherZone: watcherZone,
+              today: today,
+              uses24Hour: uses24Hour,
+            ),
+          ],
+          footer: _lastChecked(cache, uses24Hour),
+          isBad: true,
+        );
 
-    return _RowStatus(
-      lines: [
-        WatcherCopy.everythingOk,
-        cache.lastConfirmedDay == null
-            ? WatcherCopy.neverSeen
-            : WatcherCopy.lastSeen(
-                NotificationCopy.dayLabel(cache.lastConfirmedDay!)),
-        _lastChecked(cache, uses24Hour),
-      ],
-      isBad: false,
-    );
+      case WatchedRowKind.ok:
+        return _RowStatus(
+          lines: [
+            WatcherCopy.everythingOk,
+            cache.lastConfirmedDay == null
+                ? WatcherCopy.neverSeen
+                : WatcherCopy.lastSeen(
+                    NotificationCopy.dayLabel(cache.lastConfirmedDay!)),
+            _lastChecked(cache, uses24Hour),
+          ],
+          isBad: false,
+        );
+    }
   }
 
   /// When this phone last managed a successful read.

@@ -148,8 +148,9 @@ class WatcherReconcileResult {
   /// cancellation of the warning they retract.
   ///
   /// The warning channel's [NotificationDelivery.postsNotification], and it is
-  /// not the same question as whether the retraction is owed. Two states reach
-  /// this, for two different reasons:
+  /// not the same question as whether the retraction is owed. **Three routes
+  /// reach it, for three different reasons**, and only two of them mean the
+  /// platform cannot post:
   ///
   /// * **`redundant`.** The watcher is looking at the list — that is the whole
   ///   meaning of the state — and the list renders the retraction itself: the
@@ -180,8 +181,22 @@ class WatcherReconcileResult {
   ///   announcement is the screen speaking to a reader who is already on it —
   ///   which is the premise this bullet rests on, finally made true for someone
   ///   who cannot see the row change.
-  /// * **`unavailable`.** Nothing can be posted at all, so there is no
-  ///   replacement to make.
+  /// * **`unavailable` because the platform cannot post.** `POST_NOTIFICATIONS`
+  ///   revoked, or this channel muted. There is no replacement to make.
+  ///
+  /// * **`unavailable` because the hour has not arrived** —
+  ///   [WatcherDelivery.notBefore], ADR-0010. **This one is not the same case**,
+  ///   and it is the one a reader of the two above would get wrong: the platform
+  ///   can post perfectly well, and the standing warning really was posted and
+  ///   really was read — typically by yesterday's alarm under `available`. So
+  ///   the retraction is genuinely **given up** here rather than merely
+  ///   redundant: the false claim comes down silently and no sentence says it
+  ///   was withdrawn.
+  ///
+  ///   Chosen deliberately over posting it: a correction is *good news*, and
+  ///   good news may not wake a family at 00:24. The row still tells whoever
+  ///   opens the app the truth. Recorded in `ui-ux/screens.md` so it is a
+  ///   decision rather than a side effect of a shared field.
   ///
   /// **Cancelling still happens in both**, and it is the load-bearing half.
   /// `cancel` needs no permission, so the muted case genuinely takes a stale
@@ -371,7 +386,17 @@ abstract final class WatcherReconciler {
   /// that made the access-lost cadence burn itself out on a phone with
   /// `POST_NOTIFICATIONS` revoked — see [NotificationDelivery]. The platform
   /// edge supplies it: `PermissionService` for the revoked case, app lifecycle
-  /// for the foreground case.
+  /// for the foreground case, and — since ADR-0010 — the caller's own clock
+  /// against `link.warningLocalTime` for the held case
+  /// ([WatcherDelivery.notBefore], applied per link in
+  /// `WatcherReconcileService._reconcileLink`).
+  ///
+  /// **This function never derives any part of it**, and that is why the third
+  /// supplier is at the edge rather than in here. A parameter the callee
+  /// partly computes is a half-truth, and the reader then has to know which
+  /// half. It also keeps `WatcherState.warningDelivery` — which drives the
+  /// warnings-off banner, a claim about the *channel* — free of a per-link
+  /// hour.
   ///
   /// It carries **one state per channel**, because the two notices this side
   /// posts are switched off independently by the reader and ADR-0004 made that

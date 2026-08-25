@@ -1,3 +1,8 @@
+import 'package:timezone/timezone.dart' as tz;
+
+import '../time/day_key.dart';
+import '../time/local_time_of_day.dart';
+
 /// Whether a notification the domain decides is owed can actually be
 /// **delivered** — and therefore whether the reminder it satisfies may be
 /// consumed.
@@ -51,13 +56,32 @@ enum NotificationDelivery {
   /// notification to someone already reading the answer.
   redundant,
 
-  /// Nothing can be posted — `POST_NOTIFICATIONS` is revoked.
+  /// Nothing was posted, nothing was consumed, and the reminder is still owed
+  /// at the next reconcile.
   ///
-  /// **Not consumed.** Nothing was delivered, so nothing is owed-off, and the
-  /// same reminder is still due at the next reconcile. This is the state the
-  /// whole enum exists for: without it a muted phone burns its way through the
-  /// access-lost cadence in silence and then has nothing left to say when
-  /// permissions come back.
+  /// **Not consumed** is the whole of it. This is the state the enum exists for:
+  /// without it a muted phone burns its way through the access-lost cadence in
+  /// silence and then has nothing left to say when permissions come back.
+  ///
+  /// ## Three things produce it, and only the first two mean "cannot"
+  ///
+  /// 1. `POST_NOTIFICATIONS` is revoked, or the reader muted this channel — the
+  ///    platform genuinely cannot post.
+  /// 2. The app-level permission is gone, which stops both channels at once.
+  /// 3. **The watcher's chosen hour has not arrived yet** ([WatcherDelivery
+  ///    .notBefore], ADR-0010). Here the platform *can* post perfectly well; the
+  ///    app is choosing not to, because a push fires on somebody else's action
+  ///    and posted a warning at 00:24 on real hardware.
+  ///
+  /// The third reuses this state deliberately rather than adding a fourth,
+  /// because every consumer wants exactly the same three behaviours from it —
+  /// don't post, don't consume, leave the day owed — and a state that is a
+  /// synonym is a state two people eventually treat differently.
+  ///
+  /// **So do not read this as "the phone is muted, nothing here matters".** It is
+  /// the sentence a short-circuit gets written under, and a short-circuit here
+  /// turns a *late* warning into a *lost* one, which §10 rates as the worst bug
+  /// this app can have.
   unavailable;
 
   /// The state implied by the two facts the platform edge can observe.
@@ -169,6 +193,80 @@ class WatcherDelivery {
 
   @override
   int get hashCode => Object.hash(warning, accessLost);
+
+  /// This delivery with the **warning** channel held until [warningLocalTime]
+  /// has arrived today in the watcher's own zone — [ADR-0010][].
+  ///
+  /// ## What it closes
+  ///
+  /// `warningLocalTime` fed exactly one thing, the rolling window of warning
+  /// alarms, and appeared nowhere in the decision path — so whoever called
+  /// `reconcile()` posted whatever was owed. Invisible while the alarm was the
+  /// only **unattended** caller. Phase 4 added a second, and it fires on
+  /// **somebody else's** action: measured on the POCO F3, *"No check-in from Ana
+  /// yesterday."* at **00:24:53 CEST** against a 10:00 warning time, because a
+  /// check-in was written and a push woke the isolate. With ADR-0009's catch-up
+  /// the same push can post seven.
+  ///
+  /// ## Why this is a delivery state and not a branch
+  ///
+  /// **A held run must still decide, still re-arm, and still owe the day.**
+  /// [NotificationDelivery.unavailable] already means exactly that, so the
+  /// substitution buys all three at once: `warningsShownFor` is not written,
+  /// ADR-0009's `lastDecidedDay` does not advance across an unsettled day, and
+  /// `catchUpWarnings` folds in the same state. Deciding it inside
+  /// `WarningPolicy` instead would make a *held* day indistinguishable from a
+  /// *silent* one, and a silent day settles — which is the lost-warning path.
+  ///
+  /// ## It lives here, beside [WatcherDelivery.from], on purpose
+  ///
+  /// [NotificationDelivery.from] is in this file with the argument that its
+  /// branch order *"is a decision, not plumbing"*. This is the same shape: pure,
+  /// total, over explicit inputs, returning the same type. Keeping the two apart
+  /// would put half the meaning of `unavailable` in a file that never mentions
+  /// it — which is how the enum came to enumerate two causes when there were
+  /// three.
+  ///
+  /// **The call site stays at the edge**, per link, in
+  /// `WatcherReconcileService._reconcileLink`: `WatcherReconciler.reconcile`
+  /// must not derive any part of `delivery` itself, or the parameter becomes a
+  /// half-truth; `WatcherState.warningDelivery` must stay the **ungated** value,
+  /// because the warnings-off banner is about the channel and not about this
+  /// link's hour; and a deliberate bypass — the harness's *post now* control —
+  /// should be legible rather than buried.
+  ///
+  /// ## Three deliberate limits
+  ///
+  /// **[accessLost] is never touched.** ADR-0004's notice is a claim about *us*,
+  /// is not tied to an hour, and its decaying cadence is the thing this enum
+  /// exists to stop being burned in silence.
+  ///
+  /// **Only [NotificationDelivery.available] is held.**
+  /// [NotificationDelivery.redundant] posts nothing anyway, so there is nothing
+  /// to suppress; downgrading it would only leave the day owed and then post at
+  /// 10:00 about something the reader was shown at 00:24.
+  ///
+  /// **[watcherZone] is whatever the alarm was armed in, UTC fallback included.**
+  /// Agreeing with the alarm matters more here than being right in the abstract:
+  /// a gate in one zone and an alarm in another would hold a day the alarm has
+  /// already passed. Both go through [DayKey.at], so a non-existent
+  /// spring-forward wall time resolves identically for both.
+  ///
+  /// [ADR-0010]: ../../../docs/architecture/decisions/0010-a-push-may-not-post-a-warning-early.md
+  WatcherDelivery notBefore(
+    LocalTimeOfDay warningLocalTime, {
+    required DateTime now,
+    required tz.Location watcherZone,
+  }) {
+    if (!warning.postsNotification) return this;
+    final due =
+        DayKey.fromInstant(now, watcherZone).at(warningLocalTime, watcherZone);
+    if (!now.isBefore(due)) return this;
+    return WatcherDelivery(
+      warning: NotificationDelivery.unavailable,
+      accessLost: accessLost,
+    );
+  }
 
   @override
   String toString() =>

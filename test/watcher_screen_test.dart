@@ -52,13 +52,17 @@ void main() {
     // decision made against a successful read, which is what makes a stored
     // offline outcome unrenderable.
     DateTime? unverifiedSince,
+    // The day this decision is about. Defaults to `D`; passed explicitly only
+    // by the midnight-rollover case, which is the one that needs two states to
+    // disagree about what "yesterday" means.
+    DayKey? day,
   }) =>
       WatchedPersonState(
         link: linkTo(uid, name, status: status),
         cache: cache,
         decision: WarningDecision(
           outcome: outcome,
-          day: d,
+          day: day ?? d,
           unverifiedSince: unverifiedSince,
           silenceReason: outcome == WarningOutcome.silent
               ? SilenceReason.checkInRecorded
@@ -960,6 +964,86 @@ void main() {
 
       expect(spoken, ['Mum checked in. Everything OK.'],
           reason: 'Granddad\'s warning is still true and still standing');
+      handle.dispose();
+    });
+
+    testWidgets('a warning becoming REVOKED is not announced', (tester) async {
+      // `screens.md` names two more candidate strings and marks both as
+      // deliberately not shipping. Neither may arrive by falling through this:
+      // a revoked row says *"You are no longer looking after Mum."*, which is
+      // not "checked in" and not "Everything OK", and announcing the approved
+      // string over it would be a claim about a person the app can no longer
+      // read anything about.
+      final spoken = announcementsOn(tester);
+      final handle = tester.ensureSemantics();
+
+      await pump(tester, [warned()]);
+      await pump(tester, [
+        person(
+          status: LinkStatus.revoked,
+          cache: WatcherCache(lastConfirmedDay: d),
+        ),
+      ], userInitiated: false);
+      await tester.pumpAndSettle();
+
+      expect(find.text(WatcherCopy.linkEnded('Mum')), findsOneWidget,
+          reason: 'the premise — the row really did change to the revoked one');
+      expect(spoken, isEmpty);
+      handle.dispose();
+    });
+
+    testWidgets('a warning becoming LOST ACCESS is not announced',
+        (tester) async {
+      // The other unapproved candidate. ADR-0004's whole point is that this is
+      // a claim about **us**, not about her — so *"Mum checked in"* would be
+      // exactly the false claim the four-outcome split exists to prevent, said
+      // to the reader least able to notice it is wrong.
+      final spoken = announcementsOn(tester);
+      final handle = tester.ensureSemantics();
+
+      await pump(tester, [warned()]);
+      await pump(tester, [
+        person(
+          cache: WatcherCache(
+            accessLostSince: d,
+            accessLostCause: RefusedCause.unauthenticated,
+            lastConfirmedDay: d,
+          ),
+          outcome: WarningOutcome.warnAccessLost,
+        ),
+      ], userInitiated: false);
+      await tester.pumpAndSettle();
+
+      expect(find.text(WatcherCopy.accessLostLabel('Mum')), findsOneWidget,
+          reason: 'the premise — the row really is the lost-access one now');
+      expect(spoken, isEmpty);
+      handle.dispose();
+    });
+
+    testWidgets('a day rollover is not announced as a check-in', (tester) async {
+      // Two unsolicited passes straddling a watched-local midnight. The warning
+      // stood for `D`; the new pass is about `D + 1` and carries a check-in for
+      // it, so a guard that only compared `lastConfirmedDay` against the OLD
+      // day would fire — on a rollover rather than on a retraction, with `D`'s
+      // warning still unretracted and merely hidden by the state-not-history
+      // rule.
+      //
+      // Nothing false would be said, which is exactly why it is worth a test:
+      // the failure is a true sentence spoken for the wrong reason, and the
+      // reader it is spoken to cannot glance at the row to discount it.
+      final spoken = announcementsOn(tester);
+      final handle = tester.ensureSemantics();
+
+      await pump(tester, [warned()]);
+      await pump(tester, [
+        person(day: today, cache: WatcherCache(lastConfirmedDay: today)),
+      ], userInitiated: false);
+      await tester.pumpAndSettle();
+
+      expect(find.text(WatcherCopy.everythingOk), findsOneWidget,
+          reason: 'the row did go quiet — this is not a case of nothing '
+              'happening');
+      expect(spoken, isEmpty);
       handle.dispose();
     });
 

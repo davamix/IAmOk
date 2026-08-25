@@ -10,6 +10,16 @@ import '../platform/clock.dart';
 import '../platform/notification_service.dart';
 import '../platform/warning_alarm_scheduler.dart';
 
+/// What a watcher's row is currently saying about one person — four mutually
+/// exclusive states, in §10's own precedence.
+///
+/// Ordered as the decision is: a revoked link says nothing can be checked, a
+/// refused read is a claim about **us**, a standing warning is a claim about
+/// **her**, and *"Everything OK"* is what is left. See
+/// [WatchedPersonState.rowKind] for why this is a named value rather than a
+/// chain of `if`s in the widget.
+enum WatchedRowKind { revoked, accessLost, warning, ok }
+
 /// One watched person, as the watcher's screen renders them.
 class WatchedPersonState {
   const WatchedPersonState({
@@ -159,18 +169,48 @@ class WatchedPersonState {
   /// deliberately **not** shipping, and its reverse was never proposed; neither
   /// may arrive by falling through this.
   bool checkedInSince(WatchedPersonState previous) {
-    bool rendersWarning(WatchedPersonState p) =>
-        p.link.status != LinkStatus.revoked &&
-        !p.hasLostAccess &&
-        p.standingWarning != null &&
-        p.standingWarning != WarningOutcome.silent;
+    if (previous.rowKind != WatchedRowKind.warning) return false;
+    if (rowKind != WatchedRowKind.ok) return false;
 
-    if (!rendersWarning(previous)) return false;
-    if (link.status == LinkStatus.revoked || hasLostAccess) return false;
-    if (rendersWarning(this)) return false;
+    // **The same day, on both sides.** [standingWarning] keys on each state's
+    // own `decision.day`, so two unsolicited passes straddling a watched-local
+    // midnight compare a warning about `D` against a check-in for `D + 1` — and
+    // the guard below would pass on a day rollover rather than on a retraction.
+    // Nothing false would be said, but it would be said for the wrong reason,
+    // and to a reader who cannot glance at the row to discount it.
+    if (decision.day != previous.decision.day) return false;
 
+    // **The cache, not the row.** This is where *"Mum checked in"* is checked
+    // against evidence instead of inferred from the row going quiet — see the
+    // away case above.
     final confirmed = cache.lastConfirmedDay;
     return confirmed != null && confirmed >= previous.decision.day;
+  }
+
+  /// Which of the four mutually exclusive things this person's row says.
+  ///
+  /// **§10's step order, on the screen.** A revoked link outranks lost access,
+  /// which outranks a standing warning, which outranks *"Everything OK"* — the
+  /// same precedence the decision itself uses, for the same reasons.
+  ///
+  /// **It exists because that order was written out twice**: once in
+  /// `_PersonRow._status()` and once inside [checkedInSince], with nothing
+  /// keeping them in step. `screens.md` already commits Phase 6 to adding a
+  /// branch above *"Everything OK"*, and if that branch lands above the warning
+  /// case the two copies disagree silently — producing an announcement that does
+  /// not match the row, for the one reader who cannot see the row to check.
+  /// `AppServices.cacheDeviceFacts` carries this repo's own version of the rule:
+  /// two copies of a decision are two chances to make it.
+  ///
+  /// It also lifts the precedence out of the widget, which is where it least
+  /// belongs: it is §10's ordering, not a layout choice.
+  WatchedRowKind get rowKind {
+    if (link.status == LinkStatus.revoked) return WatchedRowKind.revoked;
+    if (hasLostAccess) return WatchedRowKind.accessLost;
+    final standing = standingWarning;
+    return standing != null && standing != WarningOutcome.silent
+        ? WatchedRowKind.warning
+        : WatchedRowKind.ok;
   }
 }
 
@@ -330,10 +370,23 @@ class WatcherState {
 /// 4. Persist the cache it returned — **one write**.
 ///
 /// The decision itself is `WatcherReconciler` + `WarningPolicy`, both pure and
-/// both fully tested without a device. This class contains no branch that
-/// decides whether to speak; it only carries out what was decided. That
-/// separation is what lets the riskiest logic in the app be exercised in
-/// milliseconds.
+/// both fully tested without a device. That separation is what lets the riskiest
+/// logic in the app be exercised in milliseconds.
+///
+/// **This class decides nothing about *what* to say.** It carries out what the
+/// reconciler decided, and it makes exactly **one** substitution to an input on
+/// the way in: [WatcherDelivery.notBefore], which holds the warning channel
+/// until the watcher's chosen hour (ADR-0010). That changes when a decision may
+/// be *spoken*, never what was decided — the gate is not an input to
+/// `WarningPolicy` at all, so a held run reaches the same conclusion as an
+/// unheld one and simply does not post it.
+///
+/// This docstring used to say the class *"contains no branch that decides
+/// whether to speak"*, which stopped being true the moment that substitution
+/// landed — and it was the sentence that would otherwise have stopped someone
+/// adding a second one. So, plainly: **one is the budget.** Anything further
+/// that decides whether to speak belongs in Domain, as a pure function over
+/// explicit inputs, where it can be tested in milliseconds and mutation-checked.
 class WatcherReconcileService {
   const WatcherReconcileService({
     required this.store,
@@ -509,7 +562,10 @@ class WatcherReconcileService {
       cache: cache,
       read: read,
       currentlyScheduled: armed,
-      delivery: _notBefore(link.warningLocalTime, delivery,
+      // **The one substitution this class makes to a decided input**, and it is
+      // per link because `warningLocalTime` is. See [WatcherDelivery.notBefore]
+      // for why it lives in the domain and why the call stays here.
+      delivery: delivery.notBefore(link.warningLocalTime,
           now: now, watcherZone: watcherZone),
     );
 
@@ -678,87 +734,6 @@ class WatcherReconcileService {
       cache: result.cache,
       decision: result.decision,
       zoneUnknown: result.watchedZoneUnknown,
-    );
-  }
-
-  /// [delivery], with the **warning** channel downgraded to
-  /// [NotificationDelivery.unavailable] until the watcher's chosen warning time
-  /// has arrived today, in the watcher's own zone.
-  ///
-  /// ## What this closes
-  ///
-  /// `warningLocalTime` fed exactly one thing — `_desiredWarnings`, the alarm
-  /// schedule — and appeared nowhere in the decision path, so whoever called
-  /// `reconcile()` posted whatever was owed. That was invisible while the alarm
-  /// was the only **unattended** caller. Phase 4 added a second one, and it
-  /// fires on **somebody else's** action: a check-in is written, the Function
-  /// fans out, and the isolate wakes. Measured on the POCO F3 on 2026-08-25 —
-  /// *"No check-in from Ana yesterday."* posted at **00:24:53 CEST** against a
-  /// `warningLocalTime` of 10:00. Decided by the owner the same day, and
-  /// recorded in [ADR-0010][].
-  ///
-  /// The bound is only the hours **before** the chosen time. A push at 14:00
-  /// against a 10:00 warning still posts immediately, so the acceleration is
-  /// kept for the rest of the day — including rescuing an alarm Doze made late,
-  /// which is ADR-0008's whole accepted risk. What is given up is the window
-  /// nobody asked to be woken in.
-  ///
-  /// ## Why a delivery state and not a branch
-  ///
-  /// **The trap here is that a suppressed run must still decide, must still
-  /// re-arm, and must still owe the day.** Returning early, or inventing a
-  /// fourth state, is how this becomes a *lost* warning — the 10:00 alarm finds
-  /// the day settled and says nothing, which is the worst class of bug this app
-  /// has. [NotificationDelivery.unavailable] already means exactly *not posted,
-  /// not consumed, still owed at the next reconcile*, and it is already
-  /// enforced where it matters: `warningsShownFor` is not written, ADR-0009's
-  /// `lastDecidedDay` does not advance across an unsettled day, and
-  /// `catchUpWarnings` folds in the same state — which is the case that would
-  /// otherwise post seven notifications at midnight.
-  ///
-  /// The alarm window is untouched by construction: `_desiredWarnings` arms
-  /// every day in the window whose instant is still ahead of `now`, so a run
-  /// suppressed at 00:24 arms today's 10:00 alarm on its way past.
-  ///
-  /// ## Three deliberate limits
-  ///
-  /// **The warning channel only.** ADR-0004's *lost access* notice is a claim
-  /// about **us**, not about her; a refusal is not tied to an hour, and its
-  /// decaying cadence — days 0, 1, 3, 7, 14 — is the thing
-  /// [NotificationDelivery] exists to stop being burned in silence.
-  ///
-  /// **Only when it would otherwise post.** [NotificationDelivery.redundant]
-  /// means the reader is looking at the list, which is delivery by a route no
-  /// hour applies to. Downgrading it would leave the day owed and post a
-  /// notification at 10:00 about something the reader was shown at 00:24.
-  ///
-  /// **Corrections ride this channel too**, so before the warning time a
-  /// standing false warning is **cancelled rather than replaced** — the path
-  /// `redundant` already takes, for the reason given at the correction loop.
-  /// The tray ends empty and honest, which is the substance of the retraction;
-  /// what is given up is the sentence saying so. Recorded in `screens.md` as a
-  /// consequence rather than smuggled in, because the approval was worded about
-  /// warnings.
-  ///
-  /// The zone is the watcher's cached one, **including its UTC fallback** — the
-  /// same zone `_desiredWarnings` arms in. Agreeing with the alarm matters more
-  /// here than being right: a gate in one zone and an alarm in another would
-  /// suppress a day the alarm has already passed.
-  ///
-  /// [ADR-0010]: ../../docs/architecture/decisions/0010-a-push-may-not-post-a-warning-early.md
-  static WatcherDelivery _notBefore(
-    LocalTimeOfDay warningLocalTime,
-    WatcherDelivery delivery, {
-    required DateTime now,
-    required tz.Location watcherZone,
-  }) {
-    if (!delivery.warning.postsNotification) return delivery;
-    final due = DayKey.fromInstant(now, watcherZone)
-        .at(warningLocalTime, watcherZone);
-    if (!now.isBefore(due)) return delivery;
-    return WatcherDelivery(
-      warning: NotificationDelivery.unavailable,
-      accessLost: delivery.accessLost,
     );
   }
 

@@ -1195,6 +1195,15 @@ FCM work on it**. An AOSP image would have made the whole arrangement impossible
       armed. The same store then **posted** *"No check-in from Granddad yesterday."* at 08:01 when the
       alarm reached the watcher's own hour. Full table and the two things it does not establish — no
       forced deep Doze, and a resident process on the second half — in the section above.
+- [ ] **Announcements still reach TalkBack at `targetSdk 36`** — owed, and it is not a polish check.
+      Android 16 may no longer dispatch `TYPE_ANNOUNCEMENT` for apps targeting API 36; `targetSdk =
+      36` is confirmed in `android/app/build.gradle.kts`, the behaviour is not. The run below that
+      proved announcements work was on the POCO F3 at **API 33**. If the change is real, **two**
+      shipped features are silent on current Android with nothing in the app or the suite able to see
+      it: `WatcherCopy.checkedIn`, and `WatcherCopy.showingPerson` — the screen-reader half of what
+      the *lost access* notification promises when it says *"Open the app to see what to do."* Use
+      the `Medium_Phone_API_36.0` AVD and the method in the section below, **including the control
+      run that must produce silence**. The fallback is `Semantics(liveRegion: true)` on the row.
 - [x] **A row that changes under a screen reader is announced** — 2026-08-25 08:10, with **TalkBack
       running**. A foreground push flipped a row from *"No check-in from Pop yesterday."* to
       *"Everything OK…"* (read out of the accessibility tree, before and after) and TalkBack took

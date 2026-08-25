@@ -1,6 +1,6 @@
 # Phase 4 — Firebase backbone · summary
 
-**Date:** 2026-08-25 · **954 Dart tests**, **30 Functions tests**, `flutter analyze` clean, secrets
+**Date:** 2026-08-25 · **956 Dart tests**, **30 Functions tests**, `flutter analyze` clean, secrets
 guard clean.
 
 **Status: implemented and reviewed at the gate. All five reviewers have run and every finding is
@@ -9,9 +9,13 @@ fixed or recorded.** **Not signed off.**
 **Both owner-approved changes are built and proven on the POCO F3** — a push may not post a warning
 before `warningLocalTime` ([ADR-0010](../architecture/decisions/0010-a-push-may-not-post-a-warning-early.md)),
 and a row that changes under a screen reader is announced. Both device runs were the condition of
-their approval and both passed on 2026-08-25. Everything left is the owner's call or the console:
-one open decision, the first Functions deploy, App Check's console half, and the live-radio
-measurement. Start at *Prompt to start the next session*.
+their approval and both passed on 2026-08-25, and the three reviewers whose scope the post-gate
+diff touched have since run over it again.
+
+**That round left three things open, and they are the next session's work in order** — an Android 16
+risk to the announcement mechanism, a correction the hour-gate drops instead of holding, and one copy
+decision that is **blocked on the first**. All three are written out in full in *The post-gate review
+round*, and the second is code. Start at *Prompt to start the next session*.
 
 ---
 
@@ -222,7 +226,189 @@ Full method, tables and three HyperOS traps: [../testing/device-matrix.md](../te
 
 ---
 
-## Still owed, and none of it is code
+## The post-gate review round — 2026-08-25, and the three things it left open
+
+The five reviewers ran at `43cd1b2`. Everything after that — the two approved changes, the device
+runs, and the docs around them — had never been reviewed, so three of the five ran again over the
+post-gate diff: **architecture** (`88124cc`), **testing** (`8784edb`), **UI/UX** (`589cc71`).
+
+**Security and infrastructure were deliberately not re-run.** The diff touches no `.gitignore`, no
+`firestore.rules`, nothing under `functions/`, no Firebase config and no Android build file — which
+is exactly what those two agents' trigger conditions name. Recorded so the absence reads as a
+decision rather than an oversight.
+
+They found the usual thing: claims, not test failures. The gate itself was traced branch by branch
+and holds. Fixed in those three commits, and worth knowing about:
+
+- The **gate moved into the domain** as `WatcherDelivery.notBefore`, beside `NotificationDelivery.from`,
+  whose docstring already set the precedent — *"the branch order is a decision, not plumbing"*. Zero
+  behaviour change, call site unchanged, mutation-checked after the move.
+- **The gate's zone was never the watcher's in any test.** Every link was `Europe/Madrid` watched by
+  a device cached as `Europe/Madrid`, so an implementation resolving the hour against
+  `link.tryWatchedZone` — which does not throw — passed all 924 tests. That is ADR-0010's own
+  headline defect restored in a new costume.
+- **`checkedInSince`'s day comparison was never evaluated.** Mutating it to `return confirmed != null;`
+  passed the entire suite, because the test written to prove it used a person who had *never* checked
+  in. Under that mutation TalkBack says *"Mum checked in. Everything OK."* about a day she was away
+  and did not tap.
+- **An unsolicited pass that threw replaced the reader's list with an error page.**
+
+Three things were **not** fixed, and they are the next session's work, in this order.
+
+---
+
+### 1. `SemanticsService.sendAnnouncement` may be a no-op on Android 16 — CHECK THIS FIRST
+
+**The claim.** Android 16 stops dispatching accessibility announcements (`TYPE_ANNOUNCEMENT` /
+`announceForAccessibility`) for apps targeting **API 36**, with live regions as the replacement.
+
+**What is confirmed:** `targetSdk = 36` in `android/app/build.gradle.kts:55`. **What is not:** the
+behaviour itself. The 2026-08-25 device run that proved the announcement works was on the POCO F3 at
+**API 33**, where it demonstrably speaks.
+
+**Why it is first.** If it is real, **two** shipped features are silent on current Android and
+nothing in the app or the suite can see it: `WatcherCopy.checkedIn` (Phase 4) and
+`WatcherCopy.showingPerson` (Phase 3, the screen-reader half of the notification-tap path, which
+`screens.md` promises when the notification says *"Open the app to see what to do."*). The widget
+tests assert the platform message is **sent**, which is the same distinction `CLAUDE.md` already
+draws: the app's record of what it dispatched is not evidence of what the platform did with it.
+
+**How to settle it.** The `Medium_Phone_API_36.0` AVD already exists (`~/.android/avd/`). Install a
+debug build, enable TalkBack, open the watcher list on a person with a standing warning, and drive a
+row change — the method that worked on the POCO is in `device-matrix.md` § *A row that changes under
+a screen reader*. Evidence is TalkBack taking speech audio focus (`MediaFocusControl` for
+`USAGE_ASSISTANCE_ACCESSIBILITY`), plus a control push that changes no row and must produce silence.
+**Confirm the current wording of Android 16's behaviour-changes page rather than trusting the
+summary above.**
+
+**If it is dead**, the structural replacement is `Semantics(liveRegion: true)` on the row (Flutter
+3.47 supports it), which makes the row **re-read itself** when its label changes. That is a better
+fit than an announcement in any case: per row, no separate approved string, and it covers **both**
+directions of change — which is why item 3 below is blocked on this one.
+
+---
+
+### 2. ADR-0010 drops the retraction, not just the hour — APPLY THE FIX BELOW
+
+**The defect.** Two lines, different files, opposite policies.
+
+The **warning** path gates the ledger write on delivery — `watcher_reconciler.dart:668`:
+
+```dart
+final recorded = owed && delivery.warning.consumesReminder;
+if (recorded) next = next.withWarningShownFor(each.day, each.outcome);
+```
+
+The **correction** path clears the ledger unconditionally — `watcher_reconciler.dart:476`:
+
+```dart
+for (final day in cache.warnedDays.toList()) {
+  if (confirmed.contains(day)) {
+    corrections.add(Correction(linkId: link.id, day: day));
+    next = next.withCorrectionFor(day);      // <- no delivery check at all
+  }
+}
+```
+
+`shouldPostCorrections` is not computed until line 730, long after the day has left `warnedDays`.
+So under the hour-gate: `cancelWarning` fires (right — the false claim leaves the tray), the day is
+dropped, and **nothing anywhere records that a retraction is owed**. The next pass computes
+corrections from `cache.warnedDays ∩ read.checkInDays`; the day is not in `warnedDays`; nothing is
+emitted, ever.
+
+**The reachable path.** Mum taps at 23:50 on `D` in a dead zone; the write queues. At 10:00 on
+`D + 1` the alarm reads successfully, sees nothing for `D`, and posts *"No check-in from Mum
+yesterday."* The family phones. The write later syncs. Before 10:00 on `D + 2` — 00:24, say — a push
+arrives because somebody **else** in the family tapped early, the read now returns `D`, the
+correction is held, the warning is cancelled and the day is dropped. At 07:00 the family finds an
+empty tray and cannot tell *resolved* from *I swiped it in the night*. The push is what discovered
+the good news, and the gate is what threw the sentence away.
+
+Narrow — it needs a check-in that syncs 24–34 hours after its day ended, found by a pre-hour
+reconcile, which in practice means a push. But it is exactly the *"she was fine all along"* case,
+which is the one the correction exists for. The **row** still tells the truth; `guidelines.md`'s
+whole premise is that this reader does not open the app.
+
+**The fix: gate the ledger removal exactly as the warning path gates the write.** No new cache
+column, no migration, and no fourth enum state — which matters, because *"do not invent a state"* is
+ADR-0010's own load-bearing argument and it should not be spent here.
+
+Split what `withCorrectionFor` does today:
+
+- **`lastConfirmedDay` stays ungated.** It is evidence about *her*, not a delivery record — the same
+  argument that keeps `accessLostSince` ungated. It is belt-and-braces anyway: `applyRead` already
+  advances it monotonically from the read (`watcher_cache.dart:208-222`).
+- **Dropping the day from `warningsShownFor` is gated on `delivery.warning.consumesReminder`** — the
+  identical predicate the warning path uses.
+
+| Delivery | Tray | Ledger | Result |
+|---|---|---|---|
+| `available` | correction posted | day dropped | unchanged |
+| `redundant` | cancelled silently | day dropped | unchanged — the reader is on the row, and *seeing it on screen is being told* |
+| `unavailable`, muted | cancelled silently | **day kept** | spoken when notifications come back |
+| `unavailable`, **held by the hour** | cancelled silently | **day kept** | **spoken at the warning time** |
+
+The false claim still leaves the tray immediately — that half is load-bearing and does not change.
+What changes is that the retraction stays **owed**, so the next postable pass emits the
+already-approved *"Correction: Mum did check in on Saturday 15 August."* `correctionBody` already
+handles a day that is not yesterday, so **no new copy is needed**. It also fixes the muted case as a
+side effect, which is the same defect on a different phone.
+
+**The one thing to prove rather than reason about.** Keeping a day in `warnedDays` feeds
+`standingWarning`, which the row renders. It *looks* safe — by the time a correction is held,
+`decision.day` has moved past the corrected day, so the row renders a different key — but that is
+exactly the kind of paragraph this gate keeps finding to be wrong. Assert it.
+
+**Rejected alternative**, recorded so it is not re-argued: leave the false warning *standing* in the
+tray so the next pass replaces it at the same id (which is what `guidelines.md` literally requires of
+a correction). Cheaper, no ledger change — and it parks a claim the device **knows is false** on a
+family's phone from 00:24 to 10:00. If they wake at 07:00 they read *"No check-in from Mum
+yesterday."* about a day she checked in on. The version above is honest at every instant.
+
+**Also owed:** an amendment to ADR-0010's *Consequences*, which currently says the retraction's
+sentence *"is what is given up"* — true today, false once this lands.
+
+---
+
+### 3. The OK → warning announcement — DECIDE AFTER 1, NOT BEFORE
+
+**The gap.** With the list open **and TalkBack running**, a push records the day as seen
+(`redundant` — working as designed), the row silently changes from *"Everything OK"* to a warning,
+the announcement correctly declines because that direction is unapproved, and the alarm then finds
+the day settled and says nothing. Nothing posted, nothing spoken, day consumed.
+
+**How it relates to item 2 — two holes in one matrix, and neither fix closes the other.** Both are
+instances of one rule: *the app may only record something as communicated if it actually was*. Item
+2 is `unavailable`'s claim being ignored; item 3 is `redundant`'s claim resting on a premise that is
+false for a reader who cannot see the row change. `notBefore` returns early on `redundant`, so **the
+hour never applies while the list is showing** — the two cannot overlap:
+
+| | Reader **on the list** (`redundant`, any hour) | Reader **elsewhere**, before the hour (held) |
+|---|---|---|
+| **Correction owed** (row gets better) | announced — `checkedIn`, shipped 2026-08-25 | **item 2** — cancelled, sentence lost |
+| **Warning owed** (row gets worse) | **item 3** — recorded as seen, nothing spoken | held, day stays owed, alarm speaks |
+
+Item 2 affects **every** watcher; item 3 affects only screen-reader users, because a sighted reader
+genuinely does see the row change — which is what makes `redundant` defensible at all. Item 3 loses
+a **warning**, item 2 a **retraction**, and a lost warning is worse in kind.
+
+**Why it waits for item 1.** If announcements are dead at `targetSdk 36`, this stops being a copy
+decision and becomes a mechanism one — `liveRegion` on the row covers both directions with no
+approved string at all. Approving copy now risks approving something that gets thrown away.
+
+**And the drafted candidate should not ship as written.** `screens.md` drafts *"Update. Mum. No
+check-in from Mum yesterday."* The UI/UX review rejected the wording: *"Update."* is a category label
+that differentiates nothing, is identical for both candidates, and is the part most likely to survive
+an interrupt while the claim gets clipped — against `screens.md`'s own rule that the differentiator
+belongs in the first words. It also says the name twice. The suggestion is the warning body
+**verbatim**: *"No check-in from Mum yesterday."* — already approved, names the person in its first
+four words, and applies the same rule `checkedIn` follows when it reuses `everythingOk`. The second
+candidate, *"Update. Can't check on Mum."*, truncates a message whose whole justification is
+actionability; if it ever ships, reuse the row's second line too.
+
+---
+
+## Still owed beyond those three
 
 - **The first Functions deploy.** The Cloud Functions API is enabled (three clean runs); the other
   six 2nd-gen prerequisites are **unverified** and cannot be checked from this machine — `gcloud` is
@@ -266,33 +452,71 @@ pipe is torn down, the CLI spins on `EPIPE`, the hub stops answering, and state 
 Start it detached with output redirected to a file.
 
 ---
-
 ## Prompt to start the next session
 
 > I'm continuing **Phase 4** of the I Am Ok project. Read `docs/phases/phase-4-summary.md` first —
-> especially **The nine findings** and **What to be careful of next** — then follow the reading
-> order in `docs/README.md`. `docs/phases/phase-4-handover.md` is the mid-phase snapshot and is
-> **deliberately frozen**; read it for the four things that went wrong earlier in the phase, never
+> especially **The post-gate review round** and **What to be careful of next** — then follow the
+> reading order in `docs/README.md`. `docs/phases/phase-4-handover.md` is the mid-phase snapshot and
+> is **deliberately frozen**; read it for the four things that went wrong earlier in the phase, never
 > for current state.
 >
-> **Everything with code in it is done.** Steps 4–7 are built and reviewed at the gate; the two
-> changes the owner approved on 2026-08-25 are built, mutation-checked in the VM, and **proven on the
-> POCO F3** the same day, then re-reviewed. 954 Dart tests, 30 Functions tests, `flutter analyze`
-> clean, debug APK
-> builds. ADR-0008's deciding measurement passed both its questions in forced deep Doze,
-> mutation-checked against `priority: 'normal'`.
+> **Where it stands.** Steps 4–7 are built and reviewed. The two changes the owner approved on
+> 2026-08-25 are built, mutation-checked, proven on the POCO F3, and then **re-reviewed** by the
+> three reviewers whose scope the post-gate diff touched — architecture, testing and UI/UX. Security
+> and infrastructure were deliberately skipped, and the summary says why. 956 Dart tests, 30
+> Functions tests, `flutter analyze` clean, debug APK builds.
 >
-> **What is left is the owner's call, the console, and one live-radio run. In order:**
+> **Your work is the three items in *The post-gate review round*, in the order they are numbered.
+> That order is the owner's and it is not arbitrary — item 3 is blocked on item 1.**
 >
-> 1. **Investigate what ADR-0008's option 1 actually costs** — the owner asked for the number before
->    any ADR is drafted. It means replacing or forking `android_alarm_manager_plus` so the warning
->    uses the allowlist its own broadcast receiver is already granted, instead of handing the work to
->    JobScheduler. Report the cost; **do not draft the ADR** until the owner has it. This is the one
->    decision still open, and it is the only one.
+> ---
+>
+> ### 1. Check whether accessibility announcements still work at `targetSdk 36`
+>
+> Android 16 may no longer dispatch `TYPE_ANNOUNCEMENT` for apps targeting API 36. `targetSdk = 36`
+> is confirmed; the behaviour is **not**. If it is real, two shipped features are silent on current
+> Android and nothing in the app or the suite can see it — including `showingPerson`, which is the
+> screen-reader half of a promise a notification makes.
+>
+> The `Medium_Phone_API_36.0` AVD already exists. The method that worked on the POCO F3 is in
+> `device-matrix.md` § *A row that changes under a screen reader*, including the **control** run that
+> must produce silence — without it the measurement cannot fail. Verify Android 16's behaviour-changes
+> page yourself rather than trusting the summary.
+>
+> Whatever it says, **write the result into `device-matrix.md`** — a pass closes a real risk and a
+> failure changes what item 3 even is.
+>
+> ### 2. Apply the correction-ledger fix
+>
+> The design is written out in full in the summary, with the two conflicting lines quoted, the
+> reachable scenario, a four-row truth table, the alternative that was rejected and why, and the one
+> thing to assert rather than reason about. It needs **no new copy, no new cache column, no
+> migration and no new enum state** — it makes the correction path obey the same delivery rule the
+> warning path already obeys.
+>
+> Amend ADR-0010's *Consequences* when it lands: it currently says the retraction's sentence *"is
+> what is given up"*, which stops being true.
+>
+> ### 3. Then bring item 3 back to the owner — do not decide it yourself
+>
+> It is a copy approval if item 1 passes and a mechanism change if item 1 fails. `screens.md`
+> requires the owner's approval for the string either way, and the UI/UX review's objection to the
+> drafted wording is recorded with it.
+>
+> ---
+>
+> ### After those, and unchanged
+>
+> 1. **What ADR-0008's option 1 actually costs** — the owner asked for the number before any ADR is
+>    drafted. Replacing or forking `android_alarm_manager_plus` so the warning uses the allowlist its
+>    own receiver already holds, instead of handing the work to JobScheduler. Report the cost; **do
+>    not draft the ADR**. This is the one design decision still open.
 > 2. **The first Functions deploy.** The Cloud Functions API is enabled (three clean runs); the other
 >    six 2nd-gen prerequisites are **unverified and unverifiable from this machine** — no `gcloud`,
 >    and the CLI exposes no read. `firebase deploy --only functions --dry-run --project i-am-ok-c74ca`
->    settles it and **is a state change**, not a probe, so it is the owner's call.
+>    settles it and **is a state change**, not a probe, so it is the owner's call. Blaze status has no
+>    recorded verification at all; the setup table's rows 4–7 still read *Not done* and are dated
+>    2026-08-15.
 > 3. **App Check's console half** — register with Play Integrity, register this install's debug token
 >    (confirmed *not* registered). Enforcement cannot work before the app reaches an internal test
 >    track, and the refusal-to-copy mapping must be verified against a real rejection first.
@@ -300,17 +524,19 @@ Start it detached with output redirected to a file.
 >    the first run to exercise App Check on a cold radio — register the debug token first, or it
 >    measures a retry loop.
 > 5. **The AVD taps.** Every run so far used an admin REST write as the other endpoint. Both Phase 4
->    device rows in the matrix are unticked and say why.
+>    end-to-end device rows are unticked and say why.
+> 6. **Delete protection and point-in-time recovery are both OFF**, and `deploy-notes.md` says decide
+>    both before the first real data lands.
 >
 > ---
 >
-> **The device rig, as this session left it.** One accepted link (the self-link, `warningLocalTime`
+> **The device rig, as 2026-08-25 left it.** One accepted link (self-linked, `warningLocalTime`
 > 10:00), 7 warning alarms armed at 10:00 matching the store exactly, an empty tray, TalkBack off and
 > the accessibility services restored, battery and `deviceidle` reset. The emulator suite from the
-> 00:24 session is still up on 4000/4400/4500/5001/8080/9099 with `adb reverse` in place — check
-> before starting another, because the second one fails with *"port taken"* and looks like a broken
-> script. One thing was not restored: `secure screensaver_enabled` was set to `0` to try to force
-> Doze and its original value was never captured.
+> 00:24 session may still be up on 4000/4400/4500/5001/8080/9099 with `adb reverse` in place — check
+> before starting another, because the second one fails with *"port taken"* and reads as a broken
+> script. **One thing was not restored:** `secure screensaver_enabled` was set to `0` while trying to
+> force Doze and its original value was never captured.
 >
 > **Four things that will cost you time otherwise.** Only one emulator script may run at a time —
 > `emulators.ps1`, `rules-test.ps1` and `functions-test.ps1` all want 8080/9099/5001. `adb reverse`
@@ -324,14 +550,17 @@ Start it detached with output redirected to a file.
 > by `DreamManagerService` parks it in `Dozing`); `am kill` does not reliably kill this app, so check
 > `pidof` rather than assuming, and never substitute `am force-stop` while alarms matter; and
 > **deleting** a link from Firestore strands its warning alarms, while **revoking** it tears them down
-> the way §10 step 1 says.
+> the way §10 step 1 says. Pull the app's database with `adb exec-out run-as … cat`, never a shell
+> redirect — the redirect writes a **zero-byte** file and `adb pull` still reports success.
 >
 > **The habit that found everything at this gate: read a claim against the thing it describes.**
-> Nine findings, and almost none came from a test failing — they came from a docstring, a checklist,
-> a copy table and a threat model each asserting something that had quietly stopped being true.
-> **Verify the measurement before you trust the result**: three times this phase the subject was fine
-> and the *measurement* was wrong, and the device runs above were built around that — a control push
-> that must produce silence, and the harness override read out of the store to prove it was absent.
-> This is the side where a false claim to a family is the worst bug the app can have — prefer stopping
-> to ask over guessing, and if you think a finding is wrong, say so before acting on it rather than
-> after.
+> Across both rounds, almost nothing came from a test failing — findings came from a docstring, a
+> checklist, a copy table and a threat model each asserting something that had quietly stopped being
+> true, and twice from a test whose name promised more than its body checked. **Verify the
+> measurement before you trust the result**: three times this phase the subject was fine and the
+> *measurement* was wrong, and both device runs were built around that — a control that must produce
+> silence, and the harness override read out of the store to prove it was absent. **And mutate the
+> code to see the test fail** before believing a green suite: two of this round's findings were
+> mutations that passed all 924 tests. This is the side where a false claim to a family is the worst
+> bug the app can have — prefer stopping to ask over guessing, and if you think a finding is wrong,
+> say so before acting on it rather than after.

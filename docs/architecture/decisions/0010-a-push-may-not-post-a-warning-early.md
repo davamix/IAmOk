@@ -78,6 +78,15 @@ saying so. This was chosen over the alternative because a correction is *good ne
 may not wake a family at 00:24. It is recorded in `ui-ux/screens.md` so it is a decision rather than
 a side effect of a shared field.
 
+> **Revisited 2026-08-25, after the post-gate UI/UX review — not yet amended.** The decision above is
+> sound; the *mechanism* took more than the decision did. `withCorrectionFor` clears
+> `warningsShownFor` **unconditionally**, before any delivery state is consulted, so a held
+> correction is not merely unspoken — it stops being **owed**, and no later pass can ever say it.
+> Every other consequence of this ADR honours *"late, never lost"*; this is the one that does not.
+> The fix, the reachable path and the rejected alternative are written out in
+> `phases/phase-4-summary.md` — *The post-gate review round*, item 2. **When it lands, this section
+> is what has to change**: "what is given up is the sentence saying so" stops being true.
+
 **The screen is not gated by any of this**, and must not be. A reader who opens the app at 02:00 is
 owed the truth about the day: the row still renders the warning, and the warnings-off banner still
 reflects the *channel* rather than this link's hour.

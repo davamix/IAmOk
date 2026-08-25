@@ -322,7 +322,19 @@ unreconcilable — is never announced, because there is no "before" for it to ha
 check-in for `D + 1` is a true sentence spoken for the wrong reason.
 
 **Deliberately not shipping yet**, and named here so nobody adds them casually — each needs the same
-approval this one got:
+approval this one got. **The first is also blocked on a mechanism question** (2026-08-25): Android 16
+may no longer dispatch accessibility announcements for apps targeting API 36, and this app targets
+36. If that is real, the answer is `Semantics(liveRegion: true)` on the row rather than a new string
+— which covers **both** directions and needs no approved copy at all. Settle that before approving
+either candidate; see `phases/phase-4-summary.md` items 1 and 3.
+
+**And the wording below should not ship as drafted.** *"Update."* is a category label: it
+differentiates nothing, it is identical for both candidates, and it is the part most likely to
+survive an interrupt while the claim gets clipped — against this file's own rule that the
+differentiator belongs in the first words. It also says the name twice. The UI/UX review's
+suggestion is the warning body **verbatim**, *"No check-in from Mum yesterday."*, which is already
+approved and names the person in its first four words — the same move `checkedIn` makes when it
+reuses `everythingOk`.
 
 | Change | Candidate |
 |---|---|

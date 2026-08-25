@@ -1,6 +1,8 @@
 # UI/UX guidelines
 
-**Date:** 2026-08-15 · **Status:** Current · No UI has been built. First screen lands in Phase 2.
+**Date:** 2026-08-15 · **Status:** Current · The Tap screen, the watcher list, the debug harness
+and the failure screens are **built**; onboarding, pairing, the away picker and the health panel are
+not. *"No UI has been built"* stood here until 2026-08-25, four screens after it stopped being true.
 
 Two audiences with opposite needs share one app.
 
@@ -35,7 +37,7 @@ ask a family member. The screen answering that question is the point.
 a *missed* day makes noise. Daily "everything is fine" notifications train a family to swipe away
 the one notification that matters, and once trained they cannot be untrained.
 
-> **And the noise waits for the hour the reader chose.** A warning is not posted before
+> **And the noise waits for the link's warning time.** A warning is not posted before
 > `warningLocalTime` in the watcher's own zone
 > ([ADR-0010](../architecture/decisions/0010-a-push-may-not-post-a-warning-early.md)). That hour
 > used to bound only when the *alarm asked*, so a push triggered by somebody else's tap woke a
@@ -125,3 +127,11 @@ Recorded here so they are not silently decided by whoever writes the widget firs
   trip. No grace day is planned — the reminders do their job — but the copy could acknowledge it.
 - **Whether the watched person's screen should show anything about the watchers at all**, beyond
   the fact that someone is watching.
+- **Whether the watcher ever chooses, or even sees, `warningLocalTime`.** Nothing sets it but link
+  creation and the debug harness, and no screen shows it.
+  [ADR-0008](../architecture/decisions/0008-the-warning-is-late-in-doze-and-the-app-says-so.md)
+  forbids copy that states or implies a delivery time, and
+  [ADR-0010](../architecture/decisions/0010-a-push-may-not-post-a-warning-early.md) has since made
+  the hour a **hard floor** — so it is now load-bearing with no surface, and the watcher's only
+  mental model of *when will I be told* remains unstated. `screens.md` owes the row either way.
+  Phase 7.

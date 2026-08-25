@@ -150,6 +150,44 @@ void main() {
               'screen reader has to be announced');
     });
 
+    test('a failed pass nobody asked for does NOT replace the list', () async {
+      // `AsyncValue.guard` turns a throw into `AsyncError`, and `WatcherScreen`
+      // renders that as the whole-screen *"This phone could not check on
+      // anyone."* — so a reader looking at a standing warning about Mum, who
+      // asked for nothing, would lose it to an error page because somebody else
+      // tapped. The same shape as `tapFailed` one group up, and the same answer.
+      final good = await container.read(watcherStateProvider.future);
+      expect(container.read(watcherStateProvider).hasValue, isTrue);
+
+      // The store is what every reconcile reads first, so closing it makes the
+      // next pass throw the way a real fault would — rather than by injecting a
+      // failure the production path cannot produce.
+      await store.close();
+      await container
+          .read(watcherStateProvider.notifier)
+          .refresh(userInitiated: false);
+
+      final after = container.read(watcherStateProvider);
+      expect(after.hasError, isFalse,
+          reason: 'a push she did not ask for must not take the list away');
+      expect(after.value?.people.length, good.people.length,
+          reason: "the last good answer is still on screen. Stale beats "
+              "absent, and the row's own line about when this phone last "
+              "checked is what makes the staleness visible rather than silent");
+    });
+
+    test('but a failure she ASKED for is surfaced', () async {
+      // The other half, and the reason this is a parameter rather than a
+      // blanket carry-forward: she pulled to refresh and is waiting for an
+      // answer, so an unexplained non-update would be worse than the error.
+      await container.read(watcherStateProvider.future);
+      await store.close();
+
+      await container.read(watcherStateProvider.notifier).refresh();
+
+      expect(container.read(watcherStateProvider).hasError, isTrue);
+    });
+
     test('a resume or a pull-to-refresh is not', () async {
       // The reader is arriving at the screen and will read the row themselves.
       // Announcing every refresh talks over them.

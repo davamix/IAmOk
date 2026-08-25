@@ -1059,16 +1059,15 @@ void main() {
       handle.dispose();
     });
 
-    testWidgets('two rows settling at once name both, oldest row first',
-        (tester) async {
-      // **Pinning a behaviour that was decided by a `for` loop rather than by
-      // anyone.** `screens.md`'s approved section is silent on it, and the
-      // platform does not reliably queue announcements — so the plausible bad
-      // outcome is a reader hearing about Granddad and never about Mum.
+    testWidgets('two rows settling at once are ONE utterance', (tester) async {
+      // **The first version sent one announcement per person**, which is the
+      // shape most likely to lose one: the platform does not reliably queue
+      // announcements, and the one dropped is the first — the oldest row, which
+      // is the person the reader has been waiting longest to hear about.
       //
-      // Nothing false is said either way, which is why this asserts the present
-      // behaviour rather than demanding a different one. It turns "whatever the
-      // loop does" into something a future change has to break on purpose.
+      // Joined rather than summarised, so every word stays approved copy. A
+      // shorter *"Mum and Granddad checked in. Everything OK."* would be a new
+      // string and needs the approval `screens.md` requires.
       final spoken = announcementsOn(tester);
       final handle = tester.ensureSemantics();
 
@@ -1079,10 +1078,11 @@ void main() {
       ], userInitiated: false);
       await tester.pumpAndSettle();
 
-      expect(spoken, [
-        'Mum checked in. Everything OK.',
-        'Granddad checked in. Everything OK.',
-      ], reason: 'list order, which is the order the rows are read in');
+      expect(spoken, hasLength(1),
+          reason: 'two announcements in one frame is how one of them is lost');
+      expect(spoken.single,
+          'Mum checked in. Everything OK. Granddad checked in. Everything OK.',
+          reason: 'list order, which is the order the rows are read in');
       handle.dispose();
     });
 

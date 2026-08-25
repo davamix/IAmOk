@@ -277,6 +277,7 @@ class _WatcherBodyState extends State<WatcherBody> {
   /// an arbitrary widget. It is a no-op with no assistive technology running.
   void _announceChanged(WatcherState previous) {
     if (widget.state.userInitiated) return;
+    final settled = <String>[];
     for (final person in widget.state.people) {
       final index =
           previous.people.indexWhere((p) => p.link.id == person.link.id);
@@ -285,12 +286,23 @@ class _WatcherBodyState extends State<WatcherBody> {
       // arrival as a change would announce a row the reader has never heard.
       if (index < 0) continue;
       if (!person.checkedInSince(previous.people[index])) continue;
-      SemanticsService.sendAnnouncement(
-        View.of(context),
-        WatcherCopy.checkedIn(person.name),
-        Directionality.of(context),
-      );
+      settled.add(WatcherCopy.checkedIn(person.name));
     }
+    if (settled.isEmpty) return;
+    // **One utterance, however many rows settled.** This sent one announcement
+    // per person, which is the shape most likely to lose one: the platform does
+    // not reliably queue them, and the one dropped is the first — the oldest row
+    // in the list, which is the person the reader has been waiting longest to
+    // hear about.
+    //
+    // Joined rather than summarised, so every word stays approved copy. A
+    // shorter *"Mum and Granddad checked in. Everything OK."* would be a new
+    // string and needs the approval `screens.md` requires.
+    SemanticsService.sendAnnouncement(
+      View.of(context),
+      settled.join(' '),
+      Directionality.of(context),
+    );
   }
 
   /// Reached by a tap on a notification, so the row it names has to be
@@ -762,8 +774,23 @@ class _PersonRow extends StatelessWidget {
                 ? WatcherCopy.neverSeen
                 : WatcherCopy.lastSeen(
                     NotificationCopy.dayLabel(cache.lastConfirmedDay!)),
-            _lastChecked(cache, uses24Hour),
           ],
+          // **In `footer`, like every other branch.** It rendered identically
+          // while it sat in `lines`, because this row is `isBad: false` and
+          // nothing tints an unemphasised row — so the "never error-coloured, on
+          // any row" rule held here **by coincidence rather than by structure**.
+          //
+          // `screens.md` already commits Phase 6 to adding an away branch "above
+          // Everything OK", and whoever writes it will copy its nearest
+          // neighbour. Copied from a branch that puts this line in `lines`, with
+          // `isBad: true`, it paints *"This phone last checked Tuesday 10:14."*
+          // red — collapsing the exact distinction the footer was extracted to
+          // protect: the warning is a claim about **her**, this is a fact about
+          // **this device's own effort**.
+          //
+          // `spoken` is `[...lines, ?footer].join(' ')`, so the utterance is
+          // byte-identical either way.
+          footer: _lastChecked(cache, uses24Hour),
           isBad: false,
         );
     }
@@ -796,8 +823,10 @@ class _RowStatus {
   final List<String> lines;
 
   /// A fact about **this device**, rendered as ordinary text whatever the rows
-  /// above it say. Null on the revoked row, which has nothing to report about
-  /// an effort it is no longer making.
+  /// above it say. Null **only** on the revoked row, which has nothing to report
+  /// about an effort it is no longer making — every other row carries it,
+  /// including *"Everything OK"*, because the failure it exposes is a
+  /// force-stopped watcher whose rows all still read exactly that.
   final String? footer;
 
   final bool isBad;

@@ -33,7 +33,7 @@ warning per missed day, oldest first, so the same push posts up to seven notific
 
 ## Decision
 
-**A warning is posted only when `now >= today's `warningLocalTime`` in the watcher's own zone.**
+**A warning is posted only when `now >= today's warningLocalTime` in the watcher's own zone.**
 Before that hour the reconcile still runs in full; only the *posting* is held.
 
 It is implemented as a **delivery downgrade**, not as a new branch and not as a new state:
@@ -63,7 +63,10 @@ Three deliberate limits:
 ## Consequences
 
 **What it costs.** The acceleration a push buys is given up for the hours *before* the reader's
-chosen time — the window nobody asked to be woken in. It is kept for the rest of the day, which is
+chosen time — the window nobody asked to be woken in. ("Chosen" is loose: nothing but link
+creation and the debug harness sets `warningLocalTime`, and ADR-0008 forbids copy that states or
+implies a delivery time. The hour is now a hard floor with no surface — recorded as open in
+`ui-ux/guidelines.md`.) It is kept for the rest of the day, which is
 where it was actually worth something: a push at 14:00 still posts immediately, and that is what
 rescues a 10:00 alarm ADR-0008 measured Doze holding for 3h31m.
 

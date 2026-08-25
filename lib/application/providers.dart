@@ -70,17 +70,17 @@ class AppServices {
   bool get signedIn => selfUid != LocalStore.signedOutUid;
 
   WatchedReconcileService get watchedReconcile => WatchedReconcileService(
-        store: store,
-        clock: clock,
-        alarms: alarms,
-        notificationsEnabled: permissions.notificationsEnabled,
-        // Null when nobody is signed in, and the service treats that as "record
-        // it locally and sync nothing" rather than as an error. A tap on a
-        // signed-out phone is still a tap: the screen must still say
-        // "You already tapped today", because the person did.
-        checkIns: signedIn ? CheckInRepository() : null,
-        selfUid: selfUid,
-      );
+    store: store,
+    clock: clock,
+    alarms: alarms,
+    notificationsEnabled: permissions.notificationsEnabled,
+    // Null when nobody is signed in, and the service treats that as "record
+    // it locally and sync nothing" rather than as an error. A tap on a
+    // signed-out phone is still a tap: the screen must still say
+    // "You already tapped today", because the person did.
+    checkIns: signedIn ? CheckInRepository() : null,
+    selfUid: selfUid,
+  );
 
   /// Links, from Firestore into `LocalStore` (§6). UI isolate only.
   ///
@@ -199,17 +199,17 @@ class AppServices {
   /// from the one the policy then decides about — the two disagreeing about what
   /// day it is, which is the class of defect §11 exists to prevent.
   CheckInReader get checkInReader => DebugBackendOverride(
-        store: store,
-        real: FirestoreCheckInReader(now: clock.now),
-      );
+    store: store,
+    real: FirestoreCheckInReader(now: clock.now),
+  );
 
   /// The watcher's logic-bearing alarms. Exposed so the debug harness can arm
   /// one directly — the only control that asks the OS whether it will actually
   /// wake a bare isolate on this handset.
   WarningAlarmScheduler get warningAlarms => AndroidWarningAlarmScheduler(
-        warningAlarmCallback,
-        notifications.canScheduleExact,
-      );
+    warningAlarmCallback,
+    notifications.canScheduleExact,
+  );
 
   /// The link [linkId] names, if this user watches it — otherwise null.
   ///
@@ -329,30 +329,29 @@ class AppServices {
   /// list itself.
   WatcherReconcileService watcherReconcile({
     required bool watcherListShowing,
-  }) =>
-      WatcherReconcileService(
-        store: store,
-        clock: clock,
-        // Firestore, with the harness able to override it in a debug build
-        // — see [checkInReader] and `DebugBackendOverride`.
-        //
-        // **The `kDebugMode` gate the Phase 3 security review asked for is now
-        // applied.** It could not be then, and the reason was recorded here: the
-        // clock offset has a real fallback (`Duration.zero`) and the simulated
-        // reader had none, because in Phase 3 it *was* the implementation, so
-        // gating it would have left a release build with no reader at all
-        // rather than with a safe default. This paragraph promised the question
-        // would disappear when the real reader arrived. It has.
-        reader: checkInReader,
-        notifications: notifications,
-        alarms: warningAlarms,
-        // One shared derivation, in `NotificationService`, rather than a copy
-        // here and another in the alarm isolate. Both wiring defects this phase
-        // produced lived in a copy of this expression — see
-        // [NotificationService.watcherDelivery].
-        delivery: () =>
-            notifications.watcherDelivery(appInForeground: watcherListShowing),
-      );
+  }) => WatcherReconcileService(
+    store: store,
+    clock: clock,
+    // Firestore, with the harness able to override it in a debug build
+    // — see [checkInReader] and `DebugBackendOverride`.
+    //
+    // **The `kDebugMode` gate the Phase 3 security review asked for is now
+    // applied.** It could not be then, and the reason was recorded here: the
+    // clock offset has a real fallback (`Duration.zero`) and the simulated
+    // reader had none, because in Phase 3 it *was* the implementation, so
+    // gating it would have left a release build with no reader at all
+    // rather than with a safe default. This paragraph promised the question
+    // would disappear when the real reader arrived. It has.
+    reader: checkInReader,
+    notifications: notifications,
+    alarms: warningAlarms,
+    // One shared derivation, in `NotificationService`, rather than a copy
+    // here and another in the alarm isolate. Both wiring defects this phase
+    // produced lived in a copy of this expression — see
+    // [NotificationService.watcherDelivery].
+    delivery: () =>
+        notifications.watcherDelivery(appInForeground: watcherListShowing),
+  );
 }
 
 /// Overridden in `main()`. Reading it without that override is a wiring bug,
@@ -369,8 +368,8 @@ final appServicesProvider = Provider<AppServices>(
 /// date and a boot all the same code path.
 final watchedStateProvider =
     AsyncNotifierProvider<WatchedStateNotifier, WatchedState>(
-  WatchedStateNotifier.new,
-);
+      WatchedStateNotifier.new,
+    );
 
 /// The watcher list's state, recomputed by a full reconcile.
 ///
@@ -382,8 +381,8 @@ final watchedStateProvider =
 /// and clears a stale access-lost notice.
 final watcherStateProvider =
     AsyncNotifierProvider<WatcherStateNotifier, WatcherState>(
-  WatcherStateNotifier.new,
-);
+      WatcherStateNotifier.new,
+    );
 
 class WatcherStateNotifier extends AsyncNotifier<WatcherState> {
   @override
@@ -425,7 +424,29 @@ class WatcherStateNotifier extends AsyncNotifier<WatcherState> {
           .reconcile(selfUid: services.selfUid),
     );
     final value = next.value;
-    state = userInitiated || value == null
+    if (userInitiated) {
+      state = next;
+      return;
+    }
+    // **A pass nobody asked for may not replace the list with an error.**
+    //
+    // `AsyncValue.guard` turns a throw into `AsyncError`, and `WatcherScreen`
+    // renders that as the whole-screen *"This phone could not check on
+    // anyone."* — so a reader looking at a standing warning about Mum, who
+    // asked for nothing, loses it to an error page because somebody else
+    // tapped. `_onForegroundPush`'s own `try` cannot help: the state was
+    // already set in here.
+    //
+    // The exact shape of `WatchedStateNotifier.refresh`'s `tapFailed` rule one
+    // file along — *a reconcile she did not ask for must not take away the one
+    // thing she has* — and the same answer: keep the last good value. Stale
+    // beats absent, and the row's own *"This phone last checked …"* line is
+    // what makes the staleness visible rather than silent.
+    //
+    // A refresh the reader **asked** for still surfaces the error, because they
+    // are waiting for an answer and an unexplained non-update would be worse.
+    if (value == null && state.hasValue) return;
+    state = value == null
         ? next
         : AsyncData(value.copyWith(userInitiated: false));
   }
@@ -570,6 +591,4 @@ class WatchedStateNotifier extends AsyncNotifier<WatchedState> {
     await services.permissions.requestNotifications();
     await refresh();
   }
-
-
 }

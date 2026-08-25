@@ -204,13 +204,25 @@ class WatchedPersonState {
   ///
   /// It also lifts the precedence out of the widget, which is where it least
   /// belongs: it is §10's ordering, not a layout choice.
+  /// **The link status is a `switch` with no default, and that is the point.**
+  /// `LinkStatus` is `{accepted, revoked}` today and Phase 5's pairing adds at
+  /// least `pending`. Written as `status == revoked` it would fall through to
+  /// *"Everything OK"* — the identical false all-clear the revoked row was added
+  /// at the Phase 3 gate to fix. Written as `!= accepted` it would render *"You
+  /// are no longer looking after Mum."* for an invite nobody has accepted yet,
+  /// which is a different false claim. Neither is a choice to make by accident,
+  /// so a new status has to break the build here.
   WatchedRowKind get rowKind {
-    if (link.status == LinkStatus.revoked) return WatchedRowKind.revoked;
-    if (hasLostAccess) return WatchedRowKind.accessLost;
-    final standing = standingWarning;
-    return standing != null && standing != WarningOutcome.silent
-        ? WatchedRowKind.warning
-        : WatchedRowKind.ok;
+    switch (link.status) {
+      case LinkStatus.revoked:
+        return WatchedRowKind.revoked;
+      case LinkStatus.accepted:
+        if (hasLostAccess) return WatchedRowKind.accessLost;
+        final standing = standingWarning;
+        return standing != null && standing != WarningOutcome.silent
+            ? WatchedRowKind.warning
+            : WatchedRowKind.ok;
+    }
   }
 }
 
@@ -578,13 +590,17 @@ class WatcherReconcileService {
     //    ordering is free and the failure it prevents is a false all-clear.
     //
     //    **Spoken only when the warning channel can carry it**, and taken down
-    //    silently otherwise. A correction is meaningful only against the warning
-    //    it retracts, and `redundant` means that warning was never posted at all
-    //    — the watcher was reading the list — so the replacement would arrive
-    //    alone, telling someone at 3am that a warning they never saw has been
-    //    withdrawn. `unavailable` cannot post it in any case. Cancelling needs
-    //    no permission and is a no-op when nothing is showing, so both paths end
-    //    with an empty tray, which is the honest state. See
+    //    silently otherwise. Three things stop it: the reader is on the list
+    //    (`redundant`), the channel is muted (`unavailable`), or the reader's
+    //    hour has not arrived ([WatcherDelivery.notBefore]).
+    //
+    //    **This used to say `redundant` means the warning "was never posted at
+    //    all", and that is wrong in the common case** — the standing warning was
+    //    typically posted by yesterday's 10:00 alarm under `available`, and
+    //    `redundant` describes only *this* reconcile. The reconciler retracted
+    //    the claim in its own docstring; two copies of it out here did not
+    //    follow. The tray really does hold something, which is exactly why
+    //    cancelling is the load-bearing half. See
     //    [WatcherReconcileResult.shouldPostCorrections].
     //
     //    **[WatcherDelivery.notBefore] is a third route in, and it is not the

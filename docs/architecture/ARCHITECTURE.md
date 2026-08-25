@@ -506,7 +506,7 @@ fresh or knowably stale:
 > *read*, not about what a human saw, and a phone with notifications revoked is exactly the phone
 > whose health panel must still be able to explain itself when it is finally opened.
 
-> **And a warning is not posted before the reader's chosen hour** ([ADR-0010](decisions/0010-a-push-may-not-post-a-warning-early.md),
+> **And a warning is not posted before the link's `warningLocalTime`** ([ADR-0010](decisions/0010-a-push-may-not-post-a-warning-early.md),
 > added in Phase 4). `warningLocalTime` bounded only when the *alarm asks*, so any caller posted
 > whatever these steps owed — invisible while the alarm was the only **unattended** caller. FCM is
 > the second, and it fires on somebody else's action: measured on the POCO F3 at **00:24:53 CEST**,
@@ -517,7 +517,8 @@ fresh or knowably stale:
 > warning channel is handed `unavailable` until `now >= warningLocalTime` in the **watcher's** zone,
 > so nothing is posted, nothing is recorded in `warningsShownFor`, `lastDecidedDay` does not advance,
 > and the alarm window is armed exactly as before. The day stays **owed**, and the alarm speaks at
-> the hour the reader chose. A push later in the day still posts immediately, which is what keeps
+> the hour the link names — which no screen currently lets a watcher set or see, and ADR-0008
+> forbids copy that implies. A push later in the day still posts immediately, which is what keeps
 > ADR-0008's one mitigation.
 >
 > **Step 5's channel is deliberately not gated.** A refusal is a claim about *us*, is not tied to an

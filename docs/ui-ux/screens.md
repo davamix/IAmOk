@@ -240,7 +240,7 @@ Phase 7's problem. What follows is the wording.
 | A link this pass could not check | *"Can't check on Mum — this phone could not finish checking just now."* |
 | …and what to do about it | *"If this is still here tomorrow, ask whoever set up the app."* + **"Try again"** |
 | Spoken when a tapped notification opens a row | *"Showing Mum."* |
-| Spoken when a row changes **while the list is open**, unasked | *"Mum checked in. Everything OK."* — approved 2026-08-25, see below |
+| Spoken when a row stops carrying a warning **because a check-in arrived**, while the list is open, unasked | *"Mum checked in. Everything OK."* — approved 2026-08-25, see below. **Only this one change speaks**; the two candidates below do not ship |
 | The load failed | *"This phone could not check on anyone. Try again, or open the app later."* + **"Try again"** |
 | No warning standing | *"Everything OK"* |
 | …with a check-in read | *"Your phone last saw a check-in on Saturday 15 August."* |
@@ -271,8 +271,27 @@ a false claim about a person.
 
 > *"Mum checked in. Everything OK."*
 
-It reuses `everythingOk` verbatim rather than inventing a second way to say the same thing, and it
-follows `rowLabel`'s shape — name the person, then their state, as one utterance.
+It reuses `everythingOk` verbatim rather than inventing a second way to say the same thing.
+
+**It is the one message in this set that names no day, and that is a decision rather than an
+omission.** ADR-0009's rule is that a warning names its day unless the day is yesterday, because
+*"yesterday"* is false for a watcher several zones from the watched person. *"Mum checked in."* is
+past simple with no day at all, and will be heard as *just now* — what the device actually knows is
+that a check-in exists for the last completed **watched-local** day.
+
+It ships without the date because an utterance that interrupts should be short, and because the row
+directly beneath it carries the exact date (*"Your phone last saw a check-in on Saturday 15
+August."*) for the next swipe to read. The error is small and in the reassuring direction. **If it
+is ever revisited**, the dated forms are *"Mum checked in yesterday. Everything OK."* and *"Mum
+checked in on Saturday 15 August. Everything OK."*, and they must use the same day helper as the
+warning they retract so the two cannot describe one day differently.
+
+**Several rows settling in one pass is ONE utterance**, the approved sentences joined in list order:
+*"Mum checked in. Everything OK. Granddad checked in. Everything OK."* It sent one announcement per
+person first, which is the shape most likely to lose one — the platform does not reliably queue
+them, and the one dropped is the first, which is the oldest row and the person the reader has been
+waiting longest to hear about. Repetitive, and every word of it is already approved; a shorter
+summary would be a new string needing its own approval.
 
 **Two conditions, both required.** The person's rendered status must have **changed**, and the
 refresh must **not** have been user-initiated. Announcing every refresh is noise; on a resume the
@@ -295,6 +314,12 @@ which is the case this exists for, and false for every way a warning can simply 
 A row moving into or out of a **revoked** or a **lost access** state is excluded on both sides. Each
 renders something else entirely, so each is a different sentence — and the two candidates below are
 exactly those sentences, neither of which is approved.
+
+**Two more things are pinned by tests and belong in the approved set**, because both are cases where
+saying nothing is the correct answer: a link with **no previous row** — newly paired, or previously
+unreconcilable — is never announced, because there is no "before" for it to have changed from; and a
+**day rollover** is never announced as a check-in, because a warning about `D` followed by a
+check-in for `D + 1` is a true sentence spoken for the wrong reason.
 
 **Deliberately not shipping yet**, and named here so nobody adds them casually — each needs the same
 approval this one got:
@@ -663,11 +688,22 @@ than silent ones — alarm fatigue is not a risk at that frequency.
 > instant from the payload would let a forged message put a fabricated time into a sentence about
 > whether a person is alive. If the time is ever wanted, it comes through the READ.
 
-> **A correction is only ever spoken when the warning it retracts was actually posted.** If the
-> warning was consumed as `redundant` — the watcher was reading the list, so nothing went to the
-> tray — or the *Missed check-ins* channel has since been muted, the standing warning is
-> **cancelled silently** instead. A bare *"Correction: Mum did check in yesterday"* with nothing
-> above it reads, at 3am, as a warning the reader somehow slept through.
+> **A correction is spoken only when the warning channel can carry it.** Three things stop it: the
+> reader is on the list (`redundant`), the *Missed check-ins* channel is muted, or the reader's
+> `warningLocalTime` has not arrived yet (ADR-0010). In all three the standing warning is
+> **cancelled silently** instead.
+>
+> **Only the first of the three means the tray was empty.** This blockquote used to say a correction
+> is spoken *"only when the warning it retracts was actually posted"*, and that the `redundant` case
+> means *"nothing went to the tray"* — both wrong in the common case, and the reconciler had already
+> retracted them in its own docstring. The standing warning was typically posted by **yesterday's**
+> 10:00 alarm; `redundant` describes only the reconcile that retracts it. So cancelling is the
+> load-bearing half, not a tidy-up.
+>
+> The 3am argument still holds for `redundant`: a bare *"Correction: Mum did check in yesterday"*
+> arriving alone reads as a warning the reader somehow slept through. It does **not** hold for the
+> ADR-0010 case, where the reader did see the warning — see *A warning is not posted before the
+> link's warning time* below for what that costs them.
 
 ### The three reminders — approved Phase 2
 
@@ -805,18 +841,22 @@ screen may simultaneously say nobody is set up — reminders are armed regardles
 deliberate design, because they exist for her own routine. Either an empty-audience variant, or an
 explicit acceptance once onboarding guarantees pairing before reminders arm.
 
-### A warning is not posted before the reader's chosen hour — settled 2026-08-25
+### A warning is not posted before the link's warning time — settled 2026-08-25
 
 Every string above says *what* is said. This says **when**, and it was missing.
 
-`Link.warningLocalTime` — the hour the watcher chose, 10:00 by default — bounded only when the
-*alarm asks*. Nothing in the decision path read it, so any caller posted whatever was owed, and a
+`Link.warningLocalTime` — 10:00, and **nobody chooses it**: it is set at link creation and in the
+debug harness, and no screen lets a watcher set or even see it. [ADR-0008][adr8] makes that absence
+deliberate — *"nothing in `lib/copy/` may state or imply a delivery time"* — so this section
+describes a value the reader has, not one they picked. It bounded only when the *alarm asks*.
+
+[adr8]: ../architecture/decisions/0008-the-warning-is-late-in-doze-and-the-app-says-so.md Nothing in the decision path read it, so any caller posted whatever was owed, and a
 warning is owed from the moment the day completes. Measured on the POCO F3:
 
 > *"No check-in from Ana yesterday."* — posted **00:24:53 CEST**, against a `warningLocalTime` of
 > 10:00, because somebody else tapped and the resulting push woke the isolate.
 
-**The rule: a warning is posted only once `now >= today's `warningLocalTime`` in the watcher's own
+**The rule: a warning is posted only once `now >= today's warningLocalTime` in the watcher's own
 zone.** A push at 14:00 against a 10:00 warning still posts immediately — the acceleration is kept
 for the rest of the day, including rescuing an alarm Doze made late. Only the hours before the
 reader's chosen time are given up, which is the window nobody asked to be woken in.

@@ -249,4 +249,28 @@ abstract final class WatcherCopy {
   /// the person the notification was about* — and the row is scrolled into view
   /// for the next swipe to read in full.
   static String showingPerson(String watchedName) => 'Showing $watchedName.';
+
+  /// Spoken when a row the reader is already looking at stops carrying a
+  /// warning because a check-in arrived — approved 2026-08-25.
+  ///
+  /// `NotificationDelivery.redundant` posts nothing and records the day as seen,
+  /// on the argument that the list renders the change itself. That held while
+  /// `redundant` was reached by **navigating** here. A foreground push made it
+  /// also mean *the list is open and something arrived*, and nothing re-reads a
+  /// changed widget — so a reader who heard *"Mum. No check-in from Mum
+  /// yesterday."* is looking at *"Everything OK"* with no announcement, no
+  /// reason to swipe back, and no notification ever coming. It bites hardest on
+  /// the correction, whose entire purpose is withdrawing a false claim about a
+  /// person.
+  ///
+  /// **Reuses [everythingOk] verbatim** rather than inventing a second way to
+  /// say the same thing, and follows [rowLabel]'s shape — name the person, then
+  /// their state, as one utterance.
+  ///
+  /// **This is the only change announced.** `screens.md` names two more
+  /// candidates — OK → warning, and any → lost access — as deliberately not
+  /// shipping, each owed the same approval this one got. Adding one here without
+  /// adding it there is how a screen starts speaking sentences nobody signed off.
+  static String checkedIn(String watchedName) =>
+      '$watchedName checked in. $everythingOk.';
 }

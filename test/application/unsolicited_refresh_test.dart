@@ -34,6 +34,17 @@ import '../support/zones.dart';
 /// they also watch somebody. Reachable in Phase 6, when `onAwayChanged` fans out
 /// to the watched person's own device — which is why it is closed now rather
 /// than noted.
+///
+/// ## The watcher side carries the same flag, for the mirror-image reason
+///
+/// There an unasked-for reconcile **removed** a line she needed. Here it
+/// **replaces** a claim about a relative with a different one, silently:
+/// `NotificationDelivery.redundant` posts nothing and records the day as seen,
+/// on the argument that the list renders the change itself — and nothing
+/// re-reads a changed widget, so a screen-reader user is told nothing at all and
+/// no notification is ever coming. The flag is what lets the screen announce it;
+/// `watcher_screen_test.dart` owns what is said. This owns that the flag
+/// survives the reconcile at all, which is the half a widget test cannot see.
 void main() {
   sqfliteFfiInit();
   databaseFactory = databaseFactoryFfi;
@@ -116,6 +127,42 @@ void main() {
         .refresh(userInitiated: false);
 
     expect(container.read(watchedStateProvider).value!.tapFailed, isFalse);
+  });
+
+  group('and the watcher list carries the same flag', () {
+    test('the first load is user-initiated — they opened the screen', () async {
+      final state = await container.read(watcherStateProvider.future);
+
+      expect(state.userInitiated, isTrue,
+          reason: 'the default is the silent answer: a pass that says nothing '
+              'about how it was triggered announces nothing');
+    });
+
+    test('a push-driven refresh is marked unsolicited', () async {
+      await container.read(watcherStateProvider.future);
+
+      await container
+          .read(watcherStateProvider.notifier)
+          .refresh(userInitiated: false);
+
+      expect(container.read(watcherStateProvider).value!.userInitiated, isFalse,
+          reason: 'nobody asked for this pass, so a row it changed under a '
+              'screen reader has to be announced');
+    });
+
+    test('a resume or a pull-to-refresh is not', () async {
+      // The reader is arriving at the screen and will read the row themselves.
+      // Announcing every refresh talks over them.
+      await container.read(watcherStateProvider.future);
+      await container
+          .read(watcherStateProvider.notifier)
+          .refresh(userInitiated: false);
+
+      await container.read(watcherStateProvider.notifier).refresh();
+
+      expect(container.read(watcherStateProvider).value!.userInitiated, isTrue,
+          reason: 'and it does not stick from the previous pass');
+    });
   });
 }
 

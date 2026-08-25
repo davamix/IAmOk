@@ -131,6 +131,47 @@ class WatchedPersonState {
     }
     return stored;
   }
+
+  /// Whether this row has just gone from a standing warning to *"Everything
+  /// OK"* **because a check-in arrived** — the one row change `screens.md`
+  /// approves announcing to a screen reader (2026-08-25).
+  ///
+  /// ## Why the transition is not simply "the row got better"
+  ///
+  /// The approved string is *"Mum checked in. Everything OK."*, and the first
+  /// half is a **claim about her**. A row can reach *"Everything OK"* from a
+  /// standing warning without anybody tapping: a `warnUnverifiableAway` stops
+  /// being renderable the moment a read succeeds — [standingWarning] falls back
+  /// to the current decision, which is silent because the away covers `D` — and
+  /// the row goes quiet with `lastConfirmedDay` exactly where it was. Announcing
+  /// there would tell a family she checked in on a day she was away and did not.
+  ///
+  /// So the last clause asks the cache, not the row: the day the warning was
+  /// **about** must now be confirmed. That is true for the case this exists for
+  /// — the correction, where a late-syncing check-in for `D` arrives — and false
+  /// for every way a warning can lapse without one.
+  ///
+  /// ## And the two states that outrank a warning are excluded on both sides
+  ///
+  /// A revoked link and ADR-0004's lost access render something else entirely
+  /// (`watcher_screen.dart`), so a change into or out of either is a different
+  /// sentence. `screens.md` lists *any → access lost* as a candidate that is
+  /// deliberately **not** shipping, and its reverse was never proposed; neither
+  /// may arrive by falling through this.
+  bool checkedInSince(WatchedPersonState previous) {
+    bool rendersWarning(WatchedPersonState p) =>
+        p.link.status != LinkStatus.revoked &&
+        !p.hasLostAccess &&
+        p.standingWarning != null &&
+        p.standingWarning != WarningOutcome.silent;
+
+    if (!rendersWarning(previous)) return false;
+    if (link.status == LinkStatus.revoked || hasLostAccess) return false;
+    if (rendersWarning(this)) return false;
+
+    final confirmed = cache.lastConfirmedDay;
+    return confirmed != null && confirmed >= previous.decision.day;
+  }
 }
 
 /// Everything the watcher's screen needs, as of one reconcile.
@@ -143,6 +184,7 @@ class WatcherState {
     required this.uses24Hour,
     this.unreconciled = const [],
     this.watcherZoneUnknown = false,
+    this.userInitiated = true,
   });
 
   final List<WatchedPersonState> people;
@@ -224,11 +266,48 @@ class WatcherState {
   /// the screen already receives.
   final bool watcherZoneUnknown;
 
+  /// Whether the person reading the screen **asked** for this pass.
+  ///
+  /// The twin of `WatchedStateNotifier.refresh`'s parameter, on the side where
+  /// the cost of an unasked-for rebuild is the opposite one: there a reconcile
+  /// she did not trigger *removed* a line she needed, here one nobody triggered
+  /// *replaces* a line without saying so.
+  ///
+  /// False today only for a foreground FCM nudge. It decides one thing — whether
+  /// a row that changed under a screen reader is announced — because nothing
+  /// re-reads a changed widget, so a TalkBack reader who heard *"Mum. No
+  /// check-in from Mum yesterday."* is left looking at *"Everything OK"* with no
+  /// announcement, no reason to swipe back, and no notification ever coming.
+  ///
+  /// **Defaults to true, and the direction is deliberate.** A pass that says
+  /// nothing about how it was triggered is treated as one the reader asked for,
+  /// which announces nothing — the silent, safe answer. Announcing every refresh
+  /// is noise, and on a resume the reader is arriving at the screen and will
+  /// read the row themselves.
+  ///
+  /// Set by `WatcherStateNotifier`, never by the reconcile, which has no way to
+  /// know why it was called. See `docs/ui-ux/screens.md`.
+  final bool userInitiated;
+
   /// Nobody is being watched — **not** "nothing could be rendered".
   ///
   /// [unreconciled] counts, or a watcher whose only link failed is told they
   /// are looking after nobody.
   bool get isEmpty => people.isEmpty && unreconciled.isEmpty;
+
+  /// Narrow on purpose, exactly as `WatchedState.copyWith` is: the only thing a
+  /// caller may restate about a finished reconcile is how it was triggered,
+  /// which is the one fact the reconcile itself cannot know.
+  WatcherState copyWith({bool? userInitiated}) => WatcherState(
+        people: people,
+        today: today,
+        watcherZone: watcherZone,
+        warningDelivery: warningDelivery,
+        uses24Hour: uses24Hour,
+        unreconciled: unreconciled,
+        watcherZoneUnknown: watcherZoneUnknown,
+        userInitiated: userInitiated ?? this.userInitiated,
+      );
 }
 
 /// The watcher side's one idempotent entry point — **reconcile first, then
@@ -430,7 +509,8 @@ class WatcherReconcileService {
       cache: cache,
       read: read,
       currentlyScheduled: armed,
-      delivery: delivery,
+      delivery: _notBefore(link.warningLocalTime, delivery,
+          now: now, watcherZone: watcherZone),
     );
 
     // 2. Corrections FIRST, before any new warning is posted.
@@ -450,6 +530,15 @@ class WatcherReconcileService {
     //    no permission and is a no-op when nothing is showing, so both paths end
     //    with an empty tray, which is the honest state. See
     //    [WatcherReconcileResult.shouldPostCorrections].
+    //
+    //    **[_notBefore] is a third route in, and it is not the same case.**
+    //    There the warning really was posted and really was read, so the
+    //    retraction is genuinely given up rather than merely redundant: the
+    //    false claim comes down silently and no sentence says it was withdrawn.
+    //    That is the quieter of the two errors at 00:24 — a correction is good
+    //    news, and good news may not wake a family — and the row still renders
+    //    the truth for whoever opens the app. Named here rather than left to be
+    //    inferred from a shared field.
     for (final correction in result.corrections) {
       if (!result.shouldPostCorrections) {
         await notifications.cancelWarning(correction.linkId, correction.day);
@@ -589,6 +678,87 @@ class WatcherReconcileService {
       cache: result.cache,
       decision: result.decision,
       zoneUnknown: result.watchedZoneUnknown,
+    );
+  }
+
+  /// [delivery], with the **warning** channel downgraded to
+  /// [NotificationDelivery.unavailable] until the watcher's chosen warning time
+  /// has arrived today, in the watcher's own zone.
+  ///
+  /// ## What this closes
+  ///
+  /// `warningLocalTime` fed exactly one thing — `_desiredWarnings`, the alarm
+  /// schedule — and appeared nowhere in the decision path, so whoever called
+  /// `reconcile()` posted whatever was owed. That was invisible while the alarm
+  /// was the only **unattended** caller. Phase 4 added a second one, and it
+  /// fires on **somebody else's** action: a check-in is written, the Function
+  /// fans out, and the isolate wakes. Measured on the POCO F3 on 2026-08-25 —
+  /// *"No check-in from Ana yesterday."* posted at **00:24:53 CEST** against a
+  /// `warningLocalTime` of 10:00. Decided by the owner the same day, and
+  /// recorded in [ADR-0010][].
+  ///
+  /// The bound is only the hours **before** the chosen time. A push at 14:00
+  /// against a 10:00 warning still posts immediately, so the acceleration is
+  /// kept for the rest of the day — including rescuing an alarm Doze made late,
+  /// which is ADR-0008's whole accepted risk. What is given up is the window
+  /// nobody asked to be woken in.
+  ///
+  /// ## Why a delivery state and not a branch
+  ///
+  /// **The trap here is that a suppressed run must still decide, must still
+  /// re-arm, and must still owe the day.** Returning early, or inventing a
+  /// fourth state, is how this becomes a *lost* warning — the 10:00 alarm finds
+  /// the day settled and says nothing, which is the worst class of bug this app
+  /// has. [NotificationDelivery.unavailable] already means exactly *not posted,
+  /// not consumed, still owed at the next reconcile*, and it is already
+  /// enforced where it matters: `warningsShownFor` is not written, ADR-0009's
+  /// `lastDecidedDay` does not advance across an unsettled day, and
+  /// `catchUpWarnings` folds in the same state — which is the case that would
+  /// otherwise post seven notifications at midnight.
+  ///
+  /// The alarm window is untouched by construction: `_desiredWarnings` arms
+  /// every day in the window whose instant is still ahead of `now`, so a run
+  /// suppressed at 00:24 arms today's 10:00 alarm on its way past.
+  ///
+  /// ## Three deliberate limits
+  ///
+  /// **The warning channel only.** ADR-0004's *lost access* notice is a claim
+  /// about **us**, not about her; a refusal is not tied to an hour, and its
+  /// decaying cadence — days 0, 1, 3, 7, 14 — is the thing
+  /// [NotificationDelivery] exists to stop being burned in silence.
+  ///
+  /// **Only when it would otherwise post.** [NotificationDelivery.redundant]
+  /// means the reader is looking at the list, which is delivery by a route no
+  /// hour applies to. Downgrading it would leave the day owed and post a
+  /// notification at 10:00 about something the reader was shown at 00:24.
+  ///
+  /// **Corrections ride this channel too**, so before the warning time a
+  /// standing false warning is **cancelled rather than replaced** — the path
+  /// `redundant` already takes, for the reason given at the correction loop.
+  /// The tray ends empty and honest, which is the substance of the retraction;
+  /// what is given up is the sentence saying so. Recorded in `screens.md` as a
+  /// consequence rather than smuggled in, because the approval was worded about
+  /// warnings.
+  ///
+  /// The zone is the watcher's cached one, **including its UTC fallback** — the
+  /// same zone `_desiredWarnings` arms in. Agreeing with the alarm matters more
+  /// here than being right: a gate in one zone and an alarm in another would
+  /// suppress a day the alarm has already passed.
+  ///
+  /// [ADR-0010]: ../../docs/architecture/decisions/0010-a-push-may-not-post-a-warning-early.md
+  static WatcherDelivery _notBefore(
+    LocalTimeOfDay warningLocalTime,
+    WatcherDelivery delivery, {
+    required DateTime now,
+    required tz.Location watcherZone,
+  }) {
+    if (!delivery.warning.postsNotification) return delivery;
+    final due = DayKey.fromInstant(now, watcherZone)
+        .at(warningLocalTime, watcherZone);
+    if (!now.isBefore(due)) return delivery;
+    return WatcherDelivery(
+      warning: NotificationDelivery.unavailable,
+      accessLost: delivery.accessLost,
     );
   }
 

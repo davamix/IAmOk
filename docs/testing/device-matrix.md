@@ -1005,11 +1005,28 @@ So M2 is not a hypothetical any more. A watcher can be woken in the middle of th
 about a *past* day, triggered by somebody else tapping — and this run is the evidence that it is
 reachable in ordinary use rather than only in an unlucky timezone pairing.
 
-**Settled by the owner on 2026-08-25: a push may not post a warning before `warningLocalTime`.** Not
-yet implemented; the rule and the trap are on `Link.warningLocalTime`, and the work is in the Phase 4
-summary's next-session prompt. **Re-run this measurement afterwards** — the expected result changes
-from "a warning at 00:24" to "no notification, the alarm still armed, and the day still owed", and
-the third of those is the one that must be checked in the store rather than on the screen.
+**Settled by the owner on 2026-08-25: a push may not post a warning before `warningLocalTime`.**
+
+**Implemented 2026-08-25** — [ADR-0010](../architecture/decisions/0010-a-push-may-not-post-a-warning-early.md).
+The warning channel is handed `NotificationDelivery.unavailable` until `now >= warningLocalTime` in
+the watcher's zone, so nothing posts, nothing is recorded, `lastDecidedDay` does not advance, and the
+alarm window is armed unchanged. Eleven tests in `watcher_reconcile_service_test.dart` pin it, and
+five of them fail against a build with the gate removed (mutation-checked 2026-08-25).
+
+**This measurement is owed a re-run and has not had one.** ☐ The expected result changes from *"a
+warning at 00:24"* to **three** things, and the third is the one that decides whether this is a fix
+or a new failure:
+
+| Check | Expected | Read it from |
+|---|---|---|
+| The tray | no new notification key for the package | `dumpsys notification` keys, diffed — not counted |
+| The alarm | today's `warningLocalTime` alarm still armed | `dumpsys alarm`, written to a file on the device and pulled |
+| The day | still **owed** — absent from `warningsShownFor`, and `last_decided_day` below `D` | the **pulled store**, never the screen |
+
+The third cannot be checked by looking: a lost warning and a held one look identical at 00:24 and
+differ only at 10:00. Push at 00:24, assert the three rows above, then move the debug clock past the
+warning time, reconcile, and assert the warning **is** posted. A run that stops at "nothing appeared"
+has measured the wrong half.
 
 **The test premise was wrong first, and that is worth recording too.** The script asserted "today IS
 checked in, so the reconcile has nothing to say" — while the seeded check-in was for 2026-08-21 and
@@ -1076,6 +1093,13 @@ FCM work on it**. An AOSP image would have made the whole arrangement impossible
       Doze on this handset.
 - [ ] Delivery still works after the device has been idle overnight (real Doze) — POCO as receiver;
       the AVD is not involved
+- [ ] **A push before `warningLocalTime` posts nothing, and the day is still owed**
+      ([ADR-0010](../architecture/decisions/0010-a-push-may-not-post-a-warning-early.md), implemented
+      2026-08-25 and **not yet run on hardware**). This is the re-run of *Does a Doze push show the
+      user anything*, whose 00:24 warning is the finding the rule closes. Three checks, and the
+      third is the whole point — see that section for the table. A run that stops at "nothing
+      appeared" cannot tell a **held** warning from a **lost** one; move the debug clock past the
+      warning time afterwards and assert the warning **is** posted.
 
 **Phase 5 — pairing.** All three.
 

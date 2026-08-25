@@ -141,6 +141,17 @@ in" is a claim the device cannot support; an unverifiable away is neither of tho
 has been *refused* is not offline and must not say it is. Which one fires is a correctness
 requirement, not copy polish.
 
+**Deciding is not posting** (ADR-0010). A warning decided before `warningLocalTime` in the
+**watcher's** zone is not posted — `WatcherReconcileService._notBefore` hands the warning channel
+`NotificationDelivery.unavailable`, which is the state that suppresses the post while leaving the day
+**owed**. That hour bounded only the *alarm* for three phases, so FCM — which fires on somebody
+else's tap — woke a family at 00:24. The access-lost channel is not gated; a refusal has no hour.
+
+> **The trap, if you touch this.** A held run must still decide, still re-arm, and still leave the
+> day out of `warningsShownFor` and below `lastDecidedDay`. Record it, settle it, or return early and
+> the 10:00 alarm finds it settled and says nothing — a **lost** warning, which is the worst thing
+> this app can do. Do not add an enum state for it; `unavailable` already means exactly this.
+
 **An access failure is never recorded as a warning about the watched person.** `warningsShownFor` is
 claims about *her*; lost access lives in `accessLostSince`. Mixing them makes the watcher's list row
 report a missed check-in that nothing supports — the same false claim, arriving by a different

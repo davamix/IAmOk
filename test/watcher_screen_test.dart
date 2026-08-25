@@ -77,6 +77,10 @@ void main() {
     bool uses24Hour = true,
     // Pull-to-refresh, and the failed row's *Try again*.
     Future<void> Function()? onRefresh,
+    // True by default, matching `WatcherState`'s own default: a pass that says
+    // nothing about how it was triggered announces nothing, which is the silent
+    // and safe answer. Only a foreground push passes false.
+    bool userInitiated = true,
   }) async {
     tester.view.physicalSize = surface * tester.view.devicePixelRatio;
     addTearDown(tester.view.reset);
@@ -106,6 +110,7 @@ void main() {
                     for (final name in unreconciled)
                       linkTo(name.toLowerCase(), name),
                   ],
+                  userInitiated: userInitiated,
                 ),
               ),
             ),
@@ -802,6 +807,178 @@ void main() {
       expect(announcements, ['Showing Mum.'],
           reason: 'the tapped person is named, once, and it is Mum rather than '
               'the first row in the list');
+      handle.dispose();
+    });
+  });
+
+  /// **A row that changes under a screen reader is announced** — `screens.md`,
+  /// approved 2026-08-25.
+  ///
+  /// `NotificationDelivery.redundant` posts nothing and records the day as seen,
+  /// on the argument that the list renders the change itself. That held while
+  /// `redundant` was reached by **navigating** here. Phase 4 gave the list a
+  /// second way to change — a foreground push, arriving while the reader is
+  /// already on the screen — and nothing re-reads a changed widget. A sighted
+  /// reader sees the row change; a TalkBack reader who heard *"Mum. No check-in
+  /// from Mum yesterday."* thirty seconds ago is looking at *"Everything OK"*
+  /// with no announcement, no reason to swipe back, and no notification ever
+  /// coming, because the day is already recorded as seen.
+  ///
+  /// Every case here asserts on the **platform message**, never on the copy
+  /// constant: a string-equality check against `WatcherCopy.checkedIn` passes
+  /// with the whole `sendAnnouncement` call deleted, which is the mistake the
+  /// notification-tap test above was fixed for.
+  group('a row that changes while the reader is on it', () {
+    List<String> announcementsOn(WidgetTester tester) {
+      final spoken = <String>[];
+      tester.binding.defaultBinaryMessenger
+          .setMockDecodedMessageHandler<Object?>(
+        SystemChannels.accessibility,
+        (message) async {
+          final event = message as Map<Object?, Object?>;
+          if (event['type'] == 'announce') {
+            final data = event['data'] as Map<Object?, Object?>;
+            spoken.add(data['message'] as String);
+          }
+          return null;
+        },
+      );
+      addTearDown(
+        () => tester.binding.defaultBinaryMessenger
+            .setMockDecodedMessageHandler<Object?>(
+                SystemChannels.accessibility, null),
+      );
+      return spoken;
+    }
+
+    /// The row a reader has just heard a warning about.
+    WatchedPersonState warned({String uid = 'mum', String name = 'Mum'}) =>
+        person(
+          uid: uid,
+          name: name,
+          cache: WatcherCache(warningsShownFor: {d: WarningOutcome.warnOnline}),
+          outcome: WarningOutcome.warnOnline,
+        );
+
+    /// The same row after a check-in for that day arrives.
+    WatchedPersonState settled({String uid = 'mum', String name = 'Mum'}) =>
+        person(uid: uid, name: name, cache: WatcherCache(lastConfirmedDay: d));
+
+    testWidgets('the reader is told, in the approved words', (tester) async {
+      final spoken = announcementsOn(tester);
+      final handle = tester.ensureSemantics();
+
+      await pump(tester, [warned()]);
+      await pump(tester, [settled()], userInitiated: false);
+      await tester.pumpAndSettle();
+
+      expect(spoken, ['Mum checked in. Everything OK.']);
+      handle.dispose();
+    });
+
+    testWidgets('a refresh the reader ASKED for says nothing', (tester) async {
+      // The other half of the rule, and the reason it is a condition rather
+      // than a blanket announcement. On a resume or a pull-to-refresh the
+      // reader is arriving at the screen and will read the row themselves;
+      // announcing every refresh talks over them.
+      final spoken = announcementsOn(tester);
+      final handle = tester.ensureSemantics();
+
+      await pump(tester, [warned()]);
+      await pump(tester, [settled()]);
+      await tester.pumpAndSettle();
+
+      expect(spoken, isEmpty);
+      handle.dispose();
+    });
+
+    testWidgets('an unsolicited pass that changed NOTHING says nothing',
+        (tester) async {
+      final spoken = announcementsOn(tester);
+      final handle = tester.ensureSemantics();
+
+      await pump(tester, [warned()]);
+      await pump(tester, [warned()], userInitiated: false);
+      await tester.pumpAndSettle();
+
+      expect(spoken, isEmpty,
+          reason: 'a push arrives for every check-in in the family, and most '
+              'of them change nothing on this row');
+      handle.dispose();
+    });
+
+    testWidgets('a warning that merely lapsed is NOT announced as a check-in',
+        (tester) async {
+      // The honesty case, and the reason the condition asks the cache rather
+      // than the row. A `warnUnverifiableAway` stops being renderable the
+      // moment a read succeeds — the away covers the day, so the decision is
+      // silent and the row goes quiet — with `lastConfirmedDay` exactly where
+      // it was. *"Mum checked in"* there is a claim about a person on a day she
+      // was away and did not tap.
+      final spoken = announcementsOn(tester);
+      final handle = tester.ensureSemantics();
+
+      await pump(tester, [
+        person(
+          cache: WatcherCache(
+            warningsShownFor: {d: WarningOutcome.warnUnverifiableAway},
+            lastReconcileAt: DateTime.utc(2026, 8, 14, 10, 14),
+          ),
+          outcome: WarningOutcome.warnUnverifiableAway,
+          unverifiedSince: DateTime.utc(2026, 8, 14, 10, 14),
+        ),
+      ]);
+      expect(find.textContaining('Can\'t check on Mum'), findsOneWidget,
+          reason: 'the premise — a warning really was standing');
+
+      await pump(tester, [
+        // The read succeeded and the away covers the day: nothing warns, and
+        // nobody checked in.
+        person(cache: const WatcherCache.empty()),
+      ], userInitiated: false);
+      await tester.pumpAndSettle();
+
+      expect(find.text(WatcherCopy.everythingOk), findsOneWidget,
+          reason: 'the row really did go quiet');
+      expect(spoken, isEmpty);
+      handle.dispose();
+    });
+
+    testWidgets('only the person whose row changed is named', (tester) async {
+      final spoken = announcementsOn(tester);
+      final handle = tester.ensureSemantics();
+
+      await pump(tester, [
+        warned(),
+        warned(uid: 'gd', name: 'Granddad'),
+      ]);
+      await pump(tester, [
+        settled(),
+        warned(uid: 'gd', name: 'Granddad'),
+      ], userInitiated: false);
+      await tester.pumpAndSettle();
+
+      expect(spoken, ['Mum checked in. Everything OK.'],
+          reason: 'Granddad\'s warning is still true and still standing');
+      handle.dispose();
+    });
+
+    testWidgets('a link with no previous row is not announced', (tester) async {
+      // Newly paired, or previously in `unreconciled`. There is no "before" for
+      // it to have changed from, and reading its arrival as a change would
+      // announce a row the reader has never heard.
+      final spoken = announcementsOn(tester);
+      final handle = tester.ensureSemantics();
+
+      await pump(tester, [warned()]);
+      await pump(
+        tester,
+        [warned(), settled(uid: 'gd', name: 'Granddad')],
+        userInitiated: false,
+      );
+      await tester.pumpAndSettle();
+
+      expect(spoken, isEmpty);
       handle.dispose();
     });
   });

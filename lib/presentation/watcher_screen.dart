@@ -238,6 +238,61 @@ class _WatcherBodyState extends State<WatcherBody> {
     super.dispose();
   }
 
+  /// Speaks a row that changed while the reader was already on this screen.
+  ///
+  /// **Here rather than in a listener, because this is the only place that has
+  /// both states.** `didUpdateWidget` is handed the previous [WatcherState] and
+  /// the new one, which is exactly the comparison the rule is written in terms
+  /// of; a provider listener would have to keep its own copy of the last value
+  /// and would then be a second source for it.
+  ///
+  /// `refresh()` never sets a loading state — it assigns the guarded result in
+  /// one go — so the body stays mounted with the old data and this fires with a
+  /// real `oldWidget.state` rather than after a rebuild from nothing.
+  @override
+  void didUpdateWidget(covariant WatcherBody oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _announceChanged(oldWidget.state);
+  }
+
+  /// *"Mum checked in. Everything OK."* — `screens.md`, approved 2026-08-25.
+  ///
+  /// **Two conditions, both required**, and each one removes a different kind of
+  /// noise. The pass must not have been asked for: on a resume or a
+  /// pull-to-refresh the reader is arriving at the screen and will read the row
+  /// themselves, and announcing every refresh would talk over them. And the
+  /// person's rendered status must actually have **changed** in the one direction
+  /// that has an approved sentence — see [WatchedPersonState.checkedInSince],
+  /// which is where the *"checked in"* half is checked against the cache rather
+  /// than inferred from the row going quiet.
+  ///
+  /// **This changes nothing about what is posted or consumed.** `redundant`
+  /// still posts no notification and still records the day. This is the screen
+  /// speaking to a reader who is already on it, which is the premise the
+  /// `redundant` argument always rested on — now true for someone who cannot see
+  /// the row change.
+  ///
+  /// An announcement rather than a focus move, for the same reason [_onTapped]
+  /// gives: Flutter has no supported way to place the screen reader's cursor on
+  /// an arbitrary widget. It is a no-op with no assistive technology running.
+  void _announceChanged(WatcherState previous) {
+    if (widget.state.userInitiated) return;
+    for (final person in widget.state.people) {
+      final index =
+          previous.people.indexWhere((p) => p.link.id == person.link.id);
+      // A link that was not in the previous pass — newly paired, or previously
+      // in `unreconciled` — has no "before" to have changed from. Reading its
+      // arrival as a change would announce a row the reader has never heard.
+      if (index < 0) continue;
+      if (!person.checkedInSince(previous.people[index])) continue;
+      SemanticsService.sendAnnouncement(
+        View.of(context),
+        WatcherCopy.checkedIn(person.name),
+        Directionality.of(context),
+      );
+    }
+  }
+
   /// Reached by a tap on a notification, so the row it names has to be
   /// **found**, not merely tinted.
   ///

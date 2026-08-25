@@ -281,6 +281,203 @@ void main() {
     });
   });
 
+  /// **ADR-0010.** `warningLocalTime` fed only the alarm schedule, so whoever
+  /// called `reconcile()` posted. Measured on the POCO F3 on 2026-08-25: *"No
+  /// check-in from Ana yesterday."* at **00:24:53 CEST** against a 10:00 warning
+  /// time, because somebody else tapped and a push woke the isolate.
+  ///
+  /// The risk in the fix is not the suppression. It is everything the suppressed
+  /// run must **still** do — decide, re-arm, and go on owing the day — because a
+  /// day settled in silence is a *lost* warning, and that is the worst class of
+  /// bug this app has. Each of the four is asserted separately below, and the
+  /// last one is the one that matters: the 10:00 alarm must still speak.
+  group('a warning may not be posted before the watcher\'s chosen time', () {
+    /// 00:24 Madrid on the 17th — the measured instant, near enough. `D` is
+    /// still the 16th, so every assertion is about the same day as the rest of
+    /// this file.
+    void atTheMeasuredHour() =>
+        clock = FixedClock(at(madrid, 2026, 8, 17, 0, 24));
+
+    test('nothing is posted at 00:24', () async {
+      atTheMeasuredHour();
+
+      await service().reconcile(selfUid: selfUid);
+
+      expect(notifications.silent, isTrue,
+          reason: 'nothing at all — a correction or a cancel here would be the '
+              'family woken by a different message');
+    });
+
+    test('and the day is still OWED, not settled in silence', () async {
+      atTheMeasuredHour();
+
+      await service().reconcile(selfUid: selfUid);
+
+      final cache = await store.watcherCache(mumLink);
+      expect(cache.warningsShownFor, isEmpty,
+          reason: 'nothing was delivered, so nothing may be recorded as '
+              'standing');
+      expect(cache.lastDecidedDay, isNot(d),
+          reason: 'and ADR-0009\'s pointer must not step over a day nobody was '
+              'told about — this is the assertion that separates a LATE warning '
+              'from a LOST one');
+    });
+
+    test('and today\'s own alarm is still armed', () async {
+      atTheMeasuredHour();
+
+      await service().reconcile(selfUid: selfUid);
+
+      final days = alarms.armed[mumLink]!.map((w) => w.day).toSet();
+      expect(days, contains(today),
+          reason: 'the 10:00 alarm is what will actually speak. Suppressing the '
+              'post and skipping the arming is how this becomes silence');
+      expect(days, hasLength(WatcherReconciler.windowDays),
+          reason: 'and the whole window, since nothing about the hour changes '
+              'what should be scheduled');
+    });
+
+    test('so the 10:00 alarm then says it — late, never lost', () async {
+      // The four assertions above are only worth anything together with this
+      // one. Same store, same link, same day: the push at 00:24 said nothing and
+      // the alarm at its own time speaks.
+      atTheMeasuredHour();
+      await service().reconcile(selfUid: selfUid);
+      expect(notifications.silent, isTrue);
+
+      clock = FixedClock(at(madrid, 2026, 8, 17, 10));
+      await service().reconcile(selfUid: selfUid);
+
+      expect(notifications.calls, ['warn:$mumLink:$d']);
+      expect(notifications.bodies['warn:$mumLink:$d'],
+          'No check-in from Mum yesterday.');
+    });
+
+    test('at exactly the warning time it posts', () async {
+      // The boundary is `now >= warningLocalTime`, and it is shared with
+      // `_desiredWarnings`, which does NOT arm an instant that has arrived. Both
+      // sides of that instant have to be right or a warning falls between the
+      // alarm that was not armed and the post that was not made.
+      clock = FixedClock(at(madrid, 2026, 8, 17, 10));
+
+      await service().reconcile(selfUid: selfUid);
+
+      expect(notifications.calls, contains('warn:$mumLink:$d'));
+    });
+
+    test('and a push in the afternoon still posts immediately', () async {
+      // The bound is only the hours BEFORE the chosen time. Giving up the rest
+      // of the day would give up ADR-0008's one accepted mitigation: a push
+      // arriving at 14:00 is what rescues a 10:00 alarm that Doze held.
+      clock = FixedClock(at(madrid, 2026, 8, 17, 14));
+
+      await service().reconcile(selfUid: selfUid);
+
+      expect(notifications.calls, contains('warn:$mumLink:$d'));
+    });
+
+    test('the LOST ACCESS notice is not held back — a refusal has no hour',
+        () async {
+      // ADR-0004 separated the channels because a claim about US is not a claim
+      // about HER, and this is that separation under the new rule. The
+      // access-lost cadence — days 0, 1, 3, 7, 14 — is also the thing
+      // NotificationDelivery exists to stop being burned in silence, so gating
+      // it would re-open the defect from the other end.
+      atTheMeasuredHour();
+      reader.result = const FirestoreRead.refused(RefusedCause.unauthenticated);
+
+      await service().reconcile(selfUid: selfUid);
+
+      expect(notifications.calls, ['access:$mumLink']);
+      expect((await store.watcherCache(mumLink)).accessLostNotifiedOn, d,
+          reason: 'and its cadence advanced, because it really was delivered');
+    });
+
+    test('ADR-0009\'s catch-up is held back too, so not seven at midnight',
+        () async {
+      // The case that made this urgent rather than merely wrong: a device that
+      // has decided nothing for a week owes a warning per missed day, and a push
+      // at 00:24 would post the lot. Nothing is said, nothing is settled, and
+      // the 10:00 alarm posts them oldest-first as designed.
+      await store.saveWatcherCache(
+        mumLink,
+        WatcherCache(lastDecidedDay: day('2026-08-12')),
+      );
+      atTheMeasuredHour();
+
+      await service().reconcile(selfUid: selfUid);
+      expect(notifications.silent, isTrue);
+
+      clock = FixedClock(at(madrid, 2026, 8, 17, 10));
+      await service().reconcile(selfUid: selfUid);
+
+      expect(
+        notifications.calls,
+        [
+          'warn:$mumLink:${day('2026-08-13')}',
+          'warn:$mumLink:${day('2026-08-14')}',
+          'warn:$mumLink:${day('2026-08-15')}',
+          'warn:$mumLink:$d',
+        ],
+        reason: 'every day still owed, oldest first — none of them dropped by '
+            'the hour that would not carry them',
+      );
+    });
+
+    test('`redundant` is left alone — the reader is looking at the list',
+        () async {
+      // Deliberately NOT downgraded. `redundant` posts nothing in any case, so
+      // the rule has nothing to suppress; what downgrading would change is the
+      // ledger, leaving the day owed and posting at 10:00 about something the
+      // reader was shown at 00:24.
+      atTheMeasuredHour();
+      canDeliver = const WatcherDelivery.uniform(NotificationDelivery.redundant);
+
+      await service().reconcile(selfUid: selfUid);
+
+      expect(notifications.silent, isTrue);
+      expect((await store.watcherCache(mumLink)).warningsShownFor[d],
+          WarningOutcome.warnOnline,
+          reason: 'seeing it on screen is being told, whatever the hour');
+    });
+
+    test('the row still carries the warning nobody was sent', () async {
+      // The screen is not gated by any of this, and it must not be: the reader
+      // who opens the app at 02:00 because they could not sleep is owed the
+      // truth about the day, and the banner is about the CHANNEL rather than
+      // about this link's hour.
+      atTheMeasuredHour();
+
+      final state = await service().reconcile(selfUid: selfUid);
+
+      expect(state.people.single.standingWarning, WarningOutcome.warnOnline);
+      expect(state.warningsSilenced, isFalse,
+          reason: '"this phone will not warn you about anyone" would be a false '
+              'claim about the device — it will, at 10:00');
+    });
+
+    test('a correction due before the warning time cancels, and says nothing',
+        () async {
+      // The consequence the approval did not spell out, pinned so it is a
+      // decision rather than a side effect: corrections ride the warning channel
+      // and are therefore held back too. The false claim comes down — silently —
+      // and the sentence withdrawing it is what is given up. Recorded in
+      // `screens.md` and on `_notBefore`.
+      await service().reconcile(selfUid: selfUid);
+      expect(notifications.calls, contains('warn:$mumLink:$d'));
+
+      atTheMeasuredHour();
+      reader.result = FirestoreRead.succeeded(checkInDays: {d});
+      notifications.calls.clear();
+      await service().reconcile(selfUid: selfUid);
+
+      expect(notifications.calls, ['cancelWarn:$mumLink:$d'],
+          reason: 'the tray ends empty and honest, which is the substance of '
+              'the retraction');
+      expect((await store.watcherCache(mumLink)).lastConfirmedDay, d);
+    });
+  });
+
   group('suppressed when a check-in is cached', () {
     test('a check-in for D settles the day', () async {
       reader.result = FirestoreRead.succeeded(checkInDays: {d});
@@ -882,16 +1079,26 @@ void main() {
       // the 16th, UTC says the 15th. Asserting the alarm's zone instead would
       // prove nothing — the window is always armed in the watcher's zone
       // whatever the link says.
+      //
+      // **Asserted on the decision, not on the notification, since ADR-0010.**
+      // 01:00 is before `warningLocalTime`, so nothing is posted at that hour —
+      // and a suppressed run still decides, which is the property this case
+      // actually turns on. The counterfactual is named below rather than left
+      // implicit, because "the 16th" only means something against "the 15th".
       await seedBadZone();
       clock = FixedClock(at(madrid, 2026, 8, 17, 1));
 
-      await service().reconcile(selfUid: selfUid);
+      final state = await service().reconcile(selfUid: selfUid);
+      final granddad =
+          state.people.firstWhere((p) => p.link.id == 'granddad_ana');
 
-      expect(notifications.calls, contains('warn:granddad_ana:$d'),
+      expect(granddad.decision.day, d,
           reason: 'D is the 16th — the last completed day in Madrid');
-      expect(notifications.calls,
-          isNot(contains('warn:granddad_ana:${day('2026-08-15')}')),
-          reason: 'the 15th is what a UTC fallback would have warned about');
+      expect(granddad.decision.day, isNot(day('2026-08-15')),
+          reason: 'the 15th is what a UTC fallback would have decided about');
+      expect(granddad.decision.isWarning, isTrue,
+          reason: 'and it is a real warning, held back by the hour rather than '
+              'silenced by the day');
     });
   });
 

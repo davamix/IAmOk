@@ -396,15 +396,38 @@ class WatcherStateNotifier extends AsyncNotifier<WatcherState> {
         .reconcile(selfUid: services.selfUid);
   }
 
-  /// Re-reads everything. Called on resume, and after the harness changes the
-  /// simulated backend underneath.
-  Future<void> refresh() async {
+  /// Re-reads everything. Called on resume, on pull-to-refresh, and after the
+  /// harness changes the simulated backend underneath.
+  ///
+  /// [userInitiated] is false when something the person did not do triggered
+  /// this — today only a foreground FCM nudge (`_onForegroundPush`). It decides
+  /// one thing on this side: whether a row that **changed** is announced to a
+  /// screen reader.
+  ///
+  /// The twin of `WatchedStateNotifier.refresh`'s parameter, and the mirror
+  /// image of what it protects. There an unasked-for reconcile *removed* the one
+  /// instruction she had. Here it *replaces* a claim about a relative with a
+  /// different one, silently: `NotificationDelivery.redundant` posts nothing and
+  /// records the day as seen on the argument that the list renders the change
+  /// itself — true while `redundant` was reached by navigating here, and false
+  /// the moment a push can change the list under someone already on it. Nothing
+  /// re-reads a changed widget, so a TalkBack reader is told nothing at all and
+  /// no notification is ever coming.
+  ///
+  /// A resume is deliberately **user-initiated**: the reader is arriving at the
+  /// screen and will read the row themselves, and announcing every refresh is
+  /// noise. See `docs/ui-ux/screens.md`.
+  Future<void> refresh({bool userInitiated = true}) async {
     final services = ref.read(appServicesProvider);
-    state = await AsyncValue.guard(
+    final next = await AsyncValue.guard(
       () => services
           .watcherReconcile(watcherListShowing: true)
           .reconcile(selfUid: services.selfUid),
     );
+    final value = next.value;
+    state = userInitiated || value == null
+        ? next
+        : AsyncData(value.copyWith(userInitiated: false));
   }
 
   /// The warnings-off banner's action, then a full reconcile so the banner

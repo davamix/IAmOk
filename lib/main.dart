@@ -274,7 +274,15 @@ class _IAmOkAppState extends ConsumerState<IAmOkApp>
       await services.syncLinks();
       if (!mounted) return;
       if (WatcherScreen.isShowing) {
-        await ref.read(watcherStateProvider.notifier).refresh();
+        // `userInitiated: false` on this side too, and for the mirror-image
+        // reason. The list is on screen, so the delivery is `redundant`: nothing
+        // is posted and the day is recorded as seen, on the argument that the
+        // reader can see the row change. Nothing re-reads a changed widget, so a
+        // TalkBack reader sees nothing, hears nothing, and no notification is
+        // ever coming. The flag is what lets the screen announce it.
+        await ref.read(watcherStateProvider.notifier).refresh(
+              userInitiated: false,
+            );
       } else {
         _reconcileWatcherSide();
       }

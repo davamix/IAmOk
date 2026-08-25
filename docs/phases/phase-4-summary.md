@@ -1,15 +1,17 @@
 # Phase 4 — Firebase backbone · summary
 
-**Date:** 2026-08-25 · **Head:** `43cd1b2` · **901 Dart tests**, **30 Functions tests**,
-`flutter analyze` clean, `--debug` and `--release` both build, secrets guard clean.
+**Date:** 2026-08-25 · **921 Dart tests**, **30 Functions tests**, `flutter analyze` clean, secrets
+guard clean.
 
 **Status: implemented and reviewed at the gate. All five reviewers have run and every finding is
 fixed or recorded.** **Not signed off.**
 
-**Next session picks up two approved changes** — the owner settled both on 2026-08-25 and neither is
-implemented yet. Everything else outstanding is not code: the first Functions deploy, App Check's
-console half, and one measurement that needs the live project. Start at *Prompt to start the next
-session*.
+**Both owner-approved changes are now built** — a push may not post a warning before
+`warningLocalTime` ([ADR-0010](../architecture/decisions/0010-a-push-may-not-post-a-warning-early.md)),
+and a row that changes under a screen reader is announced. **Neither has been run on hardware**, and
+both were made conditional on a device run. Everything else outstanding is not code: the first
+Functions deploy, App Check's console half, one measurement that needs the live project, and one
+open decision. Start at *Prompt to start the next session*.
 
 ---
 
@@ -41,6 +43,14 @@ been faked**, by exactly the false green the phase had already produced once.
 
 Five review rounds followed: `39764d9` architecture, `d322a12` security, `df586e7` testing,
 `fcca7b2` infrastructure, `43cd1b2` UI/UX.
+
+Then the two changes the reviews produced and the owner approved, both built on 2026-08-25 and
+**neither yet run on hardware**:
+
+| Change | What |
+|---|---|
+| **ADR-0010 — a push may not post a warning early** | `WatcherReconcileService._notBefore` downgrades the **warning** channel to `unavailable` until `now >= warningLocalTime` in the watcher's zone. Suppresses the post; leaves the day owed, the alarm armed and the row honest. Access-lost is not gated; corrections are, and that is recorded as a decision. |
+| **A row that changes under a screen reader is announced** | `WatcherState.userInitiated` (false only for a foreground push) plus `WatchedPersonState.checkedInSince`, which asks the **cache** whether the warned day is now confirmed rather than inferring it from the row going quiet. One approved string; the two candidates in `screens.md` still do not ship. |
 
 ---
 
@@ -101,8 +111,11 @@ is exactly a watcher-side failure skipping the watched side. Now `try`/`finally`
 order swapped.
 
 **4. A push can post a warning at any hour — measured, at 00:24.** `warningLocalTime` bounds when
-the *alarm* asks, not when a warning may be posted. **Decided and not yet implemented** — see
-*Prompt to start the next session*.
+the *alarm* asks, not when a warning may be posted. **Decided and now built** —
+[ADR-0010](../architecture/decisions/0010-a-push-may-not-post-a-warning-early.md). The warning
+channel is handed `NotificationDelivery.unavailable` before the reader's hour, which is the one
+substitution that suppresses the post while leaving the day **owed**: nothing recorded, ADR-0009's
+pointer not advanced, the 10:00 alarm still armed. Not yet run on hardware.
 
 **5. The deploy checklist asserted the opposite of the truth.** `deploy-notes.md` still said
 `functions:list` returns `SERVICE_DISABLED`; it has been enabled since 2026-08-21. That is the file
@@ -166,12 +179,30 @@ rather than amended". The measurement half is done. The choice is not:
   verify-before-speaking design would have two deciders and could give two answers about whether
   someone's relative is all right.
 
-**2 and 3 are DECIDED — 2026-08-25 — and are the next session's work.** Both are implementable
-without another decision; neither is implemented yet. See *Prompt to start the next session*.
+**2 and 3 were DECIDED — 2026-08-25 — and are now BUILT.** A push may not post a warning before
+`warningLocalTime` (ADR-0010, one static function in `WatcherReconcileService`, eleven tests,
+mutation-checked), and a row that changes under a screen reader is announced
+(`WatcherState.userInitiated` + `WatchedPersonState.checkedInSince`, six widget tests). Both were
+made conditional on a device run and **neither has had one**. Option 1's cost — item 1 above — is
+the decision still open, and the owner asked for the number before any ADR is drafted.
 
 ---
 
-## Still owed, and none of it is code
+## Still owed
+
+**Two device runs, for code that is already written.** Both changes above were approved on the
+condition that they are proved on hardware, and neither has been:
+
+- **ADR-0010, re-running *Does a Doze push show the user anything*.** The expected result flips from
+  a warning at 00:24 to **three** things — no notification, today's alarm still armed, and the day
+  still owed — and the third has to be read from the **pulled store**, because a held warning and a
+  lost one look identical at 00:24. Then move the clock past 10:00 and assert it posts. The table is
+  in `device-matrix.md`.
+- **The announcement, with TalkBack actually on.** The widget tests assert the platform message; only
+  the device answers whether TalkBack speaks it, and whether it arrives after the row has changed
+  rather than over the top of it.
+
+**And the rest, none of which is code:**
 
 - **The first Functions deploy.** The Cloud Functions API is enabled (three clean runs); the other
   six 2nd-gen prerequisites are **unverified** and cannot be checked from this machine — `gcloud` is
@@ -224,74 +255,48 @@ Start it detached with output redirected to a file.
 > **deliberately frozen**; read it for the four things that went wrong earlier in the phase, never
 > for current state.
 >
-> **Steps 4–7 are built and reviewed at the gate.** All five reviewers have run, one commit each,
-> every finding fixed or recorded. 901 Dart tests, 30 Functions tests, `flutter analyze` clean.
-> ADR-0008's deciding measurement **passed both its questions** in forced deep Doze, mutation-checked
-> against `priority: 'normal'`.
+> **Steps 4–7 are built and reviewed at the gate**, and so are the two changes the owner approved on
+> 2026-08-25. 921 Dart tests, 30 Functions tests, `flutter analyze` clean. ADR-0008's deciding
+> measurement **passed both its questions** in forced deep Doze, mutation-checked against
+> `priority: 'normal'`.
 >
-> **Your first job is two changes the owner approved on 2026-08-25 and nobody has implemented.**
-> Both are one-file changes using machinery that already exists and already has tests. Neither may
-> ship without a device run.
->
-> ---
->
-> ### 1. A push may not post a warning before `warningLocalTime`
->
-> **Why.** `warningLocalTime` feeds exactly one thing — `_desiredWarnings` at
-> `watcher_reconciler.dart:681`, the alarm schedule. It appears nowhere in the decision path, so
-> whoever calls `reconcile()` posts. That was invisible until Phase 4 because the alarm was the only
-> *unattended* caller. FCM is the second, and it fires on **somebody else's** action. Measured on
-> 2026-08-25 at **00:24:53 CEST**: *"No check-in from Ana yesterday."*, `warningLocalTime` 10:00.
->
-> **The rule.** Post only when `now >= today's warningLocalTime` in the **watcher's** zone. A push at
-> 14:00 against a 10:00 warning time still posts immediately — the acceleration benefit is kept for
-> the rest of the day, including rescuing an alarm Doze made late. Only the hours before the
-> watcher's chosen time are given up, which is the window nobody asked to be woken in.
->
-> **THE TRAP, and it is the whole risk.** A suppressed run must still **decide**, must still
-> **re-arm**, and must **not** record the day in `warningsShownFor` — otherwise the 10:00 alarm finds
-> it settled and says nothing, which is a *lost warning*, the worst class this app has. **Do not
-> invent a state.** `NotificationDelivery.unavailable` already means exactly *not posted, not
-> consumed, still owed at the next reconcile* (`notification_delivery.dart:61`), and it already has
-> tests.
->
-> **Where it goes.** `_reconcileLink` (`watcher_reconcile_service.dart:414`) already takes a
-> `WatcherDelivery` **per link** and has `now`, `watcherZone` and `link` in scope, so the downgrade
-> is expressible there without touching the domain layer or the enum. `WatcherDelivery` has two
-> channels — downgrade **`warning` only**. The access-lost channel must not be time-gated: a refusal
-> is not tied to an hour.
->
-> Note `catchUpWarnings` already folds in the same delivery state, so ADR-0009's catch-up is covered
-> by the same change — which is the case that would otherwise post seven at midnight.
->
-> **Prove it on the device**, and re-run the measurement in `device-matrix.md` § *Does a Doze push
-> show the user anything*. The expected result flips from "a warning at 00:24" to **no notification,
-> the alarm still armed, and the day still owed** — and the third is the one to check by pulling the
-> store, not by looking at the screen.
+> **Nothing on this list is a code change.** Two of them are device runs for code that is already
+> written and was approved on condition of exactly that; the rest are the owner's calls and the
+> console.
 >
 > ---
 >
-> ### 2. Announce a row that changes under a screen reader
+> ### 1. Prove ADR-0010 on the device — the re-run that closes the 00:24 finding
 >
-> **Why.** `redundant` means *the watcher is looking at the screen that already shows this*, so
-> nothing posts and the day is recorded as seen. That held while `redundant` was reached by
-> **navigating** here. A foreground nudge makes it also mean *the list is open and something
-> arrived* — and nothing re-reads a changed widget, so a TalkBack user who heard *"Mum. No check-in
-> from Mum yesterday."* is now looking at *"Everything OK"* with no announcement, no reason to swipe
-> back, and no notification ever coming.
+> **What changed.** A warning is now posted only once `now >= today's `warningLocalTime`` in the
+> watcher's zone. It is one static function, `WatcherReconcileService._notBefore`, which hands the
+> domain `NotificationDelivery.unavailable` on the **warning** channel — the state that already
+> means *not posted, not consumed, still owed*. Access-lost is deliberately not gated; corrections
+> are, and `screens.md` records why.
 >
-> **The approved string is in `docs/ui-ux/screens.md`**, with the two candidates that are
-> deliberately **not** shipping yet:
+> **The measurement to re-run** is `device-matrix.md` § *Does a Doze push show the user anything*,
+> which is where the 00:24 warning was found. It now has a three-row expectation table. **The third
+> row is the whole point**: a *held* warning and a *lost* one are indistinguishable at 00:24 and
+> differ only at 10:00, so the day being still owed has to be read out of the **pulled store**
+> — `warnings_shown` empty for `D`, `last_decided_day` below `D` — and never off the screen. Then
+> move the debug clock past the warning time, reconcile, and assert the warning **is** posted. A run
+> that stops at *"nothing appeared"* has measured the wrong half and would tick a lost warning as a
+> pass.
 >
-> > *"Mum checked in. Everything OK."*
+> Eleven tests pin this in `watcher_reconcile_service_test.dart`, and five of them fail against a
+> build with the gate removed. That is the VM half; the device half is what is owed.
 >
-> **Two conditions, both required**: the person's rendered status **changed**, and the refresh was
-> **not** user-initiated. `WatchedStateNotifier.refresh` already carries a `userInitiated` flag for
-> the `tapFailed` fix; the watcher side needs the same signal. Announcing every refresh is noise, and
-> on a resume the reader is arriving at the screen anyway.
+> ### 2. Prove the announcement with TalkBack actually running
 >
-> **The mechanism exists** — `SemanticsService.sendAnnouncement`, used at `watcher_screen.dart:299`.
-> This changes **nothing** about what is posted or consumed.
+> A row that goes from a standing warning to *"Mum checked in. Everything OK."* is announced, but
+> only when the pass was **not** user-initiated and only when the warned day is now **confirmed** —
+> the second condition asks `WatcherCache.lastConfirmedDay`, not the row, because a warning can lapse
+> without anybody tapping and *"Mum checked in"* would then be a false claim about a person.
+>
+> The widget tests assert the platform message on `SystemChannels.accessibility`. What they cannot
+> answer: whether TalkBack speaks it, and whether it lands **after** the row has changed rather than
+> over the top of the row it is about. Turn TalkBack on, open the list on a person with a standing
+> warning, and push.
 >
 > ---
 >

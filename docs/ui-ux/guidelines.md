@@ -35,6 +35,13 @@ ask a family member. The screen answering that question is the point.
 a *missed* day makes noise. Daily "everything is fine" notifications train a family to swipe away
 the one notification that matters, and once trained they cannot be untrained.
 
+> **And the noise waits for the hour the reader chose.** A warning is not posted before
+> `warningLocalTime` in the watcher's own zone
+> ([ADR-0010](../architecture/decisions/0010-a-push-may-not-post-a-warning-early.md)). That hour
+> used to bound only when the *alarm asked*, so a push triggered by somebody else's tap woke a
+> family at 00:24 with a warning about a past day — measured, not hypothesised. The day stays
+> **owed**, so it is said at 10:00 rather than lost, and a push later in the day still posts at once.
+
 **5. Never claim more than the device knows.** When the watcher's phone cannot reach Firestore it
 says so, in different words: *"No check-in received from Mum yesterday — your phone has been
 offline since 22:10."* Silence would be a silent failure; a flat "she didn't check in" is a claim

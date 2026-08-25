@@ -278,6 +278,21 @@ follows `rowLabel`'s shape — name the person, then their state, as one utteran
 refresh must **not** have been user-initiated. Announcing every refresh is noise; on a resume the
 reader is arriving at the screen anyway and will read the row themselves.
 
+**Built 2026-08-25.** `WatcherState.userInitiated` carries the second condition — false only for a
+foreground push — and `WatchedPersonState.checkedInSince` decides the first.
+
+**The change is not "the row got better", and the difference is a claim about a person.** *"Mum
+checked in"* has to be true. A row can reach *"Everything OK"* from a standing warning with nobody
+having tapped: a *"your phone has been offline… Mum was marked away until Saturday"* stops being
+renderable the moment a read succeeds, because the away covers the day and the decision is now
+silent — and the last check-in this device saw has not moved. So the condition asks the **cache**,
+not the row: the day the warning was about must now be confirmed. That is true for the correction,
+which is the case this exists for, and false for every way a warning can simply lapse.
+
+A row moving into or out of a **revoked** or a **lost access** state is excluded on both sides. Each
+renders something else entirely, so each is a different sentence — and the two candidates below are
+exactly those sentences, neither of which is approved.
+
 **Deliberately not shipping yet**, and named here so nobody adds them casually — each needs the same
 approval this one got:
 
@@ -786,3 +801,39 @@ string is frozen now. If a watcher marks her away, she should probably read who 
 screen may simultaneously say nobody is set up — reminders are armed regardless of the audience by
 deliberate design, because they exist for her own routine. Either an empty-audience variant, or an
 explicit acceptance once onboarding guarantees pairing before reminders arm.
+
+### A warning is not posted before the reader's chosen hour — settled 2026-08-25
+
+Every string above says *what* is said. This says **when**, and it was missing.
+
+`Link.warningLocalTime` — the hour the watcher chose, 10:00 by default — bounded only when the
+*alarm asks*. Nothing in the decision path read it, so any caller posted whatever was owed, and a
+warning is owed from the moment the day completes. Measured on the POCO F3:
+
+> *"No check-in from Ana yesterday."* — posted **00:24:53 CEST**, against a `warningLocalTime` of
+> 10:00, because somebody else tapped and the resulting push woke the isolate.
+
+**The rule: a warning is posted only once `now >= today's `warningLocalTime`` in the watcher's own
+zone.** A push at 14:00 against a 10:00 warning still posts immediately — the acceleration is kept
+for the rest of the day, including rescuing an alarm Doze made late. Only the hours before the
+reader's chosen time are given up, which is the window nobody asked to be woken in.
+[ADR-0010](../architecture/decisions/0010-a-push-may-not-post-a-warning-early.md) carries the
+reasoning and the trap.
+
+**The day is still owed.** A held run decides, arms its alarms, and records nothing — so the 10:00
+alarm finds the warning still owed and says it. Late, never lost.
+
+**The *lost access* notice is not held.** A refusal is a claim about **us**, is not tied to an hour,
+and its decaying cadence is exactly what must not burn in silence.
+
+**A correction due before the hour cancels rather than replaces**, and this is a consequence of the
+rule rather than part of what was asked for. A correction rides the *Missed check-ins* channel at
+the warning's own id, so holding the channel holds the retraction too: the false claim comes out of
+the tray silently, and the sentence withdrawing it is what is given up. Chosen deliberately — a
+correction is good news, and good news may not wake a family at 00:24 — and the row still tells
+whoever opens the app the truth. The alternative, posting *"Correction: Mum did check in
+yesterday."* at 00:24, is the same wake-up the rule exists to prevent.
+
+**Nothing about the screen is gated by the hour.** The row still renders the standing warning, and
+*"This phone will not warn you about anyone."* still means the **channel** is off, not that this
+link's hour has yet to arrive.

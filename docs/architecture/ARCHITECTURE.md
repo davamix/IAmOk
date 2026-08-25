@@ -506,6 +506,25 @@ fresh or knowably stale:
 > *read*, not about what a human saw, and a phone with notifications revoked is exactly the phone
 > whose health panel must still be able to explain itself when it is finally opened.
 
+> **And a warning is not posted before the reader's chosen hour** ([ADR-0010](decisions/0010-a-push-may-not-post-a-warning-early.md),
+> added in Phase 4). `warningLocalTime` bounded only when the *alarm asks*, so any caller posted
+> whatever these steps owed — invisible while the alarm was the only **unattended** caller. FCM is
+> the second, and it fires on somebody else's action: measured on the POCO F3 at **00:24:53 CEST**,
+> *"No check-in from Ana yesterday."*, against a 10:00 warning time, because a check-in was written
+> and a push woke the isolate. With ADR-0009's catch-up that same push can post seven.
+>
+> The steps above are unchanged — a held run still **decides**. What changes is delivery: the
+> warning channel is handed `unavailable` until `now >= warningLocalTime` in the **watcher's** zone,
+> so nothing is posted, nothing is recorded in `warningsShownFor`, `lastDecidedDay` does not advance,
+> and the alarm window is armed exactly as before. The day stays **owed**, and the alarm speaks at
+> the hour the reader chose. A push later in the day still posts immediately, which is what keeps
+> ADR-0008's one mitigation.
+>
+> **Step 5's channel is deliberately not gated.** A refusal is a claim about *us*, is not tied to an
+> hour, and is neither transient nor self-healing. Corrections *are* gated, because they ride the
+> warning channel at the warning's own id — before the hour a standing false warning is cancelled
+> rather than replaced, which is the path `redundant` already takes.
+
 Steps 5, 6 and 7 matter for the same reason. Silence would be a silent failure; a flat "she didn't
 check in" would be a claim the device cannot support; and "your phone has been offline" is a claim
 about the *device* that is false whenever the server was reached and said no. The notification says

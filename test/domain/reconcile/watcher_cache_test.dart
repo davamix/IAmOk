@@ -148,7 +148,8 @@ void main() {
       final cache = WatcherCache(
         warningsShownFor: {day('2026-08-05'): WarningOutcome.warnOnline, day('2026-08-02'): WarningOutcome.warnOnline},
       );
-      final corrected = cache.withCorrectionFor(day('2026-08-05'));
+      final corrected =
+          cache.withCorrectionFor(day('2026-08-05'), delivered: true);
       expect(corrected.warningsShownFor, {day('2026-08-02'): WarningOutcome.warnOnline});
       expect(corrected.lastConfirmedDay, day('2026-08-05'));
     });
@@ -158,15 +159,83 @@ void main() {
         warningsShownFor: {day('2026-08-02'): WarningOutcome.warnOnline},
         lastConfirmedDay: day('2026-08-05'),
       );
-      expect(cache.withCorrectionFor(day('2026-08-02')).lastConfirmedDay,
-          day('2026-08-05'));
+      expect(
+        cache
+            .withCorrectionFor(day('2026-08-02'), delivered: true)
+            .lastConfirmedDay,
+        day('2026-08-05'),
+      );
     });
 
     test('correcting a day that was never warned about is harmless', () {
-      final corrected =
-          const WatcherCache.empty().withCorrectionFor(day('2026-08-05'));
+      final corrected = const WatcherCache.empty()
+          .withCorrectionFor(day('2026-08-05'), delivered: true);
       expect(corrected.warningsShownFor, isEmpty);
       expect(corrected.lastConfirmedDay, day('2026-08-05'));
+    });
+  });
+
+  // The ledger half of ADR-0010's follow-up. The warning path gates its ledger
+  // WRITE on delivery; this path gated nothing, so a retraction found before the
+  // reader's hour cancelled the warning, dropped the day, and left no record
+  // anywhere that a sentence was owed.
+  group('a retraction that could not be spoken stays owed', () {
+    final warned = WatcherCache(
+      warningsShownFor: {day('2026-08-05'): WarningOutcome.warnOnline},
+    );
+
+    test('held: the day leaves the tray ledger and enters the owed set', () {
+      final held = warned.withCorrectionFor(day('2026-08-05'), delivered: false);
+
+      // The false claim comes down either way — that half is load-bearing.
+      expect(held.warningsShownFor, isEmpty,
+          reason: 'the warning was cancelled, so nothing is standing');
+      expect(held.correctionsOwedFor, {day('2026-08-05')});
+      expect(held.lastConfirmedDay, day('2026-08-05'),
+          reason: 'evidence about HER is not a delivery record');
+    });
+
+    test('and is cleared once it is actually spoken', () {
+      final held = warned.withCorrectionFor(day('2026-08-05'), delivered: false);
+      final spoken =
+          held.withCorrectionFor(day('2026-08-05'), delivered: true);
+      expect(spoken.correctionsOwedFor, isEmpty);
+      expect(spoken.warningsShownFor, isEmpty);
+    });
+
+    test('holding it twice owes it once', () {
+      final once = warned.withCorrectionFor(day('2026-08-05'), delivered: false);
+      final twice = once.withCorrectionFor(day('2026-08-05'), delivered: false);
+      expect(twice.correctionsOwedFor, {day('2026-08-05')});
+      expect(twice, once, reason: 'reconcile() is idempotent by design');
+    });
+
+    test('a delivered correction never owes anything', () {
+      expect(
+        warned.withCorrectionFor(day('2026-08-05'), delivered: true)
+            .correctionsOwedFor,
+        isEmpty,
+      );
+    });
+
+    // Sec 10 step 2: a revoked link's warnings are WITHDRAWN, never retracted.
+    // "Mum did check in" is a claim this device may not make about a person it
+    // is no longer entitled to read about.
+    test('revocation withdraws the owed retraction with the warnings', () {
+      final held = warned.withCorrectionFor(day('2026-08-05'), delivered: false);
+      final withdrawn = held.withWarningsWithdrawn();
+      expect(withdrawn.correctionsOwedFor, isEmpty);
+      expect(withdrawn.warningsShownFor, isEmpty);
+    });
+
+    test('withWarningsWithdrawn still fires when ONLY a retraction is owed', () {
+      // The early return used to test `warningsShownFor.isEmpty` alone, which is
+      // exactly the state a held correction leaves behind: no standing warning,
+      // one owed sentence. Returning `this` there would carry the retraction
+      // straight through the revocation that must drop it.
+      final held = warned.withCorrectionFor(day('2026-08-05'), delivered: false);
+      expect(held.warningsShownFor, isEmpty, reason: 'the precondition');
+      expect(held.withWarningsWithdrawn().correctionsOwedFor, isEmpty);
     });
   });
 

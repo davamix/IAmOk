@@ -35,6 +35,7 @@ void main() {
     accessLostCause: RefusedCause.permissionDenied,
     accessLostNotifiedOn: day('2026-08-07'),
     lastDecidedDay: day('2026-08-09'),
+    correctionsOwedFor: {day('2026-08-06')},
   );
 
   group('the four rebuild sites carry lastDecidedDay', () {
@@ -72,6 +73,42 @@ void main() {
     });
   });
 
+  // The identical trap, one field later. A held retraction that goes missing on
+  // the way through is a sentence a family never hears about a day their
+  // relative was fine — and, like the pointer above, nothing at the call site
+  // reads as a defect when it happens: the set simply comes back empty.
+  group('the four rebuild sites carry correctionsOwedFor', () {
+    test('clearAway', () {
+      expect(full.clearAway().correctionsOwedFor, {day('2026-08-06')});
+    });
+
+    test('withAccessLostOn — a DIFFERENT cause, so it really rebuilds', () {
+      final next = full.withAccessLostOn(
+        day('2026-08-12'),
+        RefusedCause.appCheckRejected,
+      );
+      expect(next.accessLostCause, RefusedCause.appCheckRejected);
+      expect(next.correctionsOwedFor, {day('2026-08-06')});
+    });
+
+    test('withAccessRestored', () {
+      final next = full.withAccessRestored();
+      expect(next.accessLostSince, isNull, reason: 'it did clear what it must');
+      expect(next.correctionsOwedFor, {day('2026-08-06')});
+    });
+
+    test('applyRead — the one that runs on every single reconcile', () {
+      final next = full.applyRead(
+        const FirestoreRead.succeeded(),
+        at: at(madrid, 2026, 8, 12, 10),
+      );
+      expect(next.away, isNull, reason: 'a successful read overwrites wholesale');
+      expect(next.accessLostSince, isNull, reason: 'access is provably back');
+      expect(next.correctionsOwedFor, {day('2026-08-06')},
+          reason: 'a retraction already established is not access-lost state');
+    });
+  });
+
   group('the pointer is monotonic', () {
     test('it does not walk backwards on a device whose clock moved back', () {
       // §3 lists a clock change among the seven cases reconcile() collapses, and
@@ -103,5 +140,14 @@ void main() {
     // A `==` that ignored the new field would make every assertion in this file
     // and in the reconciler's suite compare equal by accident.
     expect(full, isNot(equals(full.copyWith(lastDecidedDay: day('2026-08-11')))));
+    expect(
+      full,
+      isNot(equals(full.copyWith(correctionsOwedFor: {day('2026-08-04')}))),
+    );
+    expect(
+      full,
+      isNot(equals(full.copyWith(correctionsOwedFor: const <DayKey>{}))),
+      reason: 'including when the difference is a retraction going missing',
+    );
   });
 }

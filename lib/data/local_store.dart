@@ -36,8 +36,11 @@ class LocalStore {
   /// visible symptom is every standing warning firing again.
   ///
   /// **v2** adds `reconcile_lock`; **v3** re-keys it by scope. See
-  /// [acquireReconcileLock].
-  static const int schemaVersion = 4;
+  /// [acquireReconcileLock]. **v4** adds `last_decided_day` (ADR-0009). **v5**
+  /// adds `corrections_owed` — a retraction that was established but could not
+  /// be spoken, which is lost state of exactly the kind the paragraph above is
+  /// about.
+  static const int schemaVersion = 5;
 
   static const String defaultDatabaseName = 'i_am_ok.db';
 
@@ -210,6 +213,19 @@ class LocalStore {
                   'ALTER TABLE watcher_cache ADD COLUMN last_decided_day TEXT',
                 );
               }
+            // A held retraction. Additive, and idempotent for the reason the v4
+            // block spells out — `onDowngrade` accepts a newer file and rewrites
+            // its version down, so this step can be replayed against a schema
+            // that already has the table. `IF NOT EXISTS` rather than an
+            // inspection because a whole table can say so itself.
+            //
+            // Nothing is back-filled, and nothing can be: a store written by v4
+            // has already dropped every day whose retraction it could not speak,
+            // because dropping them unconditionally is the defect this table
+            // exists to fix. An upgrading install starts owing nothing, which is
+            // the honest answer rather than a guessed one.
+            case 5:
+              await db.execute(_correctionsOwedTable);
             default:
               throw StateError('no migration to v$v');
           }
@@ -336,6 +352,18 @@ class LocalStore {
       PRIMARY KEY (link_id, day)
     )
     ''',
+    // `correctionsOwedFor` — days whose warning has been DISPROVED and taken
+    // down, but whose retraction has not yet been spoken out loud.
+    //
+    // Deliberately not a column on `warnings_shown`: a day is in exactly one of
+    // the two states, never both, and `warnings_shown` means *standing*. See
+    // `WatcherCache.correctionsOwedFor` for the row that renders a false warning
+    // if the two are merged.
+    //
+    // No `outcome`: the retracted message does not matter, only the day. What
+    // gets posted is `NotificationCopy.correctionBody`, which is built from the
+    // day and the watched name.
+    _correctionsOwedTable,
     // What we believe is armed on the platform. §6's `pendingAlarms`.
     //
     // The reconciler diffs its desired set against this, so it is the answer to
@@ -381,6 +409,18 @@ class LocalStore {
     ''',
     _reconcileLockTable,
   ];
+
+  /// Named rather than inlined in [_schema] **because the v5
+  /// migration executes the same string**. Two copies of a CREATE TABLE are two
+  /// schemas that agree until somebody edits one, and the one that would drift
+  /// is the migration — the path no fresh install ever runs.
+  static const String _correctionsOwedTable = '''
+    CREATE TABLE IF NOT EXISTS corrections_owed (
+      link_id TEXT NOT NULL REFERENCES links(id) ON DELETE CASCADE,
+      day     TEXT NOT NULL,
+      PRIMARY KEY (link_id, day)
+    )
+    ''';
 
   /// One row **per scope**. See [acquireReconcileLock] for why it exists, and
   /// why one global row was wrong.
@@ -496,6 +536,7 @@ class LocalStore {
         await txn.delete('settings', where: 'key = ?', whereArgs: [_keySelfUid]);
         for (final table in [
           'warnings_shown',
+          'corrections_owed',
           'watcher_cache',
           'pending_alarms',
           'check_ins',
@@ -858,8 +899,15 @@ class LocalStore {
       whereArgs: [linkId],
     );
     final warnings = await _warningsShown(linkId);
+    final owed = await _correctionsOwed(linkId);
     if (rows.isEmpty) {
-      return WatcherCache(warningsShownFor: warnings);
+      // A link with no `watcher_cache` row has still been able to accumulate
+      // both of these — they live in their own tables — so neither may be
+      // dropped on this branch.
+      return WatcherCache(
+        warningsShownFor: warnings,
+        correctionsOwedFor: owed,
+      );
     }
     final row = rows.first;
 
@@ -879,6 +927,7 @@ class LocalStore {
       away: away,
       lastConfirmedDay: _day(row['last_confirmed_day']),
       warningsShownFor: warnings,
+      correctionsOwedFor: owed,
       lastReconcileAt: _instant(row['last_reconcile_at']),
       accessLostSince: _day(row['access_lost_since']),
       accessLostCause: _refusedCause(row['access_lost_cause']),
@@ -924,7 +973,32 @@ class LocalStore {
             'outcome': entry.value.name,
           });
         }
+
+        // Same wholesale replacement, same reason. A merge would let a day the
+        // reconciler has just retracted out loud survive as still owed, and the
+        // watcher would be told about it again every reconcile thereafter.
+        await txn.delete(
+          'corrections_owed',
+          where: 'link_id = ?',
+          whereArgs: [linkId],
+        );
+        for (final day in cache.correctionsOwedFor) {
+          await txn.insert('corrections_owed', {
+            'link_id': linkId,
+            'day': day.toString(),
+          });
+        }
       });
+
+  Future<Set<DayKey>> _correctionsOwed(String linkId) async {
+    final rows = await _db.query(
+      'corrections_owed',
+      columns: ['day'],
+      where: 'link_id = ?',
+      whereArgs: [linkId],
+    );
+    return {for (final row in rows) DayKey.parse(row['day']! as String)};
+  }
 
   Future<Map<DayKey, WarningOutcome>> _warningsShown(String linkId) async {
     final rows = await _db.query(
@@ -1200,6 +1274,7 @@ class LocalStore {
       'check_ins',
       'watcher_cache',
       'warnings_shown',
+      'corrections_owed',
       'pending_alarms',
       'self_away',
       'reconcile_lock',
@@ -1213,6 +1288,7 @@ class LocalStore {
   Future<void> wipe() => _db.transaction((txn) async {
         for (final table in [
           'warnings_shown',
+          'corrections_owed',
           'watcher_cache',
           'pending_alarms',
           'check_ins',

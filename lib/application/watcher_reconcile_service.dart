@@ -605,13 +605,18 @@ class WatcherReconcileService {
     //
     //    **[WatcherDelivery.notBefore] is a third route in, and it is not the
     //    same case.**
-    //    There the warning really was posted and really was read, so the
-    //    retraction is genuinely given up rather than merely redundant: the
-    //    false claim comes down silently and no sentence says it was withdrawn.
-    //    That is the quieter of the two errors at 00:24 — a correction is good
-    //    news, and good news may not wake a family — and the row still renders
-    //    the truth for whoever opens the app. Named here rather than left to be
-    //    inferred from a shared field.
+    //    There the warning really was posted and really was read, so a sentence
+    //    is genuinely owed — where `redundant` has none. The false claim still
+    //    comes down silently, because a correction is good news and good news
+    //    may not wake a family at 00:24, and the row still renders the truth for
+    //    whoever opens the app.
+    //
+    //    **This used to say the retraction was "genuinely given up".** It was,
+    //    and that was the defect: the day left `warningsShownFor` here, and the
+    //    next pass computes corrections from days that are still warned. Both
+    //    `unavailable` cases now leave it in `WatcherCache.correctionsOwedFor`
+    //    and the first pass that can post drains it — so this loop runs again,
+    //    for the same day, with `shouldPostCorrections` true. Late, never lost.
     for (final correction in result.corrections) {
       if (!result.shouldPostCorrections) {
         await notifications.cancelWarning(correction.linkId, correction.day);

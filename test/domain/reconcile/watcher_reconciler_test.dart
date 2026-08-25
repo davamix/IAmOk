@@ -137,6 +137,113 @@ void main() {
       expect(result.corrections, [Correction(linkId: mum.id, day: theDay)]);
     });
 
+    // The ledger half. The warning path gates its ledger WRITE on delivery; this
+    // path gated nothing, so a retraction that could not be spoken was dropped
+    // rather than held, and no later pass could find it: corrections are
+    // computed from days that are still warned, and it was no longer one.
+    group('a retraction nobody could be told about stays owed', () {
+      test('unavailable holds it — the muted phone, and ADR-0010s hour', () {
+        final result = reconcile(
+          cache: warned,
+          read: FirestoreRead.succeeded(checkInDays: {theDay}),
+          delivery: NotificationDelivery.unavailable,
+        );
+
+        // The false claim still comes down. The caller cancels on this list
+        // whenever `shouldPostCorrections` is false, and that half is what makes
+        // holding better than leaving a known lie in the tray.
+        expect(result.corrections, [Correction(linkId: mum.id, day: theDay)]);
+        expect(result.shouldPostCorrections, isFalse);
+        expect(result.cache.warningsShownFor, isEmpty,
+            reason: 'nothing is standing once the notification is cancelled');
+        expect(result.cache.correctionsOwedFor, {theDay},
+            reason: 'and the sentence is recorded as still owed');
+      });
+
+      test('redundant consumes it — the reader is watching the row correct', () {
+        final result = reconcile(
+          cache: warned,
+          read: FirestoreRead.succeeded(checkInDays: {theDay}),
+          delivery: NotificationDelivery.redundant,
+        );
+        expect(result.cache.correctionsOwedFor, isEmpty,
+            reason: 'seeing it on screen is being told');
+      });
+
+      test('an owed day is re-emitted by a later pass and then cleared', () {
+        final held = reconcile(
+          cache: warned,
+          read: FirestoreRead.succeeded(checkInDays: {theDay}),
+          delivery: NotificationDelivery.unavailable,
+        ).cache;
+
+        final spoken = reconcile(
+          cache: held,
+          read: FirestoreRead.succeeded(checkInDays: {theDay}),
+        );
+        expect(spoken.corrections, [Correction(linkId: mum.id, day: theDay)]);
+        expect(spoken.shouldPostCorrections, isTrue);
+        expect(spoken.cache.correctionsOwedFor, isEmpty);
+      });
+
+      test('an owed day is emitted even when the day is no longer in the read',
+          () {
+        // Its evidence was banked in `lastConfirmedDay` when the correction was
+        // first computed. A read window that has since rolled past the day, or a
+        // refusal, does not un-disprove it — and making the sentence wait for a
+        // fresh read strands it behind exactly the outage that delayed it.
+        final held = reconcile(
+          cache: warned,
+          read: FirestoreRead.succeeded(checkInDays: {theDay}),
+          delivery: NotificationDelivery.unavailable,
+        ).cache;
+
+        final spoken = reconcile(
+          cache: held,
+          read: const FirestoreRead.refused(RefusedCause.unauthenticated),
+        );
+        expect(spoken.corrections, [Correction(linkId: mum.id, day: theDay)]);
+      });
+
+      test('a REVOKED link drops the owed retraction rather than posting it',
+          () {
+        // §10 step 2, one reconcile later. The corrections loop runs before the
+        // revocation branch, so without `link.isAccepted` guarding the owed set
+        // as well, revoking would post the very retraction the withdrawal
+        // exists to avoid — about a person this watcher may no longer read
+        // about.
+        final held = reconcile(
+          cache: warned,
+          read: FirestoreRead.succeeded(checkInDays: {theDay}),
+          delivery: NotificationDelivery.unavailable,
+        ).cache;
+
+        final revoked = reconcile(
+          link: mum.copyWith(status: LinkStatus.revoked),
+          cache: held,
+          read: FirestoreRead.succeeded(checkInDays: {theDay}),
+        );
+        expect(revoked.corrections, isEmpty);
+        expect(revoked.cache.correctionsOwedFor, isEmpty,
+            reason: 'withdrawn with the warnings, not carried forward');
+      });
+
+      test('holding it does not put the warning back on the ROW', () {
+        // The one thing to prove rather than reason about. `standingWarning`
+        // reads `warningsShownFor[decision.day]`, and at this hour `decision.day`
+        // IS the corrected day — so a design that had parked the owed day back
+        // in that map would render "No check-in from mum yesterday." about a day
+        // this very cache has just recorded a check-in for.
+        final result = reconcile(
+          cache: warned,
+          read: FirestoreRead.succeeded(checkInDays: {theDay}),
+          delivery: NotificationDelivery.unavailable,
+        );
+        expect(result.decision.day, theDay, reason: 'the precondition');
+        expect(result.cache.warningsShownFor[result.decision.day], isNull);
+      });
+    });
+
     test('a REVOKED link withdraws rather than corrects, even on a good read',
         () {
       // §10 step 2: nothing disproves the warning — the link simply ended — so

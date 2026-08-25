@@ -182,21 +182,25 @@ class WatcherReconcileResult {
   ///   which is the premise this bullet rests on, finally made true for someone
   ///   who cannot see the row change.
   /// * **`unavailable` because the platform cannot post.** `POST_NOTIFICATIONS`
-  ///   revoked, or this channel muted. There is no replacement to make.
+  ///   revoked, or this channel muted. There is no replacement to make **now**.
   ///
   /// * **`unavailable` because the hour has not arrived** —
   ///   [WatcherDelivery.notBefore], ADR-0010. **This one is not the same case**,
   ///   and it is the one a reader of the two above would get wrong: the platform
   ///   can post perfectly well, and the standing warning really was posted and
   ///   really was read — typically by yesterday's alarm under `available`. So
-  ///   the retraction is genuinely **given up** here rather than merely
-  ///   redundant: the false claim comes down silently and no sentence says it
-  ///   was withdrawn.
+  ///   there is a sentence genuinely owed here, where `redundant` has none.
   ///
-  ///   Chosen deliberately over posting it: a correction is *good news*, and
-  ///   good news may not wake a family at 00:24. The row still tells whoever
-  ///   opens the app the truth. Recorded in `ui-ux/screens.md` so it is a
-  ///   decision rather than a side effect of a shared field.
+  ///   The false claim still comes down immediately, and silently: a correction
+  ///   is *good news*, and good news may not wake a family at 00:24.
+  ///
+  ///   **This bullet used to end "the retraction is genuinely given up … and no
+  ///   sentence says it was withdrawn", and that was the defect rather than the
+  ///   design.** Both `unavailable` cases now leave the day in
+  ///   [WatcherCache.correctionsOwedFor], and the next pass that *can* post
+  ///   drains it — so the retraction is late, not lost, which is the rule every
+  ///   other consequence of ADR-0010 already followed. See
+  ///   [WatcherCache.withCorrectionFor].
   ///
   /// **Cancelling still happens in both**, and it is the load-bearing half.
   /// `cancel` needs no permission, so the muted case genuinely takes a stale
@@ -469,11 +473,47 @@ abstract final class WatcherReconciler {
     final confirmed = link.isAccepted && read is ReadSucceeded
         ? read.checkInDays
         : const <DayKey>{};
+
+    // **Two sources, one list.** A day the read has just disproved, and a day an
+    // earlier pass disproved but could not say so about
+    // ([WatcherCache.correctionsOwedFor]).
+    //
+    // The second is what makes the retraction survive a pass that cannot post.
+    // Before it existed the ledger removal below was unconditional while the
+    // *warning* path one screen down gated its ledger write on delivery — two
+    // lines, opposite policies. Under ADR-0010's hour gate that cost the whole
+    // sentence: `cancelWarning` fired, the day left `warningsShownFor`, and the
+    // next pass computed corrections from days that were still warned, of which
+    // this was no longer one. Nothing anywhere recorded that a retraction was
+    // owed, so none was ever posted — for the *"she was fine all along"* case,
+    // which is the one a correction exists for.
+    //
+    // **An owed day does not need the read to succeed.** Its evidence was banked
+    // when the correction was first computed and is already in
+    // `lastConfirmedDay`; a later refusal does not un-disprove it, and making
+    // the retraction wait for a fresh read would strand it behind exactly the
+    // outage that is most likely to be what delayed it.
+    //
+    // **`link.isAccepted` guards both**, and for the owed set it is the whole
+    // guard rather than half of one: this loop runs before the revocation branch
+    // below clears the set, so without it a revoked link would post the
+    // retraction §10 step 2 forbids on the very reconcile that withdraws its
+    // warnings.
     final corrections = <Correction>[];
-    for (final day in cache.warnedDays.toList()) {
-      if (confirmed.contains(day)) {
+    if (link.isAccepted) {
+      // Ungated for `available` and `redundant`, held for `unavailable`. The
+      // predicate is `consumesReminder` and not `postsNotification`, because
+      // `redundant` means the reader is on the list watching the row correct
+      // itself — seeing it on screen is being told.
+      final delivered = delivery.warning.consumesReminder;
+      final owed = <DayKey>{
+        ...cache.warnedDays.where(confirmed.contains),
+        ...cache.correctionsOwedFor,
+      }.toList()
+        ..sort();
+      for (final day in owed) {
         corrections.add(Correction(linkId: link.id, day: day));
-        next = next.withCorrectionFor(day);
+        next = next.withCorrectionFor(day, delivered: delivered);
       }
     }
 

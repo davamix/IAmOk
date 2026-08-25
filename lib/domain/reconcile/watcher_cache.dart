@@ -16,6 +16,7 @@ class WatcherCache {
     this.away,
     this.lastConfirmedDay,
     this.warningsShownFor = const {},
+    this.correctionsOwedFor = const {},
     this.lastReconcileAt,
     this.accessLostSince,
     this.accessLostCause,
@@ -27,6 +28,7 @@ class WatcherCache {
       : away = null,
         lastConfirmedDay = null,
         warningsShownFor = const {},
+        correctionsOwedFor = const {},
         lastReconcileAt = null,
         accessLostSince = null,
         accessLostCause = null,
@@ -59,6 +61,44 @@ class WatcherCache {
   /// correction handler later retract a message that never claimed anything
   /// about her. Access failures live in [accessLostSince] instead.
   final Map<DayKey, WarningOutcome> warningsShownFor;
+
+  /// The days whose standing warning has been **disproved but not yet retracted
+  /// out loud** — a retraction that is owed.
+  ///
+  /// ## Why this is not a flag inside [warningsShownFor]
+  ///
+  /// That map means exactly one thing — *the warning currently **standing** for
+  /// each day* — and three separate pieces of the design read it that way. It is
+  /// the sole input to the watcher row's warned state (see its docstring), it is
+  /// what `_supersedes` compares a newly decided outcome against, and
+  /// `watcher_reconcile_service.dart` states the invariant that "a corrected day
+  /// leaves `warningsShownFor`" as the reason a correction can never overwrite a
+  /// fresh warning at the same notification id.
+  ///
+  /// A held retraction is the opposite of a standing warning: the notification
+  /// has already been **cancelled**, so nothing stands. Keeping the day in that
+  /// map to mean "still owed" would make the row render *"No check-in from Mum
+  /// yesterday."* about a day this cache knows she checked in on — reachable
+  /// whenever the retraction is held while that day is still the most recently
+  /// completed one, which is every muted phone between the warning's own hour
+  /// and the following midnight. That is a false claim about a person, on the
+  /// surface a reader who has just been frightened goes to first, produced by
+  /// the fix for a lost sentence.
+  ///
+  /// So it is a separate fact, stored separately, and the two never disagree.
+  ///
+  /// ## What puts a day in here, and what takes it out
+  ///
+  /// In: a correction was emitted for the day and the warning channel could not
+  /// carry it ([NotificationDelivery.unavailable]) — the reader's chosen hour
+  /// has not arrived (ADR-0010), or the channel is muted.
+  ///
+  /// Out: a later reconcile emits the correction under a delivery that
+  /// *consumes* it, or the link is revoked — §10 step 2 withdraws a revoked
+  /// link's warnings rather than retracting them, and *"Mum did check in"* is a
+  /// claim this device may not make about a person it is no longer entitled to
+  /// read about.
+  final Set<DayKey> correctionsOwedFor;
 
   /// The newest completed day this device has actually **settled** — ADR-0009's
   /// catch-up pointer, and the answer to *which days must still be decided
@@ -149,6 +189,7 @@ class WatcherCache {
       away: away,
       lastConfirmedDay: lastConfirmedDay,
       warningsShownFor: warningsShownFor,
+      correctionsOwedFor: correctionsOwedFor,
       lastReconcileAt: lastReconcileAt,
       accessLostSince: accessLostSince ?? day,
       accessLostCause: cause,
@@ -183,6 +224,7 @@ class WatcherCache {
       away: away,
       lastConfirmedDay: lastConfirmedDay,
       warningsShownFor: warningsShownFor,
+      correctionsOwedFor: correctionsOwedFor,
       lastReconcileAt: lastReconcileAt,
       lastDecidedDay: lastDecidedDay,
     );
@@ -221,6 +263,12 @@ class WatcherCache {
       away: read.away,
       lastConfirmedDay: confirmed,
       warningsShownFor: warningsShownFor,
+      // Carried for the same reason as the pointer below: a retraction this
+      // device has already established but never managed to speak is not part
+      // of the access-lost state a successful read clears. Dropping it here
+      // would silently un-owe every held correction on the one path that runs
+      // on every single reconcile.
+      correctionsOwedFor: correctionsOwedFor,
       lastReconcileAt: at,
       // Carried, not cleared. This constructor rebuilds the whole value so it
       // can drop the access-lost fields — a successful read is proof access is
@@ -243,15 +291,48 @@ class WatcherCache {
   /// Applies the late-arrival correction for [day] (§10).
   ///
   /// The standing warning is no longer true, so the day leaves
-  /// [warningsShownFor] and [lastConfirmedDay] advances to cover it. The
-  /// caller replaces the notification — same id, so it is a replacement rather
-  /// than a second notification.
-  WatcherCache withCorrectionFor(DayKey day) {
+  /// [warningsShownFor] and [lastConfirmedDay] advances to cover it. The caller
+  /// replaces the notification — same id, so it is a replacement rather than a
+  /// second notification — or, when it cannot post, cancels it outright.
+  ///
+  /// ## [delivered] splits what this used to do unconditionally
+  ///
+  /// Two of the three effects are **not** delivery records and stay ungated:
+  ///
+  /// * **The day leaves [warningsShownFor].** The false claim comes down from
+  ///   the tray whatever happens — that half is load-bearing and the whole
+  ///   reason a held correction is better than a standing lie. Nothing is
+  ///   showing afterwards, so nothing may be recorded as showing.
+  /// * **[lastConfirmedDay] advances.** It is evidence about *her*, not about
+  ///   what reached anybody, which is the same argument that keeps
+  ///   [accessLostSince] ungated. It is belt-and-braces in any case: [applyRead]
+  ///   already advances it monotonically from the read itself.
+  ///
+  /// The third is: **whether the retraction has actually been spoken.** Pass
+  /// `delivered: delivery.warning.consumesReminder` — the identical predicate
+  /// the warning path uses one screen down in the reconciler, for the identical
+  /// reason. `false` leaves the day owed in [correctionsOwedFor] so the next
+  /// postable pass says *"Correction: Mum did check in on Saturday 15 August."*;
+  /// `true` clears it, because [NotificationDelivery.redundant] means the reader
+  /// is looking at the row and seeing it on screen is being told.
+  ///
+  /// Without the split, a correction found before the reader's hour (ADR-0010)
+  /// cancelled the warning, dropped the day, and left **nothing anywhere**
+  /// recording that a retraction was owed — the next pass computes corrections
+  /// from days that are still warned, and the day was no longer one of them.
+  WatcherCache withCorrectionFor(DayKey day, {required bool delivered}) {
     final remaining = {...warningsShownFor}..remove(day);
     final confirmed =
         lastConfirmedDay == null || day > lastConfirmedDay! ? day : lastConfirmedDay;
+    final owed = {...correctionsOwedFor};
+    if (delivered) {
+      owed.remove(day);
+    } else {
+      owed.add(day);
+    }
     return copyWith(
       warningsShownFor: remaining,
+      correctionsOwedFor: owed,
       lastConfirmedDay: confirmed,
     );
   }
@@ -262,9 +343,19 @@ class WatcherCache {
   /// no longer this watcher's business. A correction would be worse than
   /// silence, because *"Mum did check in yesterday"* is a claim nothing here
   /// supports. The caller cancels the notifications outright.
+  ///
+  /// **[correctionsOwedFor] goes with them**, and for the same sentence: a
+  /// retraction owed to this watcher is a claim that she *did* check in, and
+  /// §10 step 2 is explicit that a revoked link's standing warning is withdrawn
+  /// rather than corrected. Leaving the day owed here would post exactly the
+  /// retraction the withdrawal exists to avoid, one reconcile later, about a
+  /// person this device is no longer entitled to read about.
   WatcherCache withWarningsWithdrawn() {
-    if (warningsShownFor.isEmpty) return this;
-    return copyWith(warningsShownFor: const {});
+    if (warningsShownFor.isEmpty && correctionsOwedFor.isEmpty) return this;
+    return copyWith(
+      warningsShownFor: const {},
+      correctionsOwedFor: const {},
+    );
   }
 
   /// `away` is not covered by the null-means-unchanged convention, because
@@ -273,6 +364,7 @@ class WatcherCache {
     AwayPeriod? away,
     DayKey? lastConfirmedDay,
     Map<DayKey, WarningOutcome>? warningsShownFor,
+    Set<DayKey>? correctionsOwedFor,
     DateTime? lastReconcileAt,
     DayKey? accessLostSince,
     RefusedCause? accessLostCause,
@@ -283,6 +375,7 @@ class WatcherCache {
         away: away ?? this.away,
         lastConfirmedDay: lastConfirmedDay ?? this.lastConfirmedDay,
         warningsShownFor: warningsShownFor ?? this.warningsShownFor,
+        correctionsOwedFor: correctionsOwedFor ?? this.correctionsOwedFor,
         lastReconcileAt: lastReconcileAt ?? this.lastReconcileAt,
         accessLostSince: accessLostSince ?? this.accessLostSince,
         accessLostCause: accessLostCause ?? this.accessLostCause,
@@ -306,6 +399,7 @@ class WatcherCache {
   WatcherCache clearAway() => WatcherCache(
         lastConfirmedDay: lastConfirmedDay,
         warningsShownFor: warningsShownFor,
+        correctionsOwedFor: correctionsOwedFor,
         lastReconcileAt: lastReconcileAt,
         accessLostSince: accessLostSince,
         accessLostCause: accessLostCause,
@@ -323,7 +417,8 @@ class WatcherCache {
       other.accessLostCause == accessLostCause &&
       other.accessLostNotifiedOn == accessLostNotifiedOn &&
       other.lastDecidedDay == lastDecidedDay &&
-      _sameWarnings(other.warningsShownFor, warningsShownFor);
+      _sameWarnings(other.warningsShownFor, warningsShownFor) &&
+      _sameDays(other.correctionsOwedFor, correctionsOwedFor);
 
   @override
   int get hashCode => Object.hash(
@@ -337,7 +432,11 @@ class WatcherCache {
         Object.hashAllUnordered(
           warningsShownFor.entries.map((e) => Object.hash(e.key, e.value)),
         ),
+        Object.hashAllUnordered(correctionsOwedFor),
       );
+
+  static bool _sameDays(Set<DayKey> a, Set<DayKey> b) =>
+      a.length == b.length && a.every(b.contains);
 
   static bool _sameWarnings(
     Map<DayKey, WarningOutcome> a,
@@ -349,6 +448,7 @@ class WatcherCache {
   @override
   String toString() => 'WatcherCache(away: $away, confirmed: $lastConfirmedDay, '
       'warnings: $warningsShownFor, reconciled: $lastReconcileAt, '
+      '${correctionsOwedFor.isEmpty ? '' : 'correctionsOwed: $correctionsOwedFor, '}'
       'decided: $lastDecidedDay'
       '${hasLostAccess ? ', accessLost: $accessLostSince/${accessLostCause?.name}' : ''})';
 }

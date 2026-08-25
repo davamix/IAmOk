@@ -680,13 +680,20 @@ void main() {
               'claim about the device — it will, at 10:00');
     });
 
-    test('a correction due before the warning time cancels, and says nothing',
+    test('a correction due before the warning time is HELD, then spoken',
         () async {
-      // The consequence the approval did not spell out, pinned so it is a
-      // decision rather than a side effect: corrections ride the warning channel
-      // and are therefore held back too. The false claim comes down — silently —
-      // and the sentence withdrawing it is what is given up. Recorded in
-      // `screens.md` and on `_notBefore`.
+      // **This test used to assert the opposite**, and it was right about the
+      // code and wrong about the design: it pinned "the sentence withdrawing it
+      // is what is given up" as a decision. The post-gate review found what that
+      // costs. `cancelWarning` fires and the day leaves the ledger, so the next
+      // pass computes corrections from days still warned — of which this is no
+      // longer one — and the retraction is not merely late, it is **never
+      // emitted at all**.
+      //
+      // Reachable: Mum taps at 23:50 on `D` in a dead zone, the write syncs a
+      // day later, and a push arrives before the hour because somebody else in
+      // the family tapped. The family found an empty tray at 07:00 and could not
+      // tell *resolved* from *I swiped it in the night*.
       await service().reconcile(selfUid: selfUid);
       expect(notifications.calls, contains('warn:$mumLink:$d'));
 
@@ -695,23 +702,77 @@ void main() {
       notifications.calls.clear();
       await service().reconcile(selfUid: selfUid);
 
+      // The false claim still comes down immediately. That half is load-bearing
+      // and did not change: leaving it standing would park a claim the device
+      // KNOWS is false on a family's phone from 00:24 to 10:00.
       expect(notifications.calls, ['cancelWarn:$mumLink:$d'],
-          reason: 'the tray ends empty and honest, which is the substance of '
-              'the retraction');
-      expect((await store.watcherCache(mumLink)).lastConfirmedDay, d);
+          reason: 'nothing may be posted before the hour, including good news');
 
-      // **And the hour arriving does not undo it.** This is the one path in the
-      // group where a held day is settled by EVIDENCE rather than by delivery,
-      // and it was the only one without a second half — in a group whose whole
-      // shape is *held at 00:24, spoken at 10:00*. If the gate opening re-posted
-      // the day, or spoke the retraction late, a family would hear at 10:00
-      // about something resolved before they woke up.
+      final held = await store.watcherCache(mumLink);
+      expect(held.lastConfirmedDay, d);
+      expect(held.warningsShownFor, isEmpty,
+          reason: 'nothing is standing — the notification was cancelled');
+      expect(held.correctionsOwedFor, {d},
+          reason: 'and THIS is the record that a sentence is still owed');
+
+      // **The one thing to prove rather than reason about.** A held retraction
+      // must not resurrect the warning on the screen. `standingWarning` reads
+      // `warningsShownFor[decision.day]`, and `decision.day` is still `d` at
+      // this hour — so a design that had parked the owed day back in that map
+      // would render *"No check-in from Mum yesterday."* about a day this cache
+      // has just recorded a check-in for, to a reader who opened the app because
+      // the warning frightened them.
+      final state = await service().reconcile(selfUid: selfUid);
+      expect(state.people.single.standingWarning, isNull,
+          reason: 'the row is honest at every instant, held or not');
+
+      // And at the hour, the already-approved sentence is spoken. Late, never
+      // lost — the same shape as the warning half of ADR-0010.
       clock = FixedClock(at(madrid, 2026, 8, 17, 10));
       notifications.calls.clear();
       await service().reconcile(selfUid: selfUid);
 
-      expect(notifications.silent, isTrue,
-          reason: 'she checked in — there is nothing left to say, at any hour');
+      expect(notifications.calls, ['correct:$mumLink:$d'],
+          reason: 'the retraction, and NOT a re-post of the warning');
+      expect((await store.watcherCache(mumLink)).correctionsOwedFor, isEmpty,
+          reason: 'said once, then no longer owed');
+    });
+
+    test('and it is not said twice — the second pass at the hour is silent',
+        () async {
+      // The failure mode a re-emitting owed set invites: a retraction posted on
+      // every reconcile for the rest of the link's life. reconcile() runs on app
+      // open, FCM, alarm and boot.
+      await service().reconcile(selfUid: selfUid);
+      atTheMeasuredHour();
+      reader.result = FirestoreRead.succeeded(checkInDays: {d});
+      await service().reconcile(selfUid: selfUid);
+
+      clock = FixedClock(at(madrid, 2026, 8, 17, 10));
+      await service().reconcile(selfUid: selfUid);
+      notifications.calls.clear();
+      await service().reconcile(selfUid: selfUid);
+
+      expect(notifications.silent, isTrue);
+    });
+
+    test('a held retraction survives a later read that FAILS', () async {
+      // Its evidence was banked in `lastConfirmedDay` when the correction was
+      // first computed; a refusal does not un-disprove it. Making the sentence
+      // wait for a fresh successful read would strand it behind exactly the
+      // outage most likely to be what delayed it.
+      await service().reconcile(selfUid: selfUid);
+      atTheMeasuredHour();
+      reader.result = FirestoreRead.succeeded(checkInDays: {d});
+      await service().reconcile(selfUid: selfUid);
+      expect((await store.watcherCache(mumLink)).correctionsOwedFor, {d});
+
+      clock = FixedClock(at(madrid, 2026, 8, 17, 10));
+      reader.result = const FirestoreRead.refused(RefusedCause.unauthenticated);
+      notifications.calls.clear();
+      await service().reconcile(selfUid: selfUid);
+
+      expect(notifications.calls, contains('correct:$mumLink:$d'));
     });
   });
 

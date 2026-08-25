@@ -73,19 +73,31 @@ rescues a 10:00 alarm ADR-0008 measured Doze holding for 3h31m.
 **Corrections are held back too, and that is the one consequence the approval did not spell out.**
 A correction rides the warning channel at the warning's own id, so before the chosen hour a standing
 false warning is **cancelled rather than replaced** — the path `redundant` already takes. The tray
-ends empty and honest, which is the substance of the retraction; what is given up is the sentence
-saying so. This was chosen over the alternative because a correction is *good news*, and good news
-may not wake a family at 00:24. It is recorded in `ui-ux/screens.md` so it is a decision rather than
-a side effect of a shared field.
+ends empty and honest, which is the substance of the retraction. This was chosen over the
+alternative because a correction is *good news*, and good news may not wake a family at 00:24. It is
+recorded in `ui-ux/screens.md` so it is a decision rather than a side effect of a shared field.
 
-> **Revisited 2026-08-25, after the post-gate UI/UX review — not yet amended.** The decision above is
-> sound; the *mechanism* took more than the decision did. `withCorrectionFor` clears
-> `warningsShownFor` **unconditionally**, before any delivery state is consulted, so a held
-> correction is not merely unspoken — it stops being **owed**, and no later pass can ever say it.
-> Every other consequence of this ADR honours *"late, never lost"*; this is the one that does not.
-> The fix, the reachable path and the rejected alternative are written out in
-> `phases/phase-4-summary.md` — *The post-gate review round*, item 2. **When it lands, this section
-> is what has to change**: "what is given up is the sentence saying so" stops being true.
+**Amended 2026-08-25.** This section used to end *"what is given up is the sentence saying so"*. That
+is no longer true, and it should never have been: the post-gate review found that the sentence was
+not merely delayed but **destroyed**. `withCorrectionFor` cleared `warningsShownFor` unconditionally,
+before any delivery state was consulted, so the day stopped being **owed** — and the next pass
+computes corrections from days that are still warned, of which it was no longer one. Every other
+consequence of this ADR honours *"late, never lost"*; that one did not.
+
+The retraction is now **held, not dropped**. `withCorrectionFor` takes a `delivered` flag — the same
+`consumesReminder` predicate the warning path uses — and when the channel could not carry it the day
+moves to `WatcherCache.correctionsOwedFor`, which the next postable pass drains. So the tray still
+empties immediately, and the already-approved *"Correction: Mum did check in on Saturday 15 August."*
+is spoken at the reader's hour. Late, never lost, on both channels this ADR touches.
+
+**It is a separate field rather than a flag inside `warningsShownFor`, and that was not free.** The
+follow-up was specified as needing no new cache column, on the reasoning that a held day could simply
+stay in the standing-warnings map. It cannot. That map is the sole input to the watcher row's warned
+state, so a day kept there after its warning was cancelled makes the row render *"No check-in from
+Mum yesterday."* about a day the same cache has just recorded a check-in for — reachable on any muted
+phone between the warning's own hour and the following midnight, when the corrected day is still the
+most recently completed one. A false claim about a person, produced by the fix for a lost sentence.
+The ledger and the retraction are two facts; they are stored as two.
 
 **The screen is not gated by any of this**, and must not be. A reader who opens the app at 02:00 is
 owed the truth about the day: the row still renders the warning, and the warnings-off banner still

@@ -324,6 +324,31 @@ void main() {
           {day('2026-08-15'): WarningOutcome.warnOffline});
     });
 
+    test('correctionsOwedFor survives the round-trip on its own', () async {
+      // A retraction this device established but could not speak. If it fails
+      // to persist, the sentence is lost at the first process death — and the
+      // held case is *by definition* the one where the app is not being used,
+      // so the process dying before the hour arrives is the normal course of
+      // events rather than an edge.
+      await store.saveWatcherCache(
+        'mum_ana',
+        WatcherCache(correctionsOwedFor: {day('2026-08-15')}),
+      );
+      expect((await store.watcherCache('mum_ana')).correctionsOwedFor,
+          {day('2026-08-15')});
+    });
+
+    test('saving replaces the owed retractions rather than merging', () async {
+      // A merge would leave a day owed after it had been spoken, and the family
+      // would be told again on every reconcile for the life of the link.
+      await store.saveWatcherCache(
+        'mum_ana',
+        WatcherCache(correctionsOwedFor: {day('2026-08-15')}),
+      );
+      await store.saveWatcherCache('mum_ana', const WatcherCache.empty());
+      expect((await store.watcherCache('mum_ana')).correctionsOwedFor, isEmpty);
+    });
+
     test('an away period cleared to null really clears', () async {
       // ADR-0001 decision 1: on a successful read `away` is overwritten
       // wholesale, INCLUDING with nothing. If a null failed to persist here,

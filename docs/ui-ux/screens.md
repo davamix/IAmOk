@@ -705,6 +705,11 @@ than silent ones — alarm fatigue is not a risk at that frequency.
 > `warningLocalTime` has not arrived yet (ADR-0010). In all three the standing warning is
 > **cancelled silently** instead.
 >
+> **Stopped is not dropped, for the last two.** `redundant` consumes the retraction — the reader is
+> watching the row correct itself. The two `unavailable` cases leave the day **owed**, and the first
+> pass that can post says the already-approved sentence then. Nothing new is written for it:
+> `correctionBody` already names a day that is not yesterday.
+>
 > **Only the first of the three means the tray was empty.** This blockquote used to say a correction
 > is spoken *"only when the warning it retracts was actually posted"*, and that the `redundant` case
 > means *"nothing went to the tray"* — both wrong in the common case, and the reconciler had already
@@ -884,10 +889,17 @@ and its decaying cadence is exactly what must not burn in silence.
 **A correction due before the hour cancels rather than replaces**, and this is a consequence of the
 rule rather than part of what was asked for. A correction rides the *Missed check-ins* channel at
 the warning's own id, so holding the channel holds the retraction too: the false claim comes out of
-the tray silently, and the sentence withdrawing it is what is given up. Chosen deliberately — a
-correction is good news, and good news may not wake a family at 00:24 — and the row still tells
-whoever opens the app the truth. The alternative, posting *"Correction: Mum did check in
-yesterday."* at 00:24, is the same wake-up the rule exists to prevent.
+the tray silently. Chosen deliberately — a correction is good news, and good news may not wake a
+family at 00:24 — and the row still tells whoever opens the app the truth. The alternative, posting
+*"Correction: Mum did check in yesterday."* at 00:24, is the same wake-up the rule exists to prevent.
+
+**Amended 2026-08-25: the sentence is held, not given up.** This paragraph used to end *"and the
+sentence withdrawing it is what is given up"*. The post-gate review found that it was not given up
+so much as **destroyed** — the day left the standing-warnings ledger, and the next pass looks for
+corrections among days that are still warned. So a family whose relative turned out to be fine got
+an empty tray at 07:00 and no way to tell *resolved* from *I swiped it in the night*. The day is now
+kept in `WatcherCache.correctionsOwedFor` and spoken at the reader's own hour — the same *late, never
+lost* shape as the warning it retracts, and with no new copy.
 
 **Nothing about the screen is gated by the hour.** The row still renders the standing warning, and
 *"This phone will not warn you about anyone."* still means the **channel** is off, not that this

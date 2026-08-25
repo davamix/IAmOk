@@ -240,6 +240,7 @@ Phase 7's problem. What follows is the wording.
 | A link this pass could not check | *"Can't check on Mum — this phone could not finish checking just now."* |
 | …and what to do about it | *"If this is still here tomorrow, ask whoever set up the app."* + **"Try again"** |
 | Spoken when a tapped notification opens a row | *"Showing Mum."* |
+| Spoken when a row changes **while the list is open**, unasked | *"Mum checked in. Everything OK."* — approved 2026-08-25, see below |
 | The load failed | *"This phone could not check on anyone. Try again, or open the app later."* + **"Try again"** |
 | No warning standing | *"Everything OK"* |
 | …with a check-in read | *"Your phone last saw a check-in on Saturday 15 August."* |
@@ -249,6 +250,46 @@ Phase 7's problem. What follows is the wording.
 | …and none has ever succeeded | *"This phone has not been able to check even once."* |
 | Spoken (TalkBack), per row | *"Mum. "* followed by the row's lines |
 | Spoken, while loading | *"Checking"* |
+
+### A row that changes under a screen reader is announced — approved 2026-08-25
+
+`NotificationDelivery.redundant` means *the watcher is looking at the screen that already shows
+this*, so nothing is posted and the day is recorded as seen. The argument has always been that the
+list renders the change itself — and until Phase 4 that was true, because `redundant` was reached by
+**navigating here**, so the row was read fresh on arrival.
+
+Phase 4 gave the list a second way to change: a foreground FCM nudge, arriving while the reader is
+already on the screen. A sighted user sees the row change. **A TalkBack user is told nothing** —
+nothing re-reads a changed widget — so someone who heard *"Mum. No check-in from Mum yesterday."*
+thirty seconds ago is now looking at *"Everything OK"*, with no announcement, no reason to swipe
+back, and no notification ever coming because the day is already recorded as seen.
+
+It bites hardest on the **correction**, which is the one message whose entire purpose is withdrawing
+a false claim about a person.
+
+**The approved string, and only this one ships first:**
+
+> *"Mum checked in. Everything OK."*
+
+It reuses `everythingOk` verbatim rather than inventing a second way to say the same thing, and it
+follows `rowLabel`'s shape — name the person, then their state, as one utterance.
+
+**Two conditions, both required.** The person's rendered status must have **changed**, and the
+refresh must **not** have been user-initiated. Announcing every refresh is noise; on a resume the
+reader is arriving at the screen anyway and will read the row themselves.
+
+**Deliberately not shipping yet**, and named here so nobody adds them casually — each needs the same
+approval this one got:
+
+| Change | Candidate |
+|---|---|
+| OK → warning | *"Update. Mum. No check-in from Mum yesterday."* |
+| any → access lost | *"Update. Can't check on Mum."* |
+
+**This changes nothing about what is posted or consumed.** `redundant` still posts no notification
+and still records the day. An announcement is the screen speaking to a reader who is already on it,
+which is the premise the `redundant` argument always rested on — now true for someone who cannot see
+the row change.
 
 **The title echoes onboarding screen 2**, *"Who are you looking after?"* — the same trick the Tap
 screen's audience line uses, so the words that asked the question at setup answer it here.

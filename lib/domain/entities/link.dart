@@ -110,12 +110,25 @@ class Link {
   ///   improvement: Mum's 07:00 tap wakes the isolate that discovers Granddad
   ///   has gone silent.
   ///
-  /// Raised by the Phase 4 UI/UX review, recorded rather than decided, and owed
-  /// to the owner. The alternative is to have the push path defer *posting* —
-  /// never deciding, and never recording the day as settled — until
-  /// `warningLocalTime` has passed, which costs only the second bullet and is a
-  /// change to the one path where silence is the failure this app cannot detect
-  /// in itself.
+  /// **DECIDED by the owner, 2026-08-25: a push may not post a warning before
+  /// `warningLocalTime`.** Not yet implemented — see the Phase 4 summary.
+  ///
+  /// The rule is *post only when `now >= today's warningLocalTime` in the
+  /// watcher's zone*, which keeps the second bullet for the rest of the day: a
+  /// push at 14:00 against a 10:00 warning time still posts immediately, and
+  /// still rescues an alarm Doze made late. It gives up only the hours before
+  /// the watcher's chosen time, which is the window nobody asked to be woken in.
+  ///
+  /// This is not new policy. It **enforces the promise this field already
+  /// makes**, on a path that bypassed it — the invariant held until Phase 4 only
+  /// because the alarm was the single unattended caller.
+  ///
+  /// **The trap, and it is the whole risk of the change.** A suppressed run must
+  /// still decide, must still re-arm, and must **not** record the day in
+  /// `warningsShownFor` — otherwise the alarm finds it settled and says nothing,
+  /// which is a lost warning. Do not invent a state for that:
+  /// `NotificationDelivery.unavailable` already means *not posted, not consumed,
+  /// still owed at the next reconcile*, and it already has tests.
   final LocalTimeOfDay warningLocalTime;
 
   final DateTime createdAt;

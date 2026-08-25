@@ -163,9 +163,21 @@ class WatcherReconcileResult {
   ///   who heard "No check-in from Mum yesterday." thirty seconds ago has it
   ///   silently replaced by "Everything OK", with no announcement and no reason
   ///   to swipe back. `WatcherScreen` already owns the mechanism
-  ///   (`SemanticsService.sendAnnouncement`), but announcing needs an approved
-  ///   string, which is a `screens.md` decision rather than something to invent
-  ///   in a widget. Raised by the Phase 4 UI/UX review and recorded as owed.
+  ///   (`SemanticsService.sendAnnouncement`).
+  ///
+  ///   **DECIDED by the owner, 2026-08-25: announce it.** Not yet implemented —
+  ///   see the Phase 4 summary. The trigger is narrow on purpose: a person's
+  ///   rendered status **changed** *and* the refresh was not user-initiated.
+  ///   Announcing every refresh is noise, and on a resume the reader is arriving
+  ///   at the screen anyway. The approved string is in `screens.md`; only the
+  ///   correction case ships first, because that is the one Phase 4 created and
+  ///   the one where silence is most misleading.
+  ///
+  ///   **This does not change what is POSTED or what is CONSUMED.** `redundant`
+  ///   still means no notification and still records the day as seen. An
+  ///   announcement is the screen speaking to a reader who is already on it —
+  ///   which is the premise this bullet rests on, finally made true for someone
+  ///   who cannot see the row change.
   /// * **`unavailable`.** Nothing can be posted at all, so there is no
   ///   replacement to make.
   ///

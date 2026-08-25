@@ -1002,9 +1002,14 @@ written and a push woke the isolate. `WarningPolicy` owes a warning the moment `
 `warningLocalTime` bounds only when the *alarm* asks.
 
 So M2 is not a hypothetical any more. A watcher can be woken in the middle of the night by a warning
-about a *past* day, triggered by somebody else tapping. The trade is recorded on
-`Link.warningLocalTime` and is the owner's to settle; this run is the evidence that it is reachable
-in ordinary use rather than only in an unlucky timezone pairing.
+about a *past* day, triggered by somebody else tapping — and this run is the evidence that it is
+reachable in ordinary use rather than only in an unlucky timezone pairing.
+
+**Settled by the owner on 2026-08-25: a push may not post a warning before `warningLocalTime`.** Not
+yet implemented; the rule and the trap are on `Link.warningLocalTime`, and the work is in the Phase 4
+summary's next-session prompt. **Re-run this measurement afterwards** — the expected result changes
+from "a warning at 00:24" to "no notification, the alarm still armed, and the day still owed", and
+the third of those is the one that must be checked in the store rather than on the screen.
 
 **The test premise was wrong first, and that is worth recording too.** The script asserted "today IS
 checked in, so the reconcile has nothing to say" — while the seeded check-in was for 2026-08-21 and

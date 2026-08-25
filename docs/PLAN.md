@@ -189,9 +189,11 @@ says something **different and honest** when the device cannot reach the network
 
 ## Phase 4 — Firebase backbone
 
-> **In progress. Steps 1–7 are built and proven on the POCO F3 against the emulator suite.** What
-> remains is not code: the **first Functions deploy**, **App Check's console half**, the
-> **live-radio** version of step 7's measurement, and the gate review. Start from
+> **In progress. Steps 1–7 are built and all five reviewers have run at the gate.** Two
+> owner-approved changes are **waiting to be implemented** — a push may not post a warning before
+> `warningLocalTime`, and a row that changes under a screen reader must be announced. After those,
+> what remains is not code: the **first Functions deploy**, **App Check's console half**, and the
+> **live-radio** version of step 7's measurement. Start from
 > [phases/phase-4-summary.md](phases/phase-4-summary.md); the earlier
 > [phases/phase-4-handover.md](phases/phase-4-handover.md) carries the four things that went wrong
 > in the first half of the phase — two of them **false greens**, work that looked finished and was

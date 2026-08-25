@@ -4,9 +4,12 @@
 `flutter analyze` clean, `--debug` and `--release` both build, secrets guard clean.
 
 **Status: implemented and reviewed at the gate. All five reviewers have run and every finding is
-fixed or recorded.** What remains is **not code** — the first Functions deploy, App Check's console
-half, and one measurement that needs the live project. **Not signed off** · **Next: the owner's
-review**, and three decisions listed at the end that are the owner's to make.
+fixed or recorded.** **Not signed off.**
+
+**Next session picks up two approved changes** — the owner settled both on 2026-08-25 and neither is
+implemented yet. Everything else outstanding is not code: the first Functions deploy, App Check's
+console half, and one measurement that needs the live project. Start at *Prompt to start the next
+session*.
 
 ---
 
@@ -98,7 +101,8 @@ is exactly a watcher-side failure skipping the watched side. Now `try`/`finally`
 order swapped.
 
 **4. A push can post a warning at any hour — measured, at 00:24.** `warningLocalTime` bounds when
-the *alarm* asks, not when a warning may be posted. Recorded, not fixed; see *Owed to the owner*.
+the *alarm* asks, not when a warning may be posted. **Decided and not yet implemented** — see
+*Prompt to start the next session*.
 
 **5. The deploy checklist asserted the opposite of the truth.** `deploy-notes.md` still said
 `functions:list` returns `SERVICE_DISABLED`; it has been enabled since 2026-08-21. That is the file
@@ -148,7 +152,7 @@ ADR-0004 maps to *refused*, which is the access-lost notice arriving at every fa
 
 ---
 
-## Owed to the owner — three decisions, none of them a measurement
+## Owed to the owner — one decision left, and it is not a measurement
 
 **1. ADR-0008's successor.** The ADR says that if both questions passed it "should be superseded
 rather than amended". The measurement half is done. The choice is not:
@@ -162,16 +166,8 @@ rather than amended". The measurement half is done. The choice is not:
   verify-before-speaking design would have two deciders and could give two answers about whether
   someone's relative is all right.
 
-**2. Whether a push may post a warning at any hour.** Measured at 00:24 on 2026-08-25. The
-alternative is to have the push path defer *posting* — never deciding, never recording the day as
-settled — until `warningLocalTime`. That costs the one real upside (a multi-person watcher
-discovering, from Mum's 07:00 tap, that Granddad has gone silent) and is a change to the path where
-silence is the failure this app cannot detect in itself.
-
-**3. Whether a push-driven change on an open list should be announced.** `redundant` used to mean
-*the reader just navigated here*; it now also means *the list is open and something arrived*. A
-TalkBack user can have a warning silently replaced by "Everything OK". Announcing needs an approved
-string, which is a `screens.md` decision rather than something to invent in a widget.
+**2 and 3 are DECIDED — 2026-08-25 — and are the next session's work.** Both are implementable
+without another decision; neither is implemented yet. See *Prompt to start the next session*.
 
 ---
 
@@ -217,3 +213,121 @@ looks like a broken emulator script.
 **The emulator's stdout can die and take the functions log with it.** If the process that owns the
 pipe is torn down, the CLI spins on `EPIPE`, the hub stops answering, and state cannot be exported.
 Start it detached with output redirected to a file.
+
+---
+
+## Prompt to start the next session
+
+> I'm continuing **Phase 4** of the I Am Ok project. Read `docs/phases/phase-4-summary.md` first —
+> especially **The nine findings** and **What to be careful of next** — then follow the reading
+> order in `docs/README.md`. `docs/phases/phase-4-handover.md` is the mid-phase snapshot and is
+> **deliberately frozen**; read it for the four things that went wrong earlier in the phase, never
+> for current state.
+>
+> **Steps 4–7 are built and reviewed at the gate.** All five reviewers have run, one commit each,
+> every finding fixed or recorded. 901 Dart tests, 30 Functions tests, `flutter analyze` clean.
+> ADR-0008's deciding measurement **passed both its questions** in forced deep Doze, mutation-checked
+> against `priority: 'normal'`.
+>
+> **Your first job is two changes the owner approved on 2026-08-25 and nobody has implemented.**
+> Both are one-file changes using machinery that already exists and already has tests. Neither may
+> ship without a device run.
+>
+> ---
+>
+> ### 1. A push may not post a warning before `warningLocalTime`
+>
+> **Why.** `warningLocalTime` feeds exactly one thing — `_desiredWarnings` at
+> `watcher_reconciler.dart:681`, the alarm schedule. It appears nowhere in the decision path, so
+> whoever calls `reconcile()` posts. That was invisible until Phase 4 because the alarm was the only
+> *unattended* caller. FCM is the second, and it fires on **somebody else's** action. Measured on
+> 2026-08-25 at **00:24:53 CEST**: *"No check-in from Ana yesterday."*, `warningLocalTime` 10:00.
+>
+> **The rule.** Post only when `now >= today's warningLocalTime` in the **watcher's** zone. A push at
+> 14:00 against a 10:00 warning time still posts immediately — the acceleration benefit is kept for
+> the rest of the day, including rescuing an alarm Doze made late. Only the hours before the
+> watcher's chosen time are given up, which is the window nobody asked to be woken in.
+>
+> **THE TRAP, and it is the whole risk.** A suppressed run must still **decide**, must still
+> **re-arm**, and must **not** record the day in `warningsShownFor` — otherwise the 10:00 alarm finds
+> it settled and says nothing, which is a *lost warning*, the worst class this app has. **Do not
+> invent a state.** `NotificationDelivery.unavailable` already means exactly *not posted, not
+> consumed, still owed at the next reconcile* (`notification_delivery.dart:61`), and it already has
+> tests.
+>
+> **Where it goes.** `_reconcileLink` (`watcher_reconcile_service.dart:414`) already takes a
+> `WatcherDelivery` **per link** and has `now`, `watcherZone` and `link` in scope, so the downgrade
+> is expressible there without touching the domain layer or the enum. `WatcherDelivery` has two
+> channels — downgrade **`warning` only**. The access-lost channel must not be time-gated: a refusal
+> is not tied to an hour.
+>
+> Note `catchUpWarnings` already folds in the same delivery state, so ADR-0009's catch-up is covered
+> by the same change — which is the case that would otherwise post seven at midnight.
+>
+> **Prove it on the device**, and re-run the measurement in `device-matrix.md` § *Does a Doze push
+> show the user anything*. The expected result flips from "a warning at 00:24" to **no notification,
+> the alarm still armed, and the day still owed** — and the third is the one to check by pulling the
+> store, not by looking at the screen.
+>
+> ---
+>
+> ### 2. Announce a row that changes under a screen reader
+>
+> **Why.** `redundant` means *the watcher is looking at the screen that already shows this*, so
+> nothing posts and the day is recorded as seen. That held while `redundant` was reached by
+> **navigating** here. A foreground nudge makes it also mean *the list is open and something
+> arrived* — and nothing re-reads a changed widget, so a TalkBack user who heard *"Mum. No check-in
+> from Mum yesterday."* is now looking at *"Everything OK"* with no announcement, no reason to swipe
+> back, and no notification ever coming.
+>
+> **The approved string is in `docs/ui-ux/screens.md`**, with the two candidates that are
+> deliberately **not** shipping yet:
+>
+> > *"Mum checked in. Everything OK."*
+>
+> **Two conditions, both required**: the person's rendered status **changed**, and the refresh was
+> **not** user-initiated. `WatchedStateNotifier.refresh` already carries a `userInitiated` flag for
+> the `tapFailed` fix; the watcher side needs the same signal. Announcing every refresh is noise, and
+> on a resume the reader is arriving at the screen anyway.
+>
+> **The mechanism exists** — `SemanticsService.sendAnnouncement`, used at `watcher_screen.dart:299`.
+> This changes **nothing** about what is posted or consumed.
+>
+> ---
+>
+> ### Then, in order
+>
+> 1. **Investigate what ADR-0008's option 1 actually costs** — the owner asked for the number before
+>    any ADR is drafted. It means replacing or forking `android_alarm_manager_plus` so the warning
+>    uses the allowlist its own broadcast receiver is already granted, instead of handing the work to
+>    JobScheduler. Report the cost; **do not draft the ADR** until the owner has it. This is the one
+>    decision still open.
+> 2. **The first Functions deploy.** The Cloud Functions API is enabled (three clean runs); the other
+>    six 2nd-gen prerequisites are **unverified and unverifiable from this machine** — no `gcloud`,
+>    and the CLI exposes no read. `firebase deploy --only functions --dry-run --project i-am-ok-c74ca`
+>    settles it and **is a state change**, not a probe, so it is the owner's call.
+> 3. **App Check's console half** — register with Play Integrity, register this install's debug token
+>    (confirmed *not* registered). Enforcement cannot work before the app reaches an internal test
+>    track, and the refusal-to-copy mapping must be verified against a real rejection first.
+> 4. **The live-radio measurement**, the only thing that closes ADR-0008 question 1. It will also be
+>    the first run to exercise App Check on a cold radio — register the debug token first, or it
+>    measures a retry loop.
+> 5. **The AVD taps.** Every run so far used an admin REST write as the other endpoint. Both Phase 4
+>    device rows in the matrix are unticked and say why.
+>
+> ---
+>
+> **Four things that will cost you time otherwise.** Only one emulator script may run at a time —
+> `emulators.ps1`, `rules-test.ps1` and `functions-test.ps1` all want 8080/9099/5001. `adb reverse`
+> dies with an adb **server** restart, not just a cable unplug, and the failure reads as a broken
+> script. Start the suite **detached with output redirected to a file**, or a torn-down pipe leaves
+> the CLI spinning on `EPIPE` with the hub unreachable and no way to export state. And both Firebase
+> plugins rewrite `127.0.0.1` to `10.0.2.2` on Android unless `automaticHostMapping: false`.
+>
+> **The habit that found everything at this gate: read a claim against the thing it describes.**
+> Nine findings, and almost none came from a test failing — they came from a docstring, a checklist,
+> a copy table and a threat model each asserting something that had quietly stopped being true.
+> **Verify the measurement before you trust the result**: three times this phase the subject was fine
+> and the *measurement* was wrong. And this is the side where a false claim to a family is the worst
+> bug the app can have — prefer stopping to ask over guessing, and if you think a finding is wrong,
+> say so before acting on it rather than after.

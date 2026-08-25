@@ -1156,6 +1156,28 @@ platform and the framework have said in writing not to rely on it"* — which is
 `liveRegion`, and the reason the OK → warning announcement is a mechanism question and not only a
 copy one.
 
+### The v4 → v5 migration, run on a real store — 2026-08-25 20:26
+
+Not a contrived one. The API 36 AVD was carrying a store written by the **previous** build, so
+installing the new APK over it exercised `onUpgrade` on a database with real rows in it — which is
+the only version of this test that means anything, and it was free.
+
+| | Before | After |
+|---|---|---|
+| `pragma user_version` | **4** | **5** |
+| `corrections_owed` | absent | present, `(link_id, day)` |
+| `links` | `granddad_`, `mum_` | **both still there** |
+
+No `DatabaseException`, no `duplicate column name`, no `no migration to v5`, and the app went on to
+reconcile and write two `watcher_cache` rows — so the store was not merely opened, it was **used**.
+The premise was read out of the pulled database before the install rather than assumed from the
+previous build's source.
+
+This matters more than a schema change usually would: `LocalStore.open()` is unguarded in both entry
+points, so a migration that throws means the app cannot open its store at all, and the only repair is
+a reinstall — which destroys `warnings_shown` and produces a fresh round of false warnings to a
+family. That is the failure `onUpgrade`'s idempotence comment is about.
+
 ### Three HyperOS behaviours that cost time in this session
 
 **`deviceidle force-idle` will not reach deep idle from a screen-off device.** It stops at

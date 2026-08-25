@@ -979,6 +979,127 @@ void main() {
       handle.dispose();
     });
 
+    // **The other direction — approved 2026-08-25.** Item 3 of the post-gate
+    // review. A push reconciles with the list open, so the delivery is
+    // `redundant`: nothing is posted and the day is recorded as SEEN. The row
+    // worsens silently, the alarm later finds the day settled and says nothing,
+    // and a screen-reader user is never told at all. `checkedInSince` loses a
+    // retraction; this loses a **warning**, which is worse in kind.
+    group('and the row that goes the other way', () {
+      testWidgets('the warning body is spoken, verbatim', (tester) async {
+        final spoken = announcementsOn(tester);
+        final handle = tester.ensureSemantics();
+
+        await pump(tester, [settled()]);
+        await pump(tester, [warned()], userInitiated: false);
+        await tester.pumpAndSettle();
+
+        // The row's own sentence, word for word — no *"Update."* prefix, and
+        // the name not said twice. Asserted against the string the row renders,
+        // so the two can never drift.
+        expect(spoken, ['No check-in from Mum yesterday.']);
+        expect(find.text('No check-in from Mum yesterday.'), findsOneWidget,
+            reason: 'and it really is what the row says');
+        handle.dispose();
+      });
+
+      testWidgets('the footer is NOT spoken with it', (tester) async {
+        // *"This phone last checked Tuesday 10:14."* is a fact about this
+        // device's own effort rather than a claim about her, and it is not what
+        // changed. Speaking it would bury the claim behind a timestamp for the
+        // one reader who cannot skim past it.
+        final spoken = announcementsOn(tester);
+        final handle = tester.ensureSemantics();
+
+        await pump(tester, [settled()]);
+        await pump(tester, [
+          person(
+            cache: WatcherCache(
+              warningsShownFor: {d: WarningOutcome.warnOnline},
+              lastReconcileAt: DateTime.utc(2026, 8, 17, 10, 14),
+            ),
+            outcome: WarningOutcome.warnOnline,
+          ),
+        ], userInitiated: false);
+        await tester.pumpAndSettle();
+
+        expect(spoken, ['No check-in from Mum yesterday.']);
+        expect(spoken.single, isNot(contains('last checked')));
+        handle.dispose();
+      });
+
+      testWidgets('a refresh the reader ASKED for says nothing', (tester) async {
+        final spoken = announcementsOn(tester);
+        final handle = tester.ensureSemantics();
+
+        await pump(tester, [settled()]);
+        await pump(tester, [warned()]);
+        await tester.pumpAndSettle();
+
+        expect(spoken, isEmpty);
+        handle.dispose();
+      });
+
+      testWidgets('LOST ACCESS is still not announced by this route',
+          (tester) async {
+        // `screens.md` marks *any → lost access* as deliberately not shipping,
+        // and it must not arrive by falling through the new branch. `rowKind`
+        // is what keeps them apart: an access failure is `accessLost`, never
+        // `warning`, so the guard cannot see it.
+        final spoken = announcementsOn(tester);
+        final handle = tester.ensureSemantics();
+
+        await pump(tester, [settled()]);
+        await pump(tester, [
+          person(
+            cache: WatcherCache(
+              accessLostSince: d,
+              accessLostCause: RefusedCause.unauthenticated,
+              lastConfirmedDay: d,
+            ),
+            outcome: WarningOutcome.warnAccessLost,
+          ),
+        ], userInitiated: false);
+        await tester.pumpAndSettle();
+
+        expect(find.text(WatcherCopy.accessLostLabel('Mum')), findsOneWidget,
+            reason: 'the premise — the row really is the lost-access one now');
+        expect(spoken, isEmpty);
+        handle.dispose();
+      });
+
+      testWidgets('a row that was ALREADY warning is not re-announced',
+          (tester) async {
+        // A push arrives for every check-in in the family. Re-reading a standing
+        // warning on each one is the fatigue that trains a reader to ignore the
+        // channel this app cannot afford to have ignored.
+        final spoken = announcementsOn(tester);
+        final handle = tester.ensureSemantics();
+
+        await pump(tester, [warned()]);
+        await pump(tester, [warned()], userInitiated: false);
+        await tester.pumpAndSettle();
+
+        expect(spoken, isEmpty);
+        handle.dispose();
+      });
+
+      testWidgets('only the person whose row worsened is named', (tester) async {
+        final spoken = announcementsOn(tester);
+        final handle = tester.ensureSemantics();
+
+        await pump(tester, [settled(), settled(uid: 'gd', name: 'Granddad')]);
+        await pump(tester, [
+          settled(),
+          warned(uid: 'gd', name: 'Granddad'),
+        ], userInitiated: false);
+        await tester.pumpAndSettle();
+
+        expect(spoken, ['No check-in from Granddad yesterday.']);
+        handle.dispose();
+      });
+    });
+
     testWidgets('a warning becoming REVOKED is not announced', (tester) async {
       // `screens.md` names two more candidate strings and marks both as
       // deliberately not shipping. Neither may arrive by falling through this:

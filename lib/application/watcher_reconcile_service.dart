@@ -187,6 +187,55 @@ class WatchedPersonState {
     return confirmed != null && confirmed >= previous.decision.day;
   }
 
+  /// Whether this row has just gone the **other** way — from *"Everything OK"*
+  /// to a standing warning — while the reader was already looking at it.
+  /// Approved 2026-08-25, and it announces the warning body **verbatim**.
+  ///
+  /// ## The gap it closes is the mirror image, and it loses more
+  ///
+  /// A foreground push reconciles with the list open, so the delivery is
+  /// [NotificationDelivery.redundant]: nothing is posted and the day is
+  /// **recorded as seen**, on the argument that the reader can see the row
+  /// change. The row worsens silently, the alarm later finds the day settled and
+  /// says nothing, and a screen-reader user is never told at all — nothing
+  /// posted, nothing spoken, day consumed.
+  ///
+  /// [checkedInSince] loses a *retraction*; this loses a **warning**, which §10
+  /// rates worse in kind.
+  ///
+  /// ## Why this needs no evidence check where [checkedInSince] needs one
+  ///
+  /// That one makes a positive claim about **her** — *"Mum checked in"* — which
+  /// the row going quiet does not establish, so it asks the cache. This one
+  /// speaks the row's own claim back, word for word: the announcement is
+  /// `NotificationCopy.warningBody`, the exact string the row is rendering and
+  /// the exact string the notification would have carried. It cannot be false
+  /// unless the row is, and then the row is the defect.
+  ///
+  /// Every outcome that can reach here names the person in its first few words —
+  /// *"No check-in from Mum yesterday."*, *"No check-in received from Mum…"*,
+  /// *"Can't check on Mum…"* — which is why `screens.md`'s rule about the
+  /// differentiator coming first is satisfied by reuse rather than by a prefix.
+  /// [WarningOutcome.warnAccessLost] is not among them: it never enters
+  /// `warningsShownFor`, and [rowKind] routes it to
+  /// [WatchedRowKind.accessLost] instead.
+  ///
+  /// ## The same-day guard is kept, and it is the conservative choice
+  ///
+  /// Same as [checkedInSince]: both states must be deciding about the same day.
+  /// Dropping it would also announce the row that turns bad at **watched-local
+  /// midnight**, when `lastCompletedDay` advances onto a day nobody has tapped
+  /// yet — and ADR-0010 exists because a warning at 00:24 is not something this
+  /// app may do unasked. The reader having the list open makes that arguable
+  /// rather than settled, and it is a policy question rather than the copy one
+  /// that was approved. So the rollover case stays silent and is recorded in
+  /// `screens.md` as the narrower gap that remains.
+  bool warnedSince(WatchedPersonState previous) {
+    if (previous.rowKind != WatchedRowKind.ok) return false;
+    if (rowKind != WatchedRowKind.warning) return false;
+    return decision.day == previous.decision.day;
+  }
+
   /// Which of the four mutually exclusive things this person's row says.
   ///
   /// **§10's step order, on the screen.** A revoked link outranks lost access,

@@ -267,10 +267,13 @@ abstract final class WatcherCopy {
   /// say the same thing, and follows [rowLabel]'s shape — name the person, then
   /// their state, as one utterance.
   ///
-  /// **This is the only change announced.** `screens.md` names two more
-  /// candidates — OK → warning, and any → lost access — as deliberately not
-  /// shipping, each owed the same approval this one got. Adding one here without
-  /// adding it there is how a screen starts speaking sentences nobody signed off.
+  /// **The OK → warning direction is now announced too** (approved 2026-08-25),
+  /// and it needs no entry in this class: it speaks
+  /// `NotificationCopy.warningBody` **verbatim**, which is the string the row is
+  /// already rendering. `screens.md` still names *any → lost access* as
+  /// deliberately not shipping, owed the same approval these two got. Adding one
+  /// here without adding it there is how a screen starts speaking sentences
+  /// nobody signed off.
   static String checkedIn(String watchedName) =>
       '$watchedName checked in. $everythingOk.';
 }

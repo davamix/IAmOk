@@ -240,7 +240,8 @@ Phase 7's problem. What follows is the wording.
 | A link this pass could not check | *"Can't check on Mum — this phone could not finish checking just now."* |
 | …and what to do about it | *"If this is still here tomorrow, ask whoever set up the app."* + **"Try again"** |
 | Spoken when a tapped notification opens a row | *"Showing Mum."* |
-| Spoken when a row stops carrying a warning **because a check-in arrived**, while the list is open, unasked | *"Mum checked in. Everything OK."* — approved 2026-08-25, see below. **Only this one change speaks**; the two candidates below do not ship |
+| Spoken when a row stops carrying a warning **because a check-in arrived**, while the list is open, unasked | *"Mum checked in. Everything OK."* — approved 2026-08-25, see below |
+| Spoken when a row **starts** carrying one, same conditions | **The notification's own sentence, verbatim** — *"No check-in from Mum yesterday."* — approved 2026-08-25, see below |
 | The load failed | *"This phone could not check on anyone. Try again, or open the app later."* + **"Try again"** |
 | No warning standing | *"Everything OK"* |
 | …with a check-in read | *"Your phone last saw a check-in on Saturday 15 August."* |
@@ -267,7 +268,8 @@ back, and no notification ever coming because the day is already recorded as see
 It bites hardest on the **correction**, which is the one message whose entire purpose is withdrawing
 a false claim about a person.
 
-**The approved string, and only this one ships first:**
+**The approved string for the row that gets better** — the first of the two that ship; the other is
+*OK → warning* below:
 
 > *"Mum checked in. Everything OK."*
 
@@ -311,9 +313,11 @@ silent — and the last check-in this device saw has not moved. So the condition
 not the row: the day the warning was about must now be confirmed. That is true for the correction,
 which is the case this exists for, and false for every way a warning can simply lapse.
 
-A row moving into or out of a **revoked** or a **lost access** state is excluded on both sides. Each
-renders something else entirely, so each is a different sentence — and the two candidates below are
-exactly those sentences, neither of which is approved.
+A row moving into or out of a **revoked** or a **lost access** state is excluded on both sides, and
+from the *OK → warning* announcement below as well. Each renders something else entirely, so each is
+a different sentence — and *any → access lost* is exactly that sentence, still unapproved. `rowKind`
+is what keeps them apart rather than a guard in the widget: an access failure is `accessLost` and
+never `warning`, so neither announcement can see it.
 
 **Two more things are pinned by tests and belong in the approved set**, because both are cases where
 saying nothing is the correct answer: a link with **no previous row** — newly paired, or previously
@@ -321,25 +325,60 @@ unreconcilable — is never announced, because there is no "before" for it to ha
 **day rollover** is never announced as a check-in, because a warning about `D` followed by a
 check-in for `D + 1` is a true sentence spoken for the wrong reason.
 
-**Deliberately not shipping yet**, and named here so nobody adds them casually — each needs the same
-approval this one got. **The first is also blocked on a mechanism question** (2026-08-25): Android 16
-may no longer dispatch accessibility announcements for apps targeting API 36, and this app targets
-36. If that is real, the answer is `Semantics(liveRegion: true)` on the row rather than a new string
-— which covers **both** directions and needs no approved copy at all. Settle that before approving
-either candidate; see `phases/phase-4-summary.md` items 1 and 3.
+#### OK → warning — approved 2026-08-25, and it is the warning body verbatim
 
-**And the wording below should not ship as drafted.** *"Update."* is a category label: it
-differentiates nothing, it is identical for both candidates, and it is the part most likely to
-survive an interrupt while the claim gets clipped — against this file's own rule that the
-differentiator belongs in the first words. It also says the name twice. The UI/UX review's
-suggestion is the warning body **verbatim**, *"No check-in from Mum yesterday."*, which is already
-approved and names the person in its first four words — the same move `checkedIn` makes when it
-reuses `everythingOk`.
+The mirror image, and it loses more. A push reconciles with the list open, so the delivery is
+`redundant`: nothing is posted and the day is **recorded as seen**. The row worsens silently, the
+alarm later finds the day settled and says nothing, and a screen-reader user is never told at all.
+`checkedIn` loses a *retraction*; this loses a **warning**, which §10 rates worse in kind.
+
+**The mechanism question that blocked it is settled.** Announcements still reach TalkBack on Android
+16 at `targetSdk 36` — measured 2026-08-25 on the API 36 AVD with an exactly-matched silent control,
+written up in `testing/device-matrix.md`. Two things stay true and are recorded there: `targetSdk`
+was never the trigger (the deprecation applies by OS version), and Flutter reports
+`MediaQuery.supportsAnnounceOf` as **false on Android generally**, so `Semantics(liveRegion: true)`
+remains the sanctioned replacement if dispatch ever stops. It is not a drop-in: this row's footer is
+*"This phone last checked Tuesday 10:14."*, which moves on every reconcile, so a whole-row live
+region would re-read the row on app open, FCM, alarm and boot. Scoping it to the status line is the
+work that would need doing.
+
+**The approved string is the warning body, word for word:**
+
+> *"No check-in from Mum yesterday."*
+
+Whatever the row is rendering — so *"No check-in received from Mum yesterday — your phone has been
+offline since…"* and *"Can't check on Mum — …"* too. It is `NotificationCopy.warningBody`, the same
+string the row shows and the same one the notification would have carried, which is why the row and
+the announcement cannot drift: `_statusFor` computes it once and both read it.
+
+**The drafted wording was rejected.** *"Update. Mum. No check-in from Mum yesterday."* — *"Update."*
+is a category label: it differentiates nothing, it is identical for both candidates, and it is the
+part most likely to survive an interrupt while the claim gets clipped, against this file's own rule
+that the differentiator belongs in the first words. It also says the name twice. Reuse names the
+person in the first four words already, which is the same move `checkedIn` makes with `everythingOk`.
+
+**The footer is not spoken with it.** *"This phone last checked Tuesday 10:14."* is a fact about this
+device's own effort rather than a claim about her, and it is not what changed. `spoken` — which
+includes it — stays right for the row **label**, where the reader is swiping through everything on
+purpose.
+
+**The same two conditions**, and the same-day guard `checkedIn` uses: both passes must be deciding
+about the same day. **The narrower gap that remains, recorded rather than glossed:** a row that turns
+bad at watched-local **midnight**, when the day being decided advances onto one nobody has tapped yet,
+is *not* announced. Dropping the guard would announce a warning at 00:24 unasked, which is what
+ADR-0010 exists to prevent; the reader having the list open makes that arguable rather than settled,
+and it is a policy question rather than the copy one that was approved.
+
+**Still deliberately not shipping**, and named here so nobody adds it casually — it needs the same
+approval the two above got:
 
 | Change | Candidate |
 |---|---|
-| OK → warning | *"Update. Mum. No check-in from Mum yesterday."* |
 | any → access lost | *"Update. Can't check on Mum."* |
+
+If it ever ships, the *"Update."* objection above applies to it too, and it should reuse the row's
+second line as well: a message whose whole justification is actionability must not be truncated to
+the half that says nothing.
 
 **This changes nothing about what is posted or consumed.** `redundant` still posts no notification
 and still records the day. An announcement is the screen speaking to a reader who is already on it,

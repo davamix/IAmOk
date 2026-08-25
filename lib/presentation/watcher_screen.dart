@@ -285,8 +285,33 @@ class _WatcherBodyState extends State<WatcherBody> {
       // in `unreconciled` — has no "before" to have changed from. Reading its
       // arrival as a change would announce a row the reader has never heard.
       if (index < 0) continue;
-      if (!person.checkedInSince(previous.people[index])) continue;
-      settled.add(WatcherCopy.checkedIn(person.name));
+      final before = previous.people[index];
+      if (person.checkedInSince(before)) {
+        settled.add(WatcherCopy.checkedIn(person.name));
+      } else if (person.warnedSince(before)) {
+        // **The row's own sentence, not a second way of saying it.** Approved
+        // 2026-08-25 as the warning body *verbatim* — already-approved copy that
+        // names the person in its first few words, which is `screens.md`'s rule
+        // about the differentiator coming first, satisfied by reuse exactly as
+        // `checkedIn` satisfies it by reusing `everythingOk`.
+        //
+        // The drafted candidate *"Update. Mum. No check-in from Mum
+        // yesterday."* was rejected: *"Update."* is a category label that
+        // differentiates nothing, is identical for both candidates, is the part
+        // most likely to survive an interrupt while the claim gets clipped, and
+        // it names her twice.
+        //
+        // `lines` rather than `spoken`: the footer is *"This phone last checked
+        // Tuesday 10:14."*, a fact about this device's own effort rather than a
+        // claim about her, and it is not what changed. `spoken` is right for the
+        // row label, where the reader is swiping through everything on purpose.
+        settled.add(_statusFor(
+          person,
+          watcherZone: widget.state.watcherZone,
+          today: widget.state.today,
+          uses24Hour: widget.state.uses24Hour,
+        ).lines.join(' '));
+      }
     }
     if (settled.isEmpty) return;
     // **One utterance, however many rows settled.** This sent one announcement
@@ -686,8 +711,31 @@ class _PersonRow extends StatelessWidget {
   /// reconcile then had two sources for one fact and could disagree about the
   /// same instant. One source, cached by `ClockService` on launch and on resume,
   /// is what both surfaces now read.
-  _RowStatus _status() {
-    final cache = person.cache;
+  _RowStatus _status() => _statusFor(
+        person,
+        watcherZone: watcherZone,
+        today: today,
+        uses24Hour: uses24Hour,
+      );
+}
+
+/// The row's rendered claim, as a value, so **the row and the announcement are
+/// the same sentence**.
+///
+/// Free-standing rather than a method on [_PersonRow] because
+/// `_WatcherBodyState._announceChanged` needs the identical string: the approved
+/// OK → warning announcement is the warning body **verbatim**, and a second
+/// place computing "what the row says" is a second chance to say something the
+/// row does not. That is the argument [WatchedPersonState.rowKind] was extracted
+/// for, one layer out — and the widget's own comment below already records what
+/// it cost when the precedence lived in two places.
+_RowStatus _statusFor(
+  WatchedPersonState person, {
+  required tz.Location watcherZone,
+  required DayKey today,
+  required bool uses24Hour,
+}) {
+  final cache = person.cache;
 
     // **The precedence is [WatchedPersonState.rowKind]'s, not this widget's.**
     // It is §10's step order — revoked, then lost access, then a standing
@@ -741,7 +789,7 @@ class _PersonRow extends StatelessWidget {
             WatcherCopy.accessLostConsequence(person.name),
             WatcherCopy.accessLostRemedy(cache.accessLostCause),
           ],
-          footer: _lastChecked(cache, uses24Hour),
+          footer: _lastChecked(cache, watcherZone, today, uses24Hour),
           isBad: true,
         );
 
@@ -762,7 +810,7 @@ class _PersonRow extends StatelessWidget {
               uses24Hour: uses24Hour,
             ),
           ],
-          footer: _lastChecked(cache, uses24Hour),
+          footer: _lastChecked(cache, watcherZone, today, uses24Hour),
           isBad: true,
         );
 
@@ -790,26 +838,30 @@ class _PersonRow extends StatelessWidget {
           //
           // `spoken` is `[...lines, ?footer].join(' ')`, so the utterance is
           // byte-identical either way.
-          footer: _lastChecked(cache, uses24Hour),
+          footer: _lastChecked(cache, watcherZone, today, uses24Hour),
           isBad: false,
         );
-    }
   }
-
-  /// When this phone last managed a successful read.
-  ///
-  /// On **every** row, healthy or not, and that is the point. A watcher whose
-  /// app was force-stopped goes deaf with the row still reading *"Everything
-  /// OK"* — which is true of the last thing this phone read and says nothing
-  /// about whether it has read anything since. This is the only surface that
-  /// distinguishes *working* from *stopped* before §13's panel lands in Phase 7.
-  String _lastChecked(WatcherCache cache, bool uses24Hour) =>
-      cache.lastReconcileAt == null
-      ? WatcherCopy.neverChecked
-      : WatcherCopy.lastChecked(
-          NotificationCopy.momentLabel(
-              cache.lastReconcileAt!, watcherZone, today, uses24Hour));
 }
+
+/// When this phone last managed a successful read.
+///
+/// On **every** row, healthy or not, and that is the point. A watcher whose
+/// app was force-stopped goes deaf with the row still reading *"Everything
+/// OK"* — which is true of the last thing this phone read and says nothing
+/// about whether it has read anything since. This is the only surface that
+/// distinguishes *working* from *stopped* before §13's panel lands in Phase 7.
+String _lastChecked(
+  WatcherCache cache,
+  tz.Location watcherZone,
+  DayKey today,
+  bool uses24Hour,
+) =>
+    cache.lastReconcileAt == null
+        ? WatcherCopy.neverChecked
+        : WatcherCopy.lastChecked(
+            NotificationCopy.momentLabel(
+                cache.lastReconcileAt!, watcherZone, today, uses24Hour));
 
 class _RowStatus {
   const _RowStatus({

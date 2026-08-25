@@ -278,8 +278,11 @@ follows `rowLabel`'s shape — name the person, then their state, as one utteran
 refresh must **not** have been user-initiated. Announcing every refresh is noise; on a resume the
 reader is arriving at the screen anyway and will read the row themselves.
 
-**Built 2026-08-25.** `WatcherState.userInitiated` carries the second condition — false only for a
-foreground push — and `WatchedPersonState.checkedInSince` decides the first.
+**Built 2026-08-25**, and **verified on hardware the same day with TalkBack running**:
+a foreground push flipped a row from a standing warning to *"Everything OK"* and TalkBack took
+speech audio focus 1.7 s later, while a control push that changed no row produced no speech at all.
+`WatcherState.userInitiated` carries the second condition — false only for a foreground push — and
+`WatchedPersonState.checkedInSince` decides the first.
 
 **The change is not "the row got better", and the difference is a claim about a person.** *"Mum
 checked in"* has to be true. A row can reach *"Everything OK"* from a standing warning with nobody

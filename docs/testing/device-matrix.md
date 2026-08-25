@@ -1013,26 +1013,119 @@ the watcher's zone, so nothing posts, nothing is recorded, `lastDecidedDay` does
 alarm window is armed unchanged. Eleven tests in `watcher_reconcile_service_test.dart` pin it, and
 five of them fail against a build with the gate removed (mutation-checked 2026-08-25).
 
-**This measurement is owed a re-run and has not had one.** ☐ The expected result changes from *"a
-warning at 00:24"* to **three** things, and the third is the one that decides whether this is a fix
-or a new failure:
+### The re-run — 2026-08-25 07:44–08:01, and it holds
 
-| Check | Expected | Read it from |
-|---|---|---|
-| The tray | no new notification key for the package | `dumpsys notification` keys, diffed — not counted |
-| The alarm | today's `warningLocalTime` alarm still armed | `dumpsys alarm`, written to a file on the device and pulled |
-| The day | still **owed** — absent from `warningsShownFor`, and `last_decided_day` below `D` | the **pulled store**, never the screen |
+POCO F3, **real clock, `debug_clock_offset_ms` = 0, `debug_simulated_backend` absent** — both read
+out of the pulled store before and after, so the harness override that could have faked this was
+provably not in the path.
 
-The third cannot be checked by looking: a lost warning and a held one look identical at 00:24 and
-differ only at 10:00. Push at 00:24, assert the three rows above, then move the debug clock past the
-warning time, reconcile, and assert the warning **is** posted. A run that stops at "nothing appeared"
-has measured the wrong half.
+**The instrument is `warningLocalTime`, not a forced date.** A second watched person (*Granddad*,
+`activeFrom` 2026-08-20, no check-ins) was linked with the warning time set ahead of the real clock
+and then moved, so the only thing that changed between the held run and the spoken one was the hour.
+That is a cleaner mutation than shifting the clock: it leaves every other input — the day, the read,
+the store, the actor — identical.
+
+| Actor | Device time | vs `warningLocalTime` | Notification | `warnings_shown[2026-08-24]` | `last_decided_day` | today's alarm |
+|---|---|---|---|---|---|---|
+| App-open reconcile (UI, `available`) | 07:44:24 | before 08:30 | none | absent | null | armed 08:30 |
+| **FCM push, app killed** | 07:49:01 | before 08:30 | **none** | **absent** | **null** | armed 08:30 |
+| App-open reconcile (UI) | 07:51:28 | before 08:00 | none | absent | null | re-armed 08:00 |
+| **Warning alarm isolate** | 08:01:00 | **past 08:00** | **posted** | **`warnOnline`** | **2026-08-24** | fired; window rolls on |
+
+The push was real and the process was cold — `pidof` was empty before it and 6206 after, and the
+platform named the reason itself:
+
+```
+UID=10612: +14s523ms - broadcast:u0a189:com.google.android.c2dm.intent.RECEIVE,reason:high-prio FCM
+```
+
+`last_reconcile_at` moved 07:44:24 → **07:49:01** on that push, which is what makes the silence mean
+something: `applyRead` stamps it only inside the read-succeeded branch, so the isolate ran **and**
+the Firestore read succeeded, and the warning was owed. It said nothing anyway.
+
+Then, with nothing touched in between, the alarm at the watcher's own hour:
+
+```
+pkg=io.github.davamix.i_am_ok  channel=warnings  importance=5
+android.title = "I Am Ok"
+android.text  = "No check-in from Granddad yesterday."
+```
+
+**Late, never lost — measured, not argued.** The tray held nothing from this app at 07:44, 07:49 or
+07:51, and held exactly this at 08:01.
+
+**What this run does NOT establish.** Forced deep Doze could not be entered: `deviceidle force-idle`
+stopped at `INACTIVE` at every attempt, because HyperOS parks the screen-off device in `Dozing`
+wakefulness with a `DOZE_WAKE_LOCK` held by `DreamManagerService`. The device was screen-off,
+unplugged (simulated) and the app killed, which is unattended but not Doze. Doze is not the variable
+ADR-0010 turns on — the gate is a clock comparison — and ADR-0008's measurement already established
+that a high-priority push wakes the isolate from deep Doze on this handset, so this was recorded
+rather than chased. The `am kill` on the *second* half also did not take (HyperOS kept pid 6206
+resident), so the 08:01 alarm ran in a resident process rather than a fresh one; the 07:49 push,
+which is the half that matters, did not.
 
 **The test premise was wrong first, and that is worth recording too.** The script asserted "today IS
 checked in, so the reconcile has nothing to say" — while the seeded check-in was for 2026-08-21 and
 the device clock had moved on to 2026-08-25. The reconcile was right and the assumption was stale,
 which is the third time this phase that a measurement's premise, not its subject, was the thing at
 fault.
+
+### A row that changes under a screen reader — measured 2026-08-25 08:10, with TalkBack running
+
+The other half of the same session, and it needed the *opposite* setup: the app **in front of the
+reader**, on the watcher list, with a push arriving unasked.
+
+Method: link a watched person with no check-ins so the row carries a warning, open the list, turn
+TalkBack on, then write that person's missing day into Firestore. `onCheckInCreated` fans out, the
+push lands in the foreground, `_onForegroundPush` refreshes with `userInitiated: false`, and the row
+flips — which is exactly the case `NotificationDelivery.redundant` posts nothing for.
+
+| | Read from |
+|---|---|
+| Row before — *"Pop. No check-in from Pop yesterday. This phone last checked 08:10."* | the accessibility tree (`uiautomator dump`), not the pixels |
+| Row after — *"Pop. Everything OK Your phone last saw a check-in on Monday 24 August…"* | same |
+| TalkBack spoke, 08:10:52.657 → 08:10:55.197 | `MediaFocusControl` audio focus for `USAGE_ASSISTANCE_ACCESSIBILITY/CONTENT_TYPE_SPEECH`, plus a `GoogleTTSServiceImpl` synthesis request |
+| **Control: a push that changed no row, 08:12:44** — reconcile ran, **no speech at all** | the same log, and the store's `last_reconcile_at` proving the reconcile happened |
+
+The control is what makes it evidence rather than a coincidence: the same actor, the same screen,
+the same second-scale window, and the only difference is whether a row changed. Repeated once
+(*Gran*, 08:14:24) with the same result.
+
+**What it does not establish: the words.** TalkBack logs utterance text only at a log level its
+default build does not use, so this run proves *that* it spoke and *when*, not *what*. The string is
+asserted against the `SystemChannels.accessibility` platform message in `watcher_screen_test.dart`,
+including the case where a warning lapses without a check-in and must **not** be announced.
+
+### Three HyperOS behaviours that cost time in this session
+
+**`deviceidle force-idle` will not reach deep idle from a screen-off device.** It stops at
+`INACTIVE`, every time, however many `step deep` calls follow. The cause is visible in
+`dumpsys power`: HyperOS parks a screen-off device in `mWakefulness=Dozing` with a `DOZE_WAKE_LOCK`
+held by `DreamManagerService`, and `mForceIdle` never flips. `doze_always_on` was already `0`, so
+that is not the lever. ADR-0008's runs did reach deep idle, so it is reachable — just not by this
+route, and not on demand.
+
+**`am kill` does not reliably kill this app.** It worked before the first push (`pidof` empty) and
+then would not touch pid 6206 through six attempts and an `am kill-all`, with the app backgrounded
+and the screen off. Use `pidof` to check rather than assuming; do **not** reach for `am force-stop`
+as a substitute while alarms matter — it cancels every one of them, and a force-stopped app stops
+receiving FCM entirely.
+
+**Pull the app's database with `adb exec-out`, never with a shell redirect.**
+`adb shell "run-as <pkg> cat databases/i_am_ok.db > /sdcard/x.db"` creates the file, exits 0, and
+`adb pull` then reports *"1 file pulled"* — of **zero bytes**. The same `cat` piped to `wc -c` returns
+73728, so the data is readable and only the redirect fails. `adb exec-out run-as <pkg> cat
+databases/i_am_ok.db > local.db` works and is binary-safe. This is the constraint about asserting on
+content before trusting a file, in a new costume: check the byte count, or read a database that is
+not there.
+
+**Deleting a link from Firestore strands its warning alarms.** `LinkRepository.syncInto` calls
+`replaceLinksFor`, so the local row disappears — and `reconcile()` iterates the links that exist, so
+nothing ever cancels what the deleted one had armed. 27 orphaned alarms, in the store and on the
+platform. **Revoking it instead cleans both**, because §10 step 1 is the designed path: set
+`status: 'revoked'`, sync, reconcile, and the alarms and their store rows are torn down; only then
+delete. Not a production path — links are revoked, never deleted — but it is the shape of a test rig
+left behind for the next session.
 
 ## What one phone and an emulator can prove — decided 2026-08-20
 
@@ -1093,13 +1186,20 @@ FCM work on it**. An AOSP image would have made the whole arrangement impossible
       Doze on this handset.
 - [ ] Delivery still works after the device has been idle overnight (real Doze) — POCO as receiver;
       the AVD is not involved
-- [ ] **A push before `warningLocalTime` posts nothing, and the day is still owed**
-      ([ADR-0010](../architecture/decisions/0010-a-push-may-not-post-a-warning-early.md), implemented
-      2026-08-25 and **not yet run on hardware**). This is the re-run of *Does a Doze push show the
-      user anything*, whose 00:24 warning is the finding the rule closes. Three checks, and the
-      third is the whole point — see that section for the table. A run that stops at "nothing
-      appeared" cannot tell a **held** warning from a **lost** one; move the debug clock past the
-      warning time afterwards and assert the warning **is** posted.
+- [x] **A push before `warningLocalTime` posts nothing, and the day is still owed** — 2026-08-25
+      07:49, [ADR-0010](../architecture/decisions/0010-a-push-may-not-post-a-warning-early.md). App
+      killed, real high-priority FCM, read succeeded (`last_reconcile_at` moved), **no notification**,
+      the day absent from `warnings_shown` and `last_decided_day` still below `D`, today's alarm still
+      armed. The same store then **posted** *"No check-in from Granddad yesterday."* at 08:01 when the
+      alarm reached the watcher's own hour. Full table and the two things it does not establish — no
+      forced deep Doze, and a resident process on the second half — in the section above.
+- [x] **A row that changes under a screen reader is announced** — 2026-08-25 08:10, with **TalkBack
+      running**. A foreground push flipped a row from *"No check-in from Pop yesterday."* to
+      *"Everything OK…"* (read out of the accessibility tree, before and after) and TalkBack took
+      speech audio focus 1.7 s later. **Control, same run:** a second push that changed no row
+      produced no speech at all. TalkBack does not log utterance **text** at its default level, so
+      the device evidence is *spoke / did not speak*; the words themselves are pinned against
+      `SystemChannels.accessibility` in `watcher_screen_test.dart`.
 
 **Phase 5 — pairing.** All three.
 

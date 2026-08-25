@@ -6,12 +6,12 @@ guard clean.
 **Status: implemented and reviewed at the gate. All five reviewers have run and every finding is
 fixed or recorded.** **Not signed off.**
 
-**Both owner-approved changes are now built** — a push may not post a warning before
-`warningLocalTime` ([ADR-0010](../architecture/decisions/0010-a-push-may-not-post-a-warning-early.md)),
-and a row that changes under a screen reader is announced. **Neither has been run on hardware**, and
-both were made conditional on a device run. Everything else outstanding is not code: the first
-Functions deploy, App Check's console half, one measurement that needs the live project, and one
-open decision. Start at *Prompt to start the next session*.
+**Both owner-approved changes are built and proven on the POCO F3** — a push may not post a warning
+before `warningLocalTime` ([ADR-0010](../architecture/decisions/0010-a-push-may-not-post-a-warning-early.md)),
+and a row that changes under a screen reader is announced. Both device runs were the condition of
+their approval and both passed on 2026-08-25. Everything left is the owner's call or the console:
+one open decision, the first Functions deploy, App Check's console half, and the live-radio
+measurement. Start at *Prompt to start the next session*.
 
 ---
 
@@ -44,8 +44,8 @@ been faked**, by exactly the false green the phase had already produced once.
 Five review rounds followed: `39764d9` architecture, `d322a12` security, `df586e7` testing,
 `fcca7b2` infrastructure, `43cd1b2` UI/UX.
 
-Then the two changes the reviews produced and the owner approved, both built on 2026-08-25 and
-**neither yet run on hardware**:
+Then the two changes the reviews produced and the owner approved, both built **and proven on the
+POCO F3** on 2026-08-25:
 
 | Change | What |
 |---|---|
@@ -188,21 +188,39 @@ the decision still open, and the owner asked for the number before any ADR is dr
 
 ---
 
-## Still owed
+## Proven on the device — 2026-08-25, 07:44–08:14
 
-**Two device runs, for code that is already written.** Both changes above were approved on the
-condition that they are proved on hardware, and neither has been:
+Both changes were approved on the condition that they be shown on hardware. Both were.
 
-- **ADR-0010, re-running *Does a Doze push show the user anything*.** The expected result flips from
-  a warning at 00:24 to **three** things — no notification, today's alarm still armed, and the day
-  still owed — and the third has to be read from the **pulled store**, because a held warning and a
-  lost one look identical at 00:24. Then move the clock past 10:00 and assert it posts. The table is
-  in `device-matrix.md`.
-- **The announcement, with TalkBack actually on.** The widget tests assert the platform message; only
-  the device answers whether TalkBack speaks it, and whether it arrives after the row has changed
-  rather than over the top of it.
+**ADR-0010.** Real clock, `debug_clock_offset_ms` = 0 and `debug_simulated_backend` absent — read out
+of the pulled store on both sides, so the override that could have faked this was provably not in the
+path. A real high-priority FCM push woke a **cold** process (`pidof` empty before, 6206 after) at
+07:49; `last_reconcile_at` moved, so the isolate ran and the read succeeded; and **nothing was
+posted**, with the day absent from `warnings_shown`, `last_decided_day` still below `D`, and today's
+alarm still armed. The same store then posted *"No check-in from Granddad yesterday."* at **08:01**,
+when the alarm reached the watcher's own hour. **Late, never lost, measured.**
 
-**And the rest, none of which is code:**
+The instrument was `warningLocalTime` itself, not a forced clock — a second watched person linked
+with the warning time ahead of the real clock, then moved — so the only difference between the held
+run and the spoken one is the hour.
+
+**The announcement.** With TalkBack running, a foreground push flipped a row from *"No check-in from
+Pop yesterday."* to *"Everything OK…"* (read out of the accessibility tree) and TalkBack took speech
+audio focus 1.7 s later. **The control is what makes it evidence:** a second push that changed no row
+produced no speech at all. Repeated once with the same result.
+
+**Two limits, recorded rather than glossed.** Forced deep Doze could not be entered on HyperOS —
+`deviceidle force-idle` stops at `INACTIVE` because a screen-off device sits in `Dozing` wakefulness
+with `DreamManagerService` holding a `DOZE_WAKE_LOCK`; Doze is not what ADR-0010 turns on, and
+ADR-0008 already established the wake-up. And TalkBack does not log utterance **text** at its default
+level, so the device shows *spoke / did not speak*, while the words are pinned in
+`watcher_screen_test.dart`.
+
+Full method, tables and three HyperOS traps: [../testing/device-matrix.md](../testing/device-matrix.md).
+
+---
+
+## Still owed, and none of it is code
 
 - **The first Functions deploy.** The Cloud Functions API is enabled (three clean runs); the other
   six 2nd-gen prerequisites are **unverified** and cannot be checked from this machine — `gcloud` is
@@ -255,58 +273,19 @@ Start it detached with output redirected to a file.
 > **deliberately frozen**; read it for the four things that went wrong earlier in the phase, never
 > for current state.
 >
-> **Steps 4–7 are built and reviewed at the gate**, and so are the two changes the owner approved on
-> 2026-08-25. 921 Dart tests, 30 Functions tests, `flutter analyze` clean. ADR-0008's deciding
-> measurement **passed both its questions** in forced deep Doze, mutation-checked against
-> `priority: 'normal'`.
+> **Everything with code in it is done.** Steps 4–7 are built and reviewed at the gate; the two
+> changes the owner approved on 2026-08-25 are built, mutation-checked in the VM, and **proven on the
+> POCO F3** the same day. 921 Dart tests, 30 Functions tests, `flutter analyze` clean, debug APK
+> builds. ADR-0008's deciding measurement passed both its questions in forced deep Doze,
+> mutation-checked against `priority: 'normal'`.
 >
-> **Nothing on this list is a code change.** Two of them are device runs for code that is already
-> written and was approved on condition of exactly that; the rest are the owner's calls and the
-> console.
->
-> ---
->
-> ### 1. Prove ADR-0010 on the device — the re-run that closes the 00:24 finding
->
-> **What changed.** A warning is now posted only once `now >= today's `warningLocalTime`` in the
-> watcher's zone. It is one static function, `WatcherReconcileService._notBefore`, which hands the
-> domain `NotificationDelivery.unavailable` on the **warning** channel — the state that already
-> means *not posted, not consumed, still owed*. Access-lost is deliberately not gated; corrections
-> are, and `screens.md` records why.
->
-> **The measurement to re-run** is `device-matrix.md` § *Does a Doze push show the user anything*,
-> which is where the 00:24 warning was found. It now has a three-row expectation table. **The third
-> row is the whole point**: a *held* warning and a *lost* one are indistinguishable at 00:24 and
-> differ only at 10:00, so the day being still owed has to be read out of the **pulled store**
-> — `warnings_shown` empty for `D`, `last_decided_day` below `D` — and never off the screen. Then
-> move the debug clock past the warning time, reconcile, and assert the warning **is** posted. A run
-> that stops at *"nothing appeared"* has measured the wrong half and would tick a lost warning as a
-> pass.
->
-> Eleven tests pin this in `watcher_reconcile_service_test.dart`, and five of them fail against a
-> build with the gate removed. That is the VM half; the device half is what is owed.
->
-> ### 2. Prove the announcement with TalkBack actually running
->
-> A row that goes from a standing warning to *"Mum checked in. Everything OK."* is announced, but
-> only when the pass was **not** user-initiated and only when the warned day is now **confirmed** —
-> the second condition asks `WatcherCache.lastConfirmedDay`, not the row, because a warning can lapse
-> without anybody tapping and *"Mum checked in"* would then be a false claim about a person.
->
-> The widget tests assert the platform message on `SystemChannels.accessibility`. What they cannot
-> answer: whether TalkBack speaks it, and whether it lands **after** the row has changed rather than
-> over the top of the row it is about. Turn TalkBack on, open the list on a person with a standing
-> warning, and push.
->
-> ---
->
-> ### Then, in order
+> **What is left is the owner's call, the console, and one live-radio run. In order:**
 >
 > 1. **Investigate what ADR-0008's option 1 actually costs** — the owner asked for the number before
 >    any ADR is drafted. It means replacing or forking `android_alarm_manager_plus` so the warning
 >    uses the allowlist its own broadcast receiver is already granted, instead of handing the work to
 >    JobScheduler. Report the cost; **do not draft the ADR** until the owner has it. This is the one
->    decision still open.
+>    decision still open, and it is the only one.
 > 2. **The first Functions deploy.** The Cloud Functions API is enabled (three clean runs); the other
 >    six 2nd-gen prerequisites are **unverified and unverifiable from this machine** — no `gcloud`,
 >    and the CLI exposes no read. `firebase deploy --only functions --dry-run --project i-am-ok-c74ca`
@@ -322,6 +301,14 @@ Start it detached with output redirected to a file.
 >
 > ---
 >
+> **The device rig, as this session left it.** One accepted link (the self-link, `warningLocalTime`
+> 10:00), 7 warning alarms armed at 10:00 matching the store exactly, an empty tray, TalkBack off and
+> the accessibility services restored, battery and `deviceidle` reset. The emulator suite from the
+> 00:24 session is still up on 4000/4400/4500/5001/8080/9099 with `adb reverse` in place — check
+> before starting another, because the second one fails with *"port taken"* and looks like a broken
+> script. One thing was not restored: `secure screensaver_enabled` was set to `0` to try to force
+> Doze and its original value was never captured.
+>
 > **Four things that will cost you time otherwise.** Only one emulator script may run at a time —
 > `emulators.ps1`, `rules-test.ps1` and `functions-test.ps1` all want 8080/9099/5001. `adb reverse`
 > dies with an adb **server** restart, not just a cable unplug, and the failure reads as a broken
@@ -329,10 +316,19 @@ Start it detached with output redirected to a file.
 > the CLI spinning on `EPIPE` with the hub unreachable and no way to export state. And both Firebase
 > plugins rewrite `127.0.0.1` to `10.0.2.2` on Android unless `automaticHostMapping: false`.
 >
+> **And three HyperOS behaviours measured on 2026-08-25**, all written up in `device-matrix.md`:
+> `deviceidle force-idle` will not reach deep idle from a screen-off device (a `DOZE_WAKE_LOCK` held
+> by `DreamManagerService` parks it in `Dozing`); `am kill` does not reliably kill this app, so check
+> `pidof` rather than assuming, and never substitute `am force-stop` while alarms matter; and
+> **deleting** a link from Firestore strands its warning alarms, while **revoking** it tears them down
+> the way §10 step 1 says.
+>
 > **The habit that found everything at this gate: read a claim against the thing it describes.**
 > Nine findings, and almost none came from a test failing — they came from a docstring, a checklist,
 > a copy table and a threat model each asserting something that had quietly stopped being true.
 > **Verify the measurement before you trust the result**: three times this phase the subject was fine
-> and the *measurement* was wrong. And this is the side where a false claim to a family is the worst
-> bug the app can have — prefer stopping to ask over guessing, and if you think a finding is wrong,
-> say so before acting on it rather than after.
+> and the *measurement* was wrong, and the device runs above were built around that — a control push
+> that must produce silence, and the harness override read out of the store to prove it was absent.
+> This is the side where a false claim to a family is the worst bug the app can have — prefer stopping
+> to ask over guessing, and if you think a finding is wrong, say so before acting on it rather than
+> after.

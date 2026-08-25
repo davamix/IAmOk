@@ -89,6 +89,14 @@ gate removed.
 **Reversing it** is a one-line change and no migration: the gate is one static function with one
 call site, and nothing is persisted differently.
 
+**Verified on hardware, 2026-08-25.** POCO F3, real clock, harness override provably absent: a real
+high-priority FCM push woke a cold process at 07:49, the read succeeded, and nothing was posted — the
+day absent from `warnings_shown`, `lastDecidedDay` still below `D`, today's alarm still armed. The
+same store then posted *"No check-in from Granddad yesterday."* at 08:01 when the alarm reached the
+watcher's own hour. The instrument was `warningLocalTime` itself rather than a forced clock, so the
+only difference between the held run and the spoken one is the hour. Method, table and the two things
+it does not establish: `testing/device-matrix.md`.
+
 ## Alternatives considered
 
 **Post immediately and let the reader mute the channel.** Rejected: the *Missed check-ins* channel

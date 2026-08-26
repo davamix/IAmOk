@@ -290,6 +290,19 @@ allowances mean effectively €0 at this scale, but the card must be on the acco
 
 ## Phase 5 — Onboarding and pairing
 
+> **NEXT. Start from [phases/phase-5-brief.md](phases/phase-5-brief.md)**, which carries what already
+> exists to build on, the design decisions not to re-litigate, and the emulator-first instruction.
+>
+> **Build against the local Firebase Emulator Suite.** A 2nd-gen deploy would currently **fail** —
+> four of the seven prerequisite APIs are missing (Cloud Build, Artifact Registry, Eventarc, Cloud
+> Run), verified read-only with `gcloud` on 2026-08-25 — and Blaze is on, so enabling them is
+> billable rather than blocked. The Functions emulator hosts callables, so `redeemInvite` needs no
+> deploy to be built and driven from two real devices.
+>
+> `InviteService` and `redeemInvite` do not exist yet. `firestore.rules` already denies every client
+> read and write on `invites/{code}`, and `Link` already carries every field `redeemInvite` has to
+> denormalise.
+
 **Deliverables** — the three screens with both Skip options, identical for every user; invite
 creation and the `redeemInvite` callable; role routing from the two selections; the summary screen.
 

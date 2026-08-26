@@ -42,13 +42,20 @@ class ScheduledWarning {
   String toString() => 'ScheduledWarning($day @ $at)';
 }
 
-/// A standing warning that a late check-in has proved wrong (§10).
+/// A warning that a late check-in has proved wrong (§10).
 ///
-/// The notification is **replaced**, not supplemented — same id, so the family
-/// sees one corrected message rather than two contradictory ones. The id is
-/// `hash(link, day)`, which is built at the platform edge in Phase 3; carrying
+/// The notification is posted at the **same id**, `hash(link, day)`, so when one
+/// is standing the family sees one corrected message rather than two
+/// contradictory ones. The id is built at the platform edge in Phase 3; carrying
 /// both parts here is what keeps a correction for one watched person from
 /// touching a standing warning for another on the same day.
+///
+/// **"Replaces" is only one of the two routes here**, and the sentence used to
+/// claim it was both. A day drained out of [WatcherCache.correctionsOwedFor] had
+/// its warning **cancelled by an earlier pass** — the reader's hour had not
+/// arrived, or the channel was muted — so there is nothing standing to replace
+/// and this is a fresh post. The shared id still earns its keep: it is what
+/// prevents a second notification in the case where one *is* standing.
 class Correction {
   const Correction({required this.linkId, required this.day});
 
@@ -124,9 +131,14 @@ class WatcherReconcileResult {
   /// see [NotificationCopy.warningBody].
   final List<WarningDecision> catchUpWarnings;
 
-  /// Standing warnings a late check-in has disproved. The notification is
-  /// **replaced** by the correction message — or, when
-  /// [shouldPostCorrections] is false, simply taken down.
+  /// Warnings a late check-in has disproved — both the ones this read disproved
+  /// and the ones an earlier pass disproved but could not speak about
+  /// ([WatcherCache.correctionsOwedFor]).
+  ///
+  /// A standing notification is **replaced** by the correction message at the
+  /// same id — or, when [shouldPostCorrections] is false, simply taken down and
+  /// the day left owed. For a day whose warning an earlier pass already
+  /// cancelled, nothing is standing and the correction is a fresh post.
   final List<Correction> corrections;
 
   /// This build's tzdata does not carry `link.watchedTimezone`, so the day was
@@ -157,6 +169,21 @@ class WatcherReconcileResult {
   ///   row goes from the warning to *"Everything OK"* in the same reconcile. A
   ///   notification would be telling someone what they are already reading.
   ///
+  ///   **That premise is weaker for a day drained out of
+  ///   [WatcherCache.correctionsOwedFor], and the difference is stated rather
+  ///   than left to be discovered.** There the warning was cancelled by an
+  ///   *earlier* pass, so the row is already *"Everything OK"* before this
+  ///   reconcile and **nothing changes under the reader** —
+  ///   [WatchedPersonState.checkedInSince] cannot fire either, because the
+  ///   previous row was not a warning. The day is consumed and no *"Correction"*
+  ///   is said on any channel.
+  ///
+  ///   It stays honest: the row reads *"Everything OK"* above *"Your phone last
+  ///   saw a check-in on Saturday 15 August."*, which is the truth and is what
+  ///   the reader is looking at. But it rests on *the row shows the settled
+  ///   truth*, not on *the reader watched it change* — a real difference for
+  ///   someone who cannot see the row, and the reason this is written down.
+  ///
   ///   **Phase 4 widened what `redundant` covers, and one case is now weaker
   ///   than this argument.** It used to mean *the reader just navigated here*,
   ///   so the change happened under their eyes. A foreground FCM nudge makes it
@@ -167,14 +194,17 @@ class WatcherReconcileResult {
   ///   (`SemanticsService.sendAnnouncement`).
   ///
   ///   **DECIDED by the owner and BUILT, 2026-08-25: announce it** —
-  ///   `WatcherState.userInitiated` plus `WatchedPersonState.checkedInSince`,
-  ///   verified on the POCO F3 with TalkBack running. The trigger is narrow on
-  ///   purpose: a person's
-  ///   rendered status **changed** *and* the refresh was not user-initiated.
-  ///   Announcing every refresh is noise, and on a resume the reader is arriving
-  ///   at the screen anyway. The approved string is in `screens.md`; only the
-  ///   correction case ships first, because that is the one Phase 4 created and
-  ///   the one where silence is most misleading.
+  ///   `WatcherState.userInitiated` plus `WatchedPersonState.checkedInSince`
+  ///   for the row that gets better and `WatchedPersonState.warnedSince` for the
+  ///   row that gets worse, verified on the POCO F3 with TalkBack running. The
+  ///   trigger is narrow on purpose: a person's rendered status **changed** *and*
+  ///   the refresh was not user-initiated. Announcing every refresh is noise, and
+  ///   on a resume the reader is arriving at the screen anyway.
+  ///
+  ///   **Both directions ship** (the second approved later the same day). Only
+  ///   *any → access lost* remains unapproved, and `rowKind` is what keeps it
+  ///   out rather than a guard in the widget. The approved strings are in
+  ///   `screens.md`.
   ///
   ///   **This does not change what is POSTED or what is CONSUMED.** `redundant`
   ///   still means no notification and still records the day as seen. An

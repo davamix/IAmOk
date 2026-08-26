@@ -1,7 +1,9 @@
 # Screen inventory
 
 **Date:** 2026-08-16 · **Status:** Specification-in-progress. **The Tap screen and the debug harness
-are built** (Phase 2); everything else is still specification.
+were built in Phase 2, and the watcher list in Phase 3** — see *Built in Phase 3* below; the rest is
+still specification. (This line said *"everything else is still specification"* until 2026-08-25;
+`guidelines.md` had the identical claim corrected the same day and this file was missed.)
 
 What is recorded here is **only what has actually been decided** — mostly behaviour and copy,
 carried over from [PLAN.md](../PLAN.md) and [ARCHITECTURE.md](../architecture/ARCHITECTURE.md).
@@ -295,6 +297,18 @@ them, and the one dropped is the first, which is the oldest row and the person t
 waiting longest to hear about. Repetitive, and every word of it is already approved; a shorter
 summary would be a new string needing its own approval.
 
+**A mixed pass leads with the warning**, not with the good news:
+
+> *"No check-in from Granddad yesterday. Mum checked in. Everything OK."*
+
+Within one utterance the part at risk is the **tail** — an interrupt takes the end, not the
+beginning — so the same rule that keeps the differentiator in the first words of a body keeps the
+loud sentence at the front of an announcement. Appending both kinds in `people` order put the warning
+last whenever an improving row happened to sort above a worsening one, and a blind watcher would hear
+that one relative is fine and lose the sentence saying a different relative is not, with no
+notification coming because `redundant` had already recorded the day as seen. List order still
+decides the order **within** each kind.
+
 **Two conditions, both required.** The person's rendered status must have **changed**, and the
 refresh must **not** have been user-initiated. Announcing every refresh is noise; on a resume the
 reader is arriving at the screen anyway and will read the row themselves.
@@ -350,6 +364,12 @@ Whatever the row is rendering — so *"No check-in received from Mum yesterday �
 offline since…"* and *"Can't check on Mum — …"* too. It is `NotificationCopy.warningBody`, the same
 string the row shows and the same one the notification would have carried, which is why the row and
 the announcement cannot drift: `_statusFor` computes it once and both read it.
+
+**That last opener belongs to two different outcomes and only one of them is announced.** It is
+`warnUnverifiableAway` — *this phone cannot check, and she was marked away until Saturday*. The
+identical opener on `warnAccessLost` is **not** announced and is not this: an access failure renders
+the `accessLost` row, never the `warning` one, so it cannot reach here. Working from the table alone,
+that is the easy one to get backwards.
 
 **The drafted wording was rejected.** *"Update. Mum. No check-in from Mum yesterday."* — *"Update."*
 is a category label: it differentiates nothing, it is identical for both candidates, and it is the
@@ -748,6 +768,25 @@ than silent ones — alarm fatigue is not a risk at that frequency.
 > watching the row correct itself. The two `unavailable` cases leave the day **owed**, and the first
 > pass that can post says the already-approved sentence then. Nothing new is written for it:
 > `correctionBody` already names a day that is not yesterday.
+>
+> **OPEN, and owed to the owner: how stale is too stale?** `correctionsOwedFor` has no age bound —
+> the only exits are a postable pass and revocation. ADR-0010's hour bounds the delay to hours; a
+> **muted** channel does not bound it at all, and §13's watcher is exactly the person Android
+> auto-revokes `POST_NOTIFICATIONS` from. So months later the first postable pass can put
+> *"Correction: Mum did check in on Saturday 15 August."* on the *Missed check-ins* channel, alone,
+> retracting a warning cancelled out of the tray a season ago. The copy is honest and correctly dated
+> — `_when` gives the written-out date, never *"yesterday"* — so this is not a false claim; it is a
+> question of whether a very old retraction is worth saying, and the argument three paragraphs down
+> (*a bare correction arriving alone reads as a warning the reader somehow slept through*) applies to
+> it with more force the older it gets. **Either bound it or state that it is deliberately unbounded.**
+> Bounding it is code, not copy.
+>
+> **Also open, and smaller:** a day drained out of `correctionsOwedFor` under `redundant` is consumed
+> with nothing said on any channel, because the row was *already* correct before that reconcile and so
+> nothing changed under the reader — `checkedInSince` cannot fire either. The row does show the truth,
+> so nothing false is said; but the `redundant` argument here rests on *the row shows the settled
+> truth* rather than on *the reader watched it change*, which is a real difference for someone who
+> cannot see the row. Recorded on `shouldPostCorrections` too.
 >
 > **Only the first of the three means the tray was empty.** This blockquote used to say a correction
 > is spoken *"only when the warning it retracts was actually posted"*, and that the `redundant` case

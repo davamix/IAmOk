@@ -200,7 +200,7 @@ thing some readers get.
 | `CheckInRepository` | Data | Write today's check-in; read a watched person's days | UI, Alarm |
 | `AwayRepository` | Data | Read / set / cancel the away period for a watched user | UI, FCM, Alarm |
 | `InviteService` | Data | Create invite; call `redeemInvite` | UI |
-| `LocalStore` | Data | SQLite. Per-link `lastConfirmedDate`, `warningsShownFor` (day → **which** warning is standing, [ADR-0004](decisions/0004-refused-is-not-unreachable.md)), `activeFrom`, `watchedTimezone`, cached `awayPeriod`, `accessLostSince` + `accessLostCause` + `accessLostNotifiedOn`; plus `deviceTimezone`, `pendingAlarms`, `lastReconcileAt` (a **timestamp** — §10 renders "offline since 10:14"), and the `reconcileLock` lease ([ADR-0006](decisions/0006-reconcile-is-serialised-on-disk.md)); plus three device-health settings that §13's panel reads in Phase 7 and `dump` shows meanwhile — `warningAlarmsExact` (the exact-alarm degradation actually happened), `linkReconcileFailed` (a link this app silently stopped checking), and `uses24HourClock` (a device fact a bare isolate cannot ask for, cached exactly as `deviceTimezone` is) | **All three** |
+| `LocalStore` | Data | SQLite. Per-link `lastConfirmedDate`, `warningsShownFor` (day → **which** warning is standing, [ADR-0004](decisions/0004-refused-is-not-unreachable.md)), `correctionsOwedFor` (days whose warning has been **disproved and taken down** but whose retraction has not been spoken — a separate fact from the one above, and separate because that one is the sole input to the row's warned state, [ADR-0010](decisions/0010-a-push-may-not-post-a-warning-early.md)), `lastDecidedDay` ([ADR-0009](decisions/0009-decide-about-every-completed-day.md)'s catch-up pointer), `activeFrom`, `watchedTimezone`, cached `awayPeriod`, `accessLostSince` + `accessLostCause` + `accessLostNotifiedOn`; plus `deviceTimezone`, `pendingAlarms`, `lastReconcileAt` (a **timestamp** — §10 renders "offline since 10:14"), and the `reconcileLock` lease ([ADR-0006](decisions/0006-reconcile-is-serialised-on-disk.md)); plus three device-health settings that §13's panel reads in Phase 7 and `dump` shows meanwhile — `warningAlarmsExact` (the exact-alarm degradation actually happened), `linkReconcileFailed` (a link this app silently stopped checking), and `uses24HourClock` (a device fact a bare isolate cannot ask for, cached exactly as `deviceTimezone` is) | **All three** |
 | `AlarmScheduler` | Platform | Schedule / cancel / enumerate alarms; `rescheduleOnReboot` | UI, Alarm |
 | `NotificationService` | Platform | Channels, display, cancel, replace-by-id, tap routing | All three |
 | `PushRegistration` | Data | This install's FCM token → `users/{uid}/tokens/{token}`, and its removal before a sign-out | UI |
@@ -571,13 +571,35 @@ was offline and Firestore only just synced, or because FCM was deferred until mo
 
 ```
 FCM/reconcile sees checkin for D
-  → D ∈ LocalStore.warningsShownFor?
-      → cancel/replace notification id hash(link,D)
-      → "Correction: Mum did check in yesterday, at 23:40."
-      → lastConfirmedDate = D; remove D from warningsShownFor
+  → D ∈ LocalStore.warningsShownFor  (disproved now)
+    ∪ LocalStore.correctionsOwedFor  (disproved earlier, never spoken)
+      → remove D from warningsShownFor        ALWAYS - nothing stands any more
+      → lastConfirmedDate = D                 ALWAYS - evidence about HER
+      → can the warning channel carry it now?
+          yes  → replace notification id hash(link,D)
+                 "Correction: Mum did check in yesterday, at 23:40."
+                 remove D from correctionsOwedFor
+          no   → cancel notification id hash(link,D)
+                 KEEP D in correctionsOwedFor - the sentence is still owed
 ```
 
 One handler covers both causes. This is the highest-value thing to test.
+
+**The delivery gate is the whole of [ADR-0010](decisions/0010-a-push-may-not-post-a-warning-early.md)'s
+follow-up, and this block used to omit it.** Written as an unconditional *"remove D from
+warningsShownFor"*, a retraction that could not be spoken — the reader's hour has not arrived, or the
+channel is muted — was not merely delayed but **destroyed**: the next pass computes corrections from
+days that are still warned, and D was no longer one of them. The family found an empty tray and could
+not tell *resolved* from *I swiped it in the night*. The predicate is
+`delivery.warning.consumesReminder`, the identical one the warning path uses, so *"record what was
+delivered, not what was decided"* now holds on both.
+
+**Two facts, two fields, deliberately.** Folding the owed day back into `warningsShownFor` is the
+tempting shortcut and it is a trap: that map is the **sole input to the watcher row's warned state**,
+so a day left in it after its warning was cancelled makes the row render *"No check-in from Mum
+yesterday."* about a day this same cache has recorded a check-in for — reachable on any muted phone
+while the corrected day is still the most recently completed one. A false claim about a person,
+produced by the fix for a lost sentence.
 
 ---
 

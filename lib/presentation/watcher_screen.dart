@@ -277,6 +277,21 @@ class _WatcherBodyState extends State<WatcherBody> {
   /// an arbitrary widget. It is a no-op with no assistive technology running.
   void _announceChanged(WatcherState previous) {
     if (widget.state.userInitiated) return;
+    // **Two lists, and the order between them is the decision.**
+    //
+    // These are joined into ONE utterance below, and within one utterance the
+    // part at risk is the **tail** — an interrupt takes the end, not the
+    // beginning. `screens.md` rejected *"Update."* on exactly that reasoning,
+    // and the same rule decides this: the loud sentence goes first.
+    //
+    // Appending both kinds to one list in `people` order put the warning last
+    // whenever an improving row happened to sort above a worsening one. A blind
+    // watcher would hear that one relative is fine and lose the sentence saying
+    // a different relative is not — and no notification is coming, because
+    // `redundant` already recorded the day as seen. That is the *"a lost warning
+    // is worse in kind"* case this feature exists to close, reopened one row
+    // along by list order alone.
+    final owed = <String>[];
     final settled = <String>[];
     for (final person in widget.state.people) {
       final index =
@@ -305,7 +320,7 @@ class _WatcherBodyState extends State<WatcherBody> {
         // Tuesday 10:14."*, a fact about this device's own effort rather than a
         // claim about her, and it is not what changed. `spoken` is right for the
         // row label, where the reader is swiping through everything on purpose.
-        settled.add(_statusFor(
+        owed.add(_statusFor(
           person,
           watcherZone: widget.state.watcherZone,
           today: widget.state.today,
@@ -313,7 +328,8 @@ class _WatcherBodyState extends State<WatcherBody> {
         ).lines.join(' '));
       }
     }
-    if (settled.isEmpty) return;
+    final spoken = [...owed, ...settled];
+    if (spoken.isEmpty) return;
     // **One utterance, however many rows settled.** This sent one announcement
     // per person, which is the shape most likely to lose one: the platform does
     // not reliably queue them, and the one dropped is the first — the oldest row
@@ -325,7 +341,7 @@ class _WatcherBodyState extends State<WatcherBody> {
     // string and needs the approval `screens.md` requires.
     SemanticsService.sendAnnouncement(
       View.of(context),
-      settled.join(' '),
+      spoken.join(' '),
       Directionality.of(context),
     );
   }

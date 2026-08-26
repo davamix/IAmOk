@@ -1098,6 +1098,69 @@ void main() {
         expect(spoken, ['No check-in from Granddad yesterday.']);
         handle.dispose();
       });
+
+      testWidgets('a mixed pass leads with the WARNING, not with the good news',
+          (tester) async {
+        // **Within one utterance the tail is what an interrupt takes.** This is
+        // the same rule `screens.md` used to reject *"Update."* — the part most
+        // likely to survive is not where the claim belongs — applied to the
+        // order of two sentences rather than to the words inside one.
+        //
+        // Appended in `people` order, an improving row that sorts first pushed
+        // the warning to the end. A blind watcher would hear that Mum is fine
+        // and lose the sentence saying Granddad is not — with no notification
+        // coming, because `redundant` already recorded the day as seen.
+        final spoken = announcementsOn(tester);
+        final handle = tester.ensureSemantics();
+
+        // Mum first in list order, and Mum is the one who IMPROVES.
+        await pump(tester, [warned(), settled(uid: 'gd', name: 'Granddad')]);
+        await pump(tester, [
+          settled(),
+          warned(uid: 'gd', name: 'Granddad'),
+        ], userInitiated: false);
+        await tester.pumpAndSettle();
+
+        expect(spoken, [
+          'No check-in from Granddad yesterday. Mum checked in. Everything OK.',
+        ], reason: 'one utterance, and the loud half is at the front of it');
+        handle.dispose();
+      });
+
+      testWidgets('the OFFLINE-shaped warning is spoken too, and in full',
+          (tester) async {
+        // `screens.md` promises *"whatever the row is rendering"*, which is
+        // three outcomes rather than one. Only `warnOnline` was asserted, so the
+        // approved-copy document claimed more than the suite checked.
+        //
+        // This one also proves the announcement carries the interpolated
+        // instant: a body truncated at the em dash would still contain the
+        // person's name and still pass a `contains` check on the first clause.
+        final spoken = announcementsOn(tester);
+        final handle = tester.ensureSemantics();
+
+        await pump(tester, [settled()]);
+        await pump(tester, [
+          person(
+            cache: WatcherCache(
+              warningsShownFor: {d: WarningOutcome.warnOffline},
+              lastReconcileAt: DateTime.utc(2026, 8, 16, 20, 10),
+            ),
+            outcome: WarningOutcome.warnOffline,
+            unverifiedSince: DateTime.utc(2026, 8, 16, 20, 10),
+          ),
+        ], userInitiated: false);
+        await tester.pumpAndSettle();
+
+        expect(spoken, hasLength(1));
+        expect(spoken.single, startsWith('No check-in received from Mum'),
+            reason: 'the person is named in the first five words');
+        expect(spoken.single, contains('offline'),
+            reason: 'and the clause explaining WHY is not clipped off');
+        expect(find.text(spoken.single), findsOneWidget,
+            reason: 'and it is exactly what the row renders');
+        handle.dispose();
+      });
     });
 
     testWidgets('a warning becoming REVOKED is not announced', (tester) async {

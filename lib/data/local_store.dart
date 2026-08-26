@@ -243,9 +243,11 @@ class LocalStore {
       // block and assumes a downgrade needs handling.
       //
       // `onDatabaseDowngradeDelete` **deletes the file**. That loses
-      // `warnings_shown`, and this class's own schema note says the visible
-      // symptom is every standing warning firing again — a fresh round of false
-      // claims to a family, produced by a rollback. It is the one option that
+      // `warnings_shown` and `corrections_owed`, and this class's own schema
+      // note says the visible symptom is every standing warning firing again — a
+      // fresh round of false claims to a family, produced by a rollback, with
+      // the retractions that would have withdrawn them gone in the same
+      // instant. It is the one option that
       // must never appear here, and a test pins that.
       //
       // Accepting the file is safe today because every migration so far is
@@ -679,10 +681,11 @@ class LocalStore {
   ///
   /// Deliberately a real `ON CONFLICT … DO UPDATE` and **not**
   /// `ConflictAlgorithm.replace`. SQLite resolves a REPLACE primary-key
-  /// conflict by *deleting* the existing row first — and `watcher_cache` and
-  /// `warnings_shown` both declare `ON DELETE CASCADE`, with foreign keys
-  /// enabled in [open]. So a REPLACE here silently takes with it, for that
-  /// link: every standing warning, `lastConfirmedDay`, `lastReconcileAt`,
+  /// conflict by *deleting* the existing row first — and `watcher_cache`,
+  /// `warnings_shown` **and `corrections_owed`** all declare
+  /// `ON DELETE CASCADE`, with foreign keys enabled in [open]. So a REPLACE here
+  /// silently takes with it, for that link: every standing warning, **every
+  /// retraction still owed**, `lastConfirmedDay`, `lastReconcileAt`,
   /// `accessLostSince`, `accessLostCause` and `accessLostNotifiedOn`.
   ///
   /// Re-writing a link is not rare — it is what Phase 4 does on every reconcile
@@ -758,11 +761,12 @@ class LocalStore {
   ///
   /// **Upsert then prune, in one transaction**, and never a delete-then-insert.
   /// The rows that hang off a link cascade on delete: `watcher_cache` carries the
-  /// standing warnings and the access-lost cadence anchor, and `warnings_shown`
-  /// is what stops a warning being posted twice. Rewriting a link the blunt way
-  /// would take all of that with it, and the visible symptom would be every
-  /// standing warning firing again the next morning — a fresh round of false
-  /// claims to a family, produced by a sync. [upsertLink] avoids that by
+  /// access-lost cadence anchor and ADR-0009's pointer, `warnings_shown` is what
+  /// stops a warning being posted twice, and `corrections_owed` is the sentence
+  /// a family is still owed about a day their relative turned out to be fine on.
+  /// Rewriting a link the blunt way would take all of that with it, and the
+  /// visible symptom would be every standing warning firing again the next
+  /// morning — a fresh round of false claims to a family, produced by a sync. [upsertLink] avoids that by
   /// updating in place, and this reuses its statement rather than a second copy.
   ///
   /// **The prune is what makes a revocation on another device arrive here**, and
@@ -901,9 +905,16 @@ class LocalStore {
     final warnings = await _warningsShown(linkId);
     final owed = await _correctionsOwed(linkId);
     if (rows.isEmpty) {
-      // A link with no `watcher_cache` row has still been able to accumulate
-      // both of these — they live in their own tables — so neither may be
-      // dropped on this branch.
+      // **Defensive, and named as such rather than left reading like a live
+      // invariant.** [saveWatcherCache] writes the `watcher_cache` row and both
+      // child tables in one transaction, so in practice a link with no cache row
+      // has empty children too and this branch returns the same value either
+      // way — no test can currently distinguish it.
+      //
+      // Both are still carried, because the tables are separate and the day
+      // that stops being true is the day someone adds a writer for one of them
+      // alone. Dropping a field here is silent: it comes back empty, and an
+      // empty `correctionsOwedFor` is a retraction a family never hears.
       return WatcherCache(
         warningsShownFor: warnings,
         correctionsOwedFor: owed,

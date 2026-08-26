@@ -271,11 +271,19 @@ class NotificationService implements WatcherNotifications {
         payload: linkId,
       );
 
-  /// Replaces a standing warning with the correction, at the **same id**.
+  /// Posts the correction at the **same id** as the warning it retracts, so a
+  /// standing one is replaced rather than sat beside.
   ///
   /// Deliberately the same call shape as [showWarning] rather than a variant
   /// flag: the identity is the whole mechanism, so making the two share one id
   /// derivation is what stops them drifting apart.
+  ///
+  /// **It does not always have something to replace.** A retraction the warning
+  /// channel could not carry when it was computed is held in
+  /// `WatcherCache.correctionsOwedFor` with its warning already **cancelled**,
+  /// so when a later pass finally posts it the tray is empty and this is a fresh
+  /// notification. The id still matters — it is what makes the replacing case
+  /// replace — but "replaces" is not a precondition.
   @override
   Future<void> showCorrection({
     required String linkId,

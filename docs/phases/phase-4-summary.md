@@ -1,6 +1,6 @@
 # Phase 4 — Firebase backbone · summary
 
-**Date:** 2026-08-25 · **982 Dart tests**, **30 Functions tests**, `flutter analyze` clean, secrets
+**Date:** 2026-08-25 · **991 Dart tests**, **30 Functions tests**, `flutter analyze` clean, secrets
 guard clean.
 
 **Status: implemented and reviewed at the gate. All five reviewers have run and every finding is
@@ -15,8 +15,11 @@ diff touched have since run over it again.
 **That round left three things open. All three are now closed** — the Android 16 announcement risk
 was measured and is **false as stated**, the correction the hour-gate dropped is now **held**, and the
 copy decision it blocked was **approved by the owner and built**. What each turned out to be, and the
-one thing each cost that was not in the plan, is in *The post-gate review round*. Start at *Prompt to
-start the next session*.
+one thing each cost that was not in the plan, is in *The post-gate review round*.
+
+**Those three were then reviewed again**, and that round found two real defects in them plus a design
+document that still specified the behaviour ADR-0010 had disowned — all fixed. See *The second review
+round*. Start at *Prompt to start the next session*.
 
 ---
 
@@ -55,7 +58,7 @@ POCO F3** on 2026-08-25:
 | Change | What |
 |---|---|
 | **ADR-0010 — a push may not post a warning early** | `WatcherDelivery.notBefore` downgrades the **warning** channel to `unavailable` until `now >= warningLocalTime` in the watcher's zone. Suppresses the post; leaves the day owed, the alarm armed and the row honest. Access-lost is not gated; corrections are, and that is recorded as a decision. |
-| **A row that changes under a screen reader is announced** | `WatcherState.userInitiated` (false only for a foreground push) plus `WatchedPersonState.checkedInSince`, which asks the **cache** whether the warned day is now confirmed rather than inferring it from the row going quiet. One approved string; the two candidates in `screens.md` still do not ship. |
+| **A row that changes under a screen reader is announced** | `WatcherState.userInitiated` (false only for a foreground push) plus `WatchedPersonState.checkedInSince`, which asks the **cache** whether the warned day is now confirmed rather than inferring it from the row going quiet. **The OK → warning direction was approved and built later the same day** — `warnedSince`, speaking the warning body verbatim. Only *any → access lost* still does not ship. |
 
 ---
 
@@ -511,6 +514,63 @@ actionability; if it ever ships, reuse the row's second line too.
 
 ---
 
+## The second review round — 2026-08-25, over the three items above
+
+Architecture, testing and UI/UX ran again over `99f1451..HEAD`. **Security and infrastructure were
+deliberately not re-run**, and the trigger check is recorded rather than asserted: the diff touches no
+`.gitignore`, no `firestore.rules`, nothing under `functions/`, no Firebase config and no Android
+build file, which is exactly what those two agents' trigger conditions name.
+
+They found the usual thing and two real defects. **Both defects were in the work that closed items 2
+and 3, and neither was found by a test failing.**
+
+**1. `warnedSince`'s same-day guard was pinned by nothing** — found independently by testing and
+UI/UX. Mutating `return decision.day == previous.decision.day;` to `return true;` passed all 982
+tests. That guard is the conservative half of the item 3 decision: without it, a foreground push at
+watched-local midnight makes TalkBack speak a warning about a day nobody has had a chance to tap yet
+— the hour ADR-0010 exists to protect, arriving on the one channel ADR-0010 does not gate. **This is
+the previous round's `checkedInSince` finding, one field later, in the same commit round that fixed
+it**, and my own five mutations missed it because they mutated the guard to `false` and never to
+`true`. There is now a `warnedSince` group mirroring `checkedInSince`'s, six cases.
+
+**2. A mixed pass spoke the warning last, where an interrupt clips it.** Both kinds of sentence were
+appended to one list in `people` order, so an improving row that sorted above a worsening one pushed
+the warning to the tail of the utterance. A blind watcher would hear that one relative is fine and
+lose the sentence saying a different relative is not — with no notification coming, because
+`redundant` had already recorded the day as seen. That is *"a lost warning is worse in kind"*
+reopened one row along, by list order alone. Two lists now, warnings first; `screens.md` records the
+rule, which is the same one it used to reject *"Update."*
+
+**3. ARCHITECTURE.md still specified the behaviour ADR-0010 disowned.** §10's pseudo-code said
+*"remove D from warningsShownFor"* unconditionally — the destroyed-retraction defect, written as the
+design — and §6's `LocalStore` row listed neither `correctionsOwedFor` nor `lastDecidedDay` (v4 had
+already omitted the latter). ADR-0010, `screens.md` and the docstrings were all amended when the fix
+landed; the design document was not, and it is the one CLAUDE.md says nothing may contradict.
+
+**Also fixed:** four docstrings claimed a correction *"replaces a standing warning"* when a drained
+one has nothing to replace; the `redundant` bullet justified consuming a retraction with a premise
+that is false for a drained day (the row was already correct, so nothing changed under the reader —
+stated now rather than left to be discovered); `LocalStore`'s three cascade-guard comments did not
+list `corrections_owed`, on the comments whose whole job is to stop a destructive write; and PLAN.md,
+the build table above and the device matrix each still described the three items as open.
+
+**Two gaps the reviewers found in older ground, both now closed:** no test ever asserted the `today:`
+argument at either notification call site, so any expression equal to `day + 1` left the suite green
+while a four-day catch-up said *"yesterday"* about three days it was not — the exact defect the dated
+copy variant exists for, unpinned at the place that feeds it. And the muted route was driven through
+`withCorrectionFor(delivered: false)` without ever asserting `correctionsOwedFor` or the drain.
+
+**One thing I did not decide, and it is recorded in `screens.md` as owed to the owner:**
+`correctionsOwedFor` has no age bound. ADR-0010's hour bounds the delay to hours; a muted channel does
+not bound it at all, and §13's watcher is exactly who Android auto-revokes `POST_NOTIFICATIONS` from.
+Months later the first postable pass can retract a warning cancelled out of the tray a season ago. The
+copy stays honest and correctly dated, so nothing false is said — the question is whether a very old
+retraction is worth saying, and bounding it is code rather than copy.
+
+**991 tests. 15 mutations, every one caught, and a no-op control that passes.**
+
+---
+
 ## Still owed beyond those three
 
 - **The first Functions deploy.** The Cloud Functions API is enabled (three clean runs); the other
@@ -567,8 +627,15 @@ Start it detached with output redirected to a file.
 > on 2026-08-25 are built, mutation-checked, proven on the POCO F3, and re-reviewed by architecture,
 > testing and UI/UX. **The three items that round left open are all now closed** — the Android 16
 > announcement risk was measured and is false as stated, the correction the hour-gate dropped is now
-> held, and the copy decision it blocked was approved by the owner and built. 982 Dart tests, 30
-> Functions tests, `flutter analyze` clean, debug APK builds and installs.
+> held, and the copy decision it blocked was approved by the owner and built. **A second review round
+> over that work has also run and its findings are applied** — two real defects, both in the new work
+> and neither found by a test failing, plus ARCHITECTURE.md still specifying the behaviour ADR-0010
+> disowned. 991 Dart tests, 30 Functions tests, `flutter analyze` clean, debug APK builds and
+> installs, secrets guard clean.
+>
+> **One thing is explicitly owed to you and was not decided for you**: `correctionsOwedFor` has no age
+> bound, so a muted phone can retract a warning a season after it was cancelled. It is written up in
+> `ui-ux/screens.md` under *Stopped is not dropped*.
 >
 > **Nothing is queued for you by a previous session's plan.** What follows is the standing list, and
 > the first item is the only open *design* decision in the phase.
@@ -664,12 +731,24 @@ Start it detached with output redirected to a file.
 > changed the window too.
 >
 > **The habit that found everything at this gate: read a claim against the thing it describes.**
-> Across three rounds now, almost nothing came from a test failing — findings came from a docstring, a
-> checklist, a copy table and a threat model each asserting something that had quietly stopped being
-> true. This round added two more: a **handover** that specified a fix whose central premise was
-> wrong, and a **behaviour-changes page** cited for a claim it does not make. **Verify the measurement
-> before you trust the result** — this session's own mutation harness reported five green results
-> that were an encoding crash, caught only because a no-op control was added to it and had to pass.
-> **And mutate the code to see the test fail** before believing a green suite. This is the side where
-> a false claim to a family is the worst bug the app can have — prefer stopping to ask over guessing,
-> and if you think a finding is wrong, say so before acting on it rather than after.
+> Across four rounds now, almost nothing came from a test failing — findings came from a docstring, a
+> checklist, a copy table, a threat model and finally the **design document itself** each asserting
+> something that had quietly stopped being true. This session added two more of the same kind: a
+> **handover** that specified a fix whose central premise was wrong, and a **behaviour-changes page**
+> cited for a claim it does not make.
+>
+> **Mutate the code to see the test fail, and mutate it in BOTH directions.** The last round's
+> defect was a guard mutated to `false` and never to `true`: five mutations of `warnedSince` all
+> passed while the day guard they were supposed to cover was pinned by nothing, and two reviewers
+> found it independently. It was the previous round's finding, one field later, in the commit that
+> fixed it.
+>
+> **Verify the measurement before you trust the result.** This session's own mutation harness
+> reported five green results that were an encoding crash swallowing the output — caught only because
+> a no-op control was added and had to pass. A reviewer's harness then hit the same class of problem
+> from a different direction (CRLF conversion breaking a source-text assertion in its control), and
+> caught it the same way. The control is the part that has to be there.
+>
+> This is the side where a false claim to a family is the worst bug the app can have — prefer stopping
+> to ask over guessing, and if you think a finding is wrong, say so before acting on it rather than
+> after.

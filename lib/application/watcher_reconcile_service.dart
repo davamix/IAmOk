@@ -632,11 +632,13 @@ class WatcherReconcileService {
 
     // 2. Corrections FIRST, before any new warning is posted.
     //
-    //    They replace a standing warning at the same id, so a correction applied
-    //    after a fresh warning for the same day would silently overwrite the
-    //    warning that was just, correctly, raised. The domain never produces
-    //    both for one day — a corrected day leaves `warningsShownFor` — but the
-    //    ordering is free and the failure it prevents is a false all-clear.
+    //    They post at a standing warning's id, so a correction applied after a
+    //    fresh warning for the same day would silently overwrite the warning
+    //    that was just, correctly, raised. The domain never produces both for
+    //    one day — a corrected day leaves `warningsShownFor`, and a day held in
+    //    `correctionsOwedFor` is below `lastDecidedDay` and so is not decided
+    //    again — but the ordering is free and the failure it prevents is a false
+    //    all-clear.
     //
     //    **Spoken only when the warning channel can carry it**, and taken down
     //    silently otherwise. Three things stop it: the reader is on the list

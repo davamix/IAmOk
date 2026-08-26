@@ -1101,9 +1101,10 @@ including the case where a warning lapses without a check-in and must **not** be
 ### Announcements at API 36 — measured 2026-08-25 20:04, and the claim is false as stated
 
 The post-gate review raised a real risk: Android 16 deprecates accessibility announcements, and if
-that deprecation is a **no-op** then `WatcherCopy.checkedIn` and `WatcherCopy.showingPerson` are both
-silent on current Android with nothing in the app or the suite able to see it. Settled on the
-`Medium_Phone_API_36.0` AVD.
+that deprecation is a **no-op** then every announcement this app makes is silent on current Android
+with nothing in the app or the suite able to see it — `WatcherCopy.checkedIn`,
+`WatcherCopy.showingPerson`, and (since later the same day) the OK → warning announcement, which
+speaks `NotificationCopy.warningBody` verbatim. Settled on the `Medium_Phone_API_36.0` AVD.
 
 **They still speak.** Android 16, `ro.build.version.sdk=36`, TalkBack 16.0.0, and — read from
 `dumpsys package`, not from `build.gradle.kts` — the **installed** app reports `targetSdk=36`. The
@@ -1280,13 +1281,20 @@ FCM work on it**. An AOSP image would have made the whole arrangement impossible
       The risk was real to raise and is false as stated**; neither shipped feature is silent. Method,
       the matched control, and the two things that are true and still matter are in *Announcements at
       API 36* below.
-- [x] **A row that changes under a screen reader is announced** — 2026-08-25 08:10, with **TalkBack
-      running**. A foreground push flipped a row from *"No check-in from Pop yesterday."* to
-      *"Everything OK…"* (read out of the accessibility tree, before and after) and TalkBack took
-      speech audio focus 1.7 s later. **Control, same run:** a second push that changed no row
-      produced no speech at all. TalkBack does not log utterance **text** at its default level, so
-      the device evidence is *spoke / did not speak*; the words themselves are pinned against
-      `SystemChannels.accessibility` in `watcher_screen_test.dart`.
+- [x] **A row that changes under a screen reader is announced — the warning → OK direction** —
+      2026-08-25 08:10, with **TalkBack running**. A foreground push flipped a row from *"No check-in
+      from Pop yesterday."* to *"Everything OK…"* (read out of the accessibility tree, before and
+      after) and TalkBack took speech audio focus 1.7 s later. **Control, same run:** a second push
+      that changed no row produced no speech at all. TalkBack does not log utterance **text** at its
+      default level, so the device evidence is *spoke / did not speak*; the words themselves are
+      pinned against `SystemChannels.accessibility` in `watcher_screen_test.dart`.
+
+      **The direction is named because the other one has not been driven on hardware.** The
+      OK → warning announcement was approved and built later the same day and goes through the
+      identical `SemanticsService.sendAnnouncement` call, which the API 36 run above exercises — so
+      the mechanism is established twice over and the residual risk is the app-side predicate, not
+      the platform. It is covered at the widget level (`warnedSince`, six value-level cases and eight
+      widget cases). Ticking this row for both directions would record a run that did not happen.
 
 **Phase 5 — pairing.** All three.
 

@@ -406,6 +406,86 @@ void main() {
         );
       });
     });
+
+    // The mirror, and it had **no tests at all** — found by two reviewers
+    // independently. Mutating the day guard to `return true;` passed all 982.
+    // That is the defect the previous round found on `checkedInSince`, one
+    // field later and in the same commit round that fixed it.
+    group('warnedSince', () {
+      WatchedPersonState ok() => state(cache: WatcherCache(lastConfirmedDay: d));
+
+      test('OK → warning is the case it exists for', () {
+        expect(warned().warnedSince(ok()), isTrue);
+      });
+
+      test('and a day rollover is NOT announced — the guard, finally pinned',
+          () {
+        // **The conservative half of ADR-0010, on the one channel ADR-0010 does
+        // not gate.** At watched-local midnight the day being decided advances
+        // onto one nobody has had a chance to tap yet. Without this guard a
+        // foreground push at 00:24 makes TalkBack say *"No check-in from Mum
+        // yesterday."* unasked — which is the hour ADR-0010 exists to protect.
+        //
+        // Deliberately asymmetric with the correction path, and `screens.md`
+        // records it as the narrower gap that remains rather than as an
+        // oversight.
+        expect(
+          state(
+            decisionDay: today,
+            cache: WatcherCache(warningsShownFor: {today: WarningOutcome.warnOnline}),
+            outcome: WarningOutcome.warnOnline,
+          ).warnedSince(ok()),
+          isFalse,
+        );
+      });
+
+      test('a row that was already warning is not a new warning', () {
+        // reconcile() runs on app open, FCM, alarm and boot, and a push arrives
+        // for every check-in in the family. Re-reading a standing warning on
+        // each one is the fatigue that trains a reader to ignore the channel
+        // this app cannot afford to have ignored.
+        expect(warned().warnedSince(warned()), isFalse);
+      });
+
+      test('coming FROM lost access is not announced', () {
+        // `screens.md` marks *any → access lost* unapproved, and its reverse was
+        // never proposed. The previous row must have been the OK one.
+        expect(
+          warned().warnedSince(state(
+            cache: WatcherCache(
+              accessLostSince: d,
+              accessLostCause: RefusedCause.unauthenticated,
+              lastConfirmedDay: d,
+            ),
+          )),
+          isFalse,
+        );
+      });
+
+      test('going TO lost access is not announced either', () {
+        expect(
+          state(
+            cache: WatcherCache(
+              accessLostSince: d,
+              accessLostCause: RefusedCause.unauthenticated,
+              lastConfirmedDay: d,
+            ),
+          ).warnedSince(ok()),
+          isFalse,
+        );
+      });
+
+      test('going TO revoked is not announced', () {
+        expect(
+          state(
+            status: LinkStatus.revoked,
+            cache: WatcherCache(warningsShownFor: {d: WarningOutcome.warnOnline}),
+            outcome: WarningOutcome.warnOnline,
+          ).warnedSince(ok()),
+          isFalse,
+        );
+      });
+    });
   });
 
   group('a warning fires when it should', () {
@@ -646,6 +726,21 @@ void main() {
         reason: 'every day still owed, oldest first — none of them dropped by '
             'the hour that would not carry them',
       );
+
+      // **And each one says WHICH day, because only one of them is yesterday.**
+      //
+      // `NotificationCopy` gets this right and its own suite pins it — but no
+      // test ever asserted the `today:` ARGUMENT this call site passes, so
+      // replacing it with anything that always equals `day + 1` left the whole
+      // suite green while four notifications each claimed *"yesterday"*, three
+      // of them falsely, at four ids, on the channel §1 exists to keep
+      // un-swipeable. That is the exact defect `warningBody`'s docstring says
+      // the dated variant was written for, unpinned at the one place that feeds
+      // it.
+      expect(notifications.bodies['warn:$mumLink:${day('2026-08-13')}'],
+          contains('on Thursday 13 August'));
+      expect(notifications.bodies['warn:$mumLink:$d'], contains('yesterday'),
+          reason: 'and the one that IS yesterday still says so');
     });
 
     test('`redundant` is left alone — the reader is looking at the list',
@@ -754,6 +849,37 @@ void main() {
       await service().reconcile(selfUid: selfUid);
 
       expect(notifications.silent, isTrue);
+    });
+
+    test('a retraction drained on a LATER day names that day, not "yesterday"',
+        () async {
+      // The held path makes a multi-day-late retraction routine, and the day it
+      // is *about* is no longer the day the reader calls yesterday. `today:` at
+      // the correction call site is what decides that, and nothing asserted it:
+      // any expression that always equals `day + 1` left the suite green while
+      // the sentence said *"yesterday"* about a day two days back — a
+      // fabricated fact in the one message whose entire purpose is retracting
+      // one.
+      await service().reconcile(selfUid: selfUid);
+      atTheMeasuredHour();
+      reader.result = FirestoreRead.succeeded(checkInDays: {d});
+      await service().reconcile(selfUid: selfUid);
+      expect((await store.watcherCache(mumLink)).correctionsOwedFor, {d},
+          reason: 'the premise — it really is being held');
+
+      // A day later, and she tapped on the 17th too, so nothing new is owed.
+      clock = FixedClock(at(madrid, 2026, 8, 18, 10));
+      reader.result =
+          FirestoreRead.succeeded(checkInDays: {d, day('2026-08-17')});
+      notifications.calls.clear();
+      await service().reconcile(selfUid: selfUid);
+
+      expect(notifications.calls, ['correct:$mumLink:$d']);
+      expect(notifications.bodies['correct:$mumLink:$d'],
+          contains('on Sunday 16 August'));
+      expect(notifications.bodies['correct:$mumLink:$d'],
+          isNot(contains('yesterday')),
+          reason: '16 August is not yesterday on the 18th');
     });
 
     test('a held retraction survives a later read that FAILS', () async {
@@ -912,6 +1038,24 @@ void main() {
       expect(notifications.calls, ['cancelWarn:$mumLink:$d']);
       expect((await store.watcherCache(mumLink)).warningsShownFor, isEmpty,
           reason: 'she checked in — the day is no longer warned either way');
+
+      // **And the retraction is owed, not lost.** The muted phone is §13's
+      // watcher — the one who never opens the app — so the row is not going to
+      // carry this for them. Asserting only the cancel left the whole point of
+      // the held-retraction change unexercised on this route: `unavailable`
+      // arrives here from a muted channel rather than from ADR-0010's hour, and
+      // nothing but this line distinguishes the two.
+      expect((await store.watcherCache(mumLink)).correctionsOwedFor, {d});
+
+      // The other half: when notifications come back, it is actually said.
+      canDeliver =
+          const WatcherDelivery.uniform(NotificationDelivery.available);
+      notifications.calls.clear();
+      await service().reconcile(selfUid: selfUid);
+
+      expect(notifications.calls, ['correct:$mumLink:$d'],
+          reason: 'the sentence survives the mute, and no warning is re-posted');
+      expect((await store.watcherCache(mumLink)).correctionsOwedFor, isEmpty);
     });
 
     test('the day leaves warningsShownFor and is confirmed', () async {

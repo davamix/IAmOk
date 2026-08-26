@@ -291,7 +291,8 @@ allowances mean effectively €0 at this scale, but the card must be on the acco
 ## Phase 5 — Onboarding and pairing
 
 > **BUILT, the exit criterion is MET on two devices, and all five reviewers have run with their
-> findings applied.** Start from [phases/phase-5-summary.md](phases/phase-5-summary.md). **Not
+> findings applied.** Start from [phases/phase-5-handover.md](phases/phase-5-handover.md) to close
+> it out, or [phases/phase-5-summary.md](phases/phase-5-summary.md) for what was built. **Not
 > signed off** — every new user-visible string is owed the owner's approval, including **two changes
 > to already-approved copy**, and **six review findings are open on purpose**, two of them owner
 > decisions: the cross-role dead end, and the 21:00 reminder's promise to a family that may not

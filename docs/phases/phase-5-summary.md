@@ -8,6 +8,10 @@ their findings applied.** **Not signed off** — **every new user-visible string
 approval**, including **two changes to already-approved copy**, and six findings were deliberately
 left for the owner or a later phase rather than decided here.
 
+> **[phase-5-handover.md](phase-5-handover.md) is where to start if you are closing this phase out.**
+> It carries the current state, every open item, and a suggested solution for each — this file is
+> *what was built and why*.
+
 > **Two phones paired from a cold install using only a shared code**, 2026-08-26 11:12–11:28. The AVD
 > was *Mum*, the POCO F3 was *Ana*; both were uninstalled first; the code was read off one screen and
 > typed into the other. Mum landed on the Tap screen naming Ana, Ana on the watcher list showing Mum.

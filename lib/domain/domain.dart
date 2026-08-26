@@ -18,9 +18,12 @@ library;
 
 export 'away/away_period.dart';
 export 'entities/check_in.dart';
+export 'entities/invite_code.dart';
 export 'entities/link.dart';
+export 'entities/pairing_outcome.dart';
 export 'entities/watch_status.dart';
 export 'entities/watched_audience.dart';
+export 'onboarding/home_route.dart';
 export 'policy/reminder_policy.dart';
 export 'policy/warning_policy.dart';
 export 'reconcile/firestore_read.dart';

@@ -34,8 +34,13 @@ abstract final class WatcherCopy {
   /// is false in the other state this same line covers: the last link was
   /// revoked, so something was set up and is not any more. One line has to be
   /// true in both, which is the whole reason it is deliberately one line.
-  static const String nobody = 'You\'re not looking after anyone. '
-      'Ask a family member to help you add someone.';
+  /// **The second sentence went in Phase 5, for the same reason its Tap-screen
+  /// twin's did.** It read *"Ask a family member to help you add someone."* —
+  /// the dead-end wording, which is only honest while there is nothing left to
+  /// press. There is now an **Add someone** button directly beneath this line,
+  /// and a sentence sending the reader off to find a person instead of pressing
+  /// it would be worse than terse: it would be wrong.
+  static const String nobody = 'You\'re not looking after anyone.';
 
   /// The good state — **current state, never history**.
   ///

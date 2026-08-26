@@ -1179,6 +1179,94 @@ points, so a migration that throws means the app cannot open its store at all, a
 a reinstall — which destroys `warnings_shown` and produces a fresh round of false warnings to a
 family. That is the failure `onUpgrade`'s idempotence comment is about.
 
+### Pairing on two phones — 2026-08-26 11:12–11:28, and it found two defects
+
+**Rig.** AVD `Medium_Phone_API_36.0` as **Mum, the watched person** (`10.0.2.2`); POCO F3 as **Ana,
+the watcher** (`127.0.0.1` over `adb reverse`). Emulator suite started detached with output
+redirected to a file, per the `EPIPE` trap. Both devices **uninstalled first**, so both flows began
+at sign-in.
+
+**The measurement was verified before the result was believed**, and that check is the reason the run
+means anything. Until this phase `AuthRepository._emulatorCredential` had a **hard-coded subject**, so
+every emulator build signed in as the same person — two phones, one uid, and `redeemInvite` would
+have refused the pairing as a self-link. `IAMOK_EMULATOR_USER` fixes it, and the fix was confirmed by
+reading the accounts back out of Firestore rather than by trusting the build flags:
+
+| uid | displayName | timezone | device |
+|---|---|---|---|
+| `APV0SSG3EZ4…` | Mum | `Europe/Paris` | AVD |
+| `BORQFqEdPhm…` | Ana | `Europe/Madrid` | POCO |
+
+Two distinct uids, so the run is about two people.
+
+#### DEFECT 1 — every callable was sent to an address that does not exist on a handset
+
+`redeemInvite` **hung until it timed out**, and the Functions emulator logged *nothing at all* — the
+call never arrived. Auth and Firestore were working over the same `adb reverse`: the phone signed in,
+wrote `users/{uid}` and rendered the pairing screen.
+
+`useFunctionsEmulator` does the same `127.0.0.1 → 10.0.2.2` rewrite as the other two plugins and
+defaults `automaticHostMapping` to `true`. `FirebaseBootstrap` passed `false` to Auth and Firestore
+and **not** to Functions, so on a physical handset every callable went to an address that means
+nothing there.
+
+**Half the app working is what made it read as a backend fault** rather than as a host never reached.
+Nothing in 1 141 Dart tests or 67 Functions tests could see it, and the AVD could not either —
+`10.0.2.2` is *correct* there. It needed a physical handset, which is the whole argument for this
+page. Fixed, and generalised into a `CLAUDE.md` line: three plugins, three for three, assume the next
+one does it too.
+
+#### DEFECT 2 — the summary screen was unreachable
+
+With the callable fixed, the pairing worked and **both phones skipped screen 3 entirely**, going from
+*"Skip for now"* straight to the Tap screen and the watcher list. Screen 3 is a Phase 5 deliverable
+and no user ever saw it.
+
+`OnboardingController._persist` invalidated the provider `homeRouteProvider` watches, so the moment a
+question was answered **affirmatively** the route recomputed, found a role, and left onboarding. Every
+piece was individually correct — the route was right, the answers were right — and the defect existed
+only as *a screen a person never reaches*, which is a thing a suite of unit tests is structurally
+unable to notice. The router is now told once, by `finish()`.
+
+Both defects have regression tests. The second one's group asserts the route **while the flow is
+running**, which is what the per-step tests could not see.
+
+#### What passed, in order
+
+| Time | What |
+|---|---|
+| 11:12 | Cold install, both phones. Sign-in screen on each. |
+| 11:12 | Mum signs in → `users/{Mum}` written → question 1. |
+| 11:14 | *"Add someone"* → `createInvite` in 351 ms → code shown as **`JJX 5VZ`**, expiry rendered *"It stops working at 11:14 am on Thursday 27 August."* — the AVD's own **12-hour** setting, honoured rather than hard-coded. |
+| 11:15 | Ana skips question 1, types **`jjx5vz` in lower case** — the field upper-cases as she types. |
+| 11:19 | `redeemInvite` → `status: linked`, `alreadyLinked: false`, 432 ms. |
+| 11:19 | **Mum's phone, untouched, changes by itself** from *"Waiting for them to type it in."* to *"Ana will now know you're OK."* |
+| 11:25 | Both summaries: Ana *"You will be told if Mum misses a day."* (singular verb); Mum *"Ana will know you are OK when you tap each day."* + *"Tap once a day. That is all."* |
+| 11:27 | Mum lands on the Tap screen; permission prompt; granted; **taps**. |
+| 11:28 | Ana's list: *"Mum · Everything OK · Your phone last saw a check-in on Wednesday 26 August."* |
+
+**The one-sitting design is the thing to keep.** Mum's phone noticing by itself is not a nicety: in
+the sitting this flow assumes, the family member is holding the *other* phone, so a confirmation only
+they can see leaves the person the app is for looking at an unchanged screen.
+
+#### The rig as this session left it
+
+**POCO F3 — the app is UNINSTALLED, deliberately.** It held an accepted link to a synthetic *Mum* on
+a local emulator and **81 alarm entries** including armed warning alarms; the emulator has since been
+stopped, so those alarms would have fired at 10:00 the next morning against a backend that no longer
+answers and posted an offline notice about a person who does not exist — on the owner's personal
+phone. Uninstalling is what stops that. **Phase 4's recorded POCO state — one self-link, 7 warning
+alarms at 10:00 — is gone**, replaced by nothing; a future phase reinstalls.
+
+**AVD — keeps the paired state**, signed in as *Mum* with an accepted link to *Ana*, onboarding
+complete (`wants_to_be_watched=true`, `wants_to_watch=false`), and today's check-in recorded. It is a
+scratch rig; *Wipe store* resets it.
+
+**The emulator export did NOT run.** The suite was stopped by killing the process rather than by
+`Ctrl-C`, so `emulator-data/` is still the 2026-08-25 export and today's users, invites and link are
+**not** in it. The next `emulators.ps1` run starts from the older state and the AVD's local store will
+reference uids the emulator no longer knows — re-pair rather than trying to reconcile it.
+
 ### Three HyperOS behaviours that cost time in this session
 
 **`deviceidle force-idle` will not reach deep idle from a screen-off device.** It stops at
@@ -1296,11 +1384,35 @@ FCM work on it**. An AOSP image would have made the whole arrangement impossible
       the platform. It is covered at the widget level (`warnedSince`, six value-level cases and eight
       widget cases). Ticking this row for both directions would record a run that did not happen.
 
-**Phase 5 — pairing.** All three.
+**Phase 5 — pairing.** All three, **run 2026-08-26 11:12–11:28, AVD ↔ POCO, against the emulator
+suite.** Full write-up in *Pairing on two phones* below.
 
-- [ ] Two phones pair from a **cold install** using only a shared code — POCO ↔ AVD
-- [ ] Each lands on the correct main screen from the two onboarding selections — one device is enough
-- [ ] Both Skip paths work and leave a usable app — one device is enough
+- [x] Two phones pair from a **cold install** using only a shared code — **AVD (Mum, watched) ↔ POCO
+      (Ana, watcher)**. Both uninstalled first, so both flows started at sign-in. Code `LWCUCQ`
+      created on the AVD, read off its screen, typed into the POCO **in lower case** — link
+      `{Mum}_{Ana}` written by `redeemInvite` in 432 ms.
+- [x] Each lands on the correct main screen from the two onboarding selections — **Mum → Tap screen**
+      showing *"Ana will know you're OK."*; **Ana → watcher list** showing *"Mum · Everything OK"*.
+- [x] Both Skip paths work and leave a usable app — Ana skipped question 1, Mum skipped question 2;
+      both reached the summary and a working main screen.
+
+> **What this run does NOT establish, stated rather than left to be assumed.** It went through the
+> **emulator suite** over `adb reverse`, not the live project — which is what the phase brief
+> instructed, and which means it says nothing about a deployed `redeemInvite`. And the exit criterion
+> is about pairing, so nothing here re-measures Doze, FCM wake-up, or alarm delivery.
+
+**Also closed by the same run — the AVD finally tapped**, which is the half Phase 4 left owed above.
+
+- [x] **The AVD tapped as a real client** — 2026-08-26 11:27. `checkins/{Mum}/days/2026-08-26` written
+      through `firestore.rules` by the app rather than by an admin REST write, `deviceTappedAt`
+      09:27:42 UTC, `timezone` **`Europe/Paris`** (the AVD's own zone — the day is decided on the
+      device, §11). `onCheckInCreated` then fired with `acceptedLinks: 1`, `tokens: 2`, `sent: 1`,
+      `failed: 1`, `pruned: 1` — the **first end-to-end exercise of the `UNREGISTERED` pruning path**,
+      against a genuinely stale token left by the previous install.
+- [ ] The **receiving** half of Phase 4's row is still owed. Ana's list did show the check-in, but the
+      app was **already running and on that screen**, so a foreground push and the resume reconcile
+      cannot be told apart from the outside. The row above wants the app *killed*. Ticking it on this
+      evidence would record a measurement that was not isolated.
 
 **Phase 6 — away mode.** All four, one of them with a role swap.
 

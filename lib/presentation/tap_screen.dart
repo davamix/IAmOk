@@ -8,9 +8,13 @@ import 'package:timezone/timezone.dart' as tz;
 import '../application/providers.dart';
 import '../application/watched_reconcile_service.dart';
 import '../copy/notification_copy.dart';
+import '../copy/onboarding_copy.dart';
 import '../copy/tap_copy.dart';
+import '../copy/watcher_copy.dart';
 import '../domain/domain.dart';
 import 'debug_harness.dart';
+import 'pairing_screens.dart';
+import 'watcher_screen.dart';
 
 /// The watched person's main screen, and **the only screen they need**.
 ///
@@ -27,7 +31,20 @@ import 'debug_harness.dart';
 ///   this is for the person, not the data.
 /// - Font scale, contrast and semantics are floors rather than goals.
 class TapScreen extends ConsumerStatefulWidget {
-  const TapScreen({super.key});
+  const TapScreen({this.watcherListReachable = false, super.key});
+
+  /// Whether this user is **also** a watcher, and so needs a way to the list.
+  ///
+  /// PLAN.md: *"Both selected — Tap + Away takes priority as the main screen,
+  /// and a top action button opens the watcher list. The person who taps daily
+  /// should never have to navigate to reach their one action."* So the watcher
+  /// pays the extra tap and the watched person pays nothing, which is the whole
+  /// trade.
+  ///
+  /// Decided by `HomeRoute.decide` and passed in, never derived here: a screen
+  /// that worked out its own role would be a second answer to a question the
+  /// router already answered, and the two could disagree.
+  final bool watcherListReachable;
 
   @override
   ConsumerState<TapScreen> createState() => _TapScreenState();
@@ -131,7 +148,10 @@ class _TapScreenState extends ConsumerState<TapScreen>
     return Scaffold(
       body: SafeArea(
         child: switch (state) {
-          AsyncData(:final value) => TapBody(state: value),
+          AsyncData(:final value) => TapBody(
+              state: value,
+              watcherListReachable: widget.watcherListReachable,
+            ),
           AsyncError(:final error) => _Failure(error: error),
           _ => Semantics(
               label: TapCopy.loadingLabel,
@@ -145,9 +165,16 @@ class _TapScreenState extends ConsumerState<TapScreen>
 
 @visibleForTesting
 class TapBody extends ConsumerWidget {
-  const TapBody({required this.state, super.key});
+  const TapBody({
+    required this.state,
+    this.watcherListReachable = false,
+    super.key,
+  });
 
   final WatchedState state;
+
+  /// See [TapScreen.watcherListReachable].
+  final bool watcherListReachable;
 
   /// The share of the screen reserved for everything below the target.
   ///
@@ -201,6 +228,12 @@ class TapBody extends ConsumerWidget {
                     ),
                   ),
                   const Positioned(top: 0, right: 0, child: DebugHarnessButton()),
+                  // **Top-LEFT, opposite the debug button**, and inside the
+                  // target area's Stack rather than the band below, which is
+                  // what "a top action button" means and what keeps it far
+                  // from both the tap target and the Away control.
+                  if (watcherListReachable)
+                    const Positioned(top: 0, left: 0, child: WatcherListButton()),
                 ],
               ),
             ),
@@ -300,6 +333,16 @@ class _BottomBand extends StatelessWidget {
               ),
             const SizedBox(height: 12),
             _AudienceLine(state: state),
+
+            // **The way back into pairing.** Without it, someone who skipped
+            // onboarding's first question lands here reading "No one is set up
+            // to know you're OK" with nothing to press, and a second watcher
+            // could never be added at all. It is also what makes that line
+            // honest: it used to end "Ask a family member to help you add
+            // someone", which is the dead-end wording and is only honest while
+            // there is nothing left to press.
+            const SizedBox(height: 12),
+            const AddSomeoneButton(),
 
             // Away is present, secondary, and **not adjacent** to the tap
             // target — a full text block sits between them, so a mis-tap on the
@@ -427,6 +470,73 @@ class TapTarget extends StatelessWidget {
 /// The empty case is one static line covering both "nobody yet" and "everyone
 /// revoked", because distinguishing them is what would make a status-change
 /// message possible.
+/// Opens the pairing flow again, from the watched person's own screen.
+///
+/// **Secondary by construction.** A `TextButton` beside the Away control rather
+/// than anything that competes with the target: `guidelines.md`'s first
+/// principle is one screen, one action, and this is emphatically not the action.
+/// It sits below a full text block, so it is no nearer the target than Away is.
+///
+/// Always present rather than only when nobody is set up. Both halves of the
+/// gap it closes are real — the empty screen with nothing to press, **and** a
+/// second watcher that could otherwise never be added, because an invite is
+/// single-use so every watcher needs their own code (§8).
+@visibleForTesting
+class AddSomeoneButton extends ConsumerWidget {
+  const AddSomeoneButton({super.key});
+
+  static const Key buttonKey = Key('tap-add-someone');
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) => TextButton.icon(
+        key: buttonKey,
+        onPressed: () async {
+          await Navigator.of(context).push<bool>(
+            MaterialPageRoute(builder: (_) => const ShareCodeScreen()),
+          );
+          // **Reconcile on the way back, whatever the screen returned.** The
+          // audience line is rendered from `WatchedState`, and a pairing that
+          // completed while that screen was up has changed it. §3's rule is that
+          // nothing patches state incrementally, so this re-reads rather than
+          // adding the new name to a list.
+          //
+          // `userInitiated` is left at its default true: she pressed the button
+          // that opened this, so a refresh is the answer she asked for.
+          await ref.read(watchedStateProvider.notifier).refresh();
+        },
+        icon: const Icon(Icons.person_add_alt),
+        label: const Text(OnboardingCopy.addSomeone),
+        style: ButtonStyle(
+          // `guidelines.md`: 48dp floor for secondary controls, no exceptions.
+          minimumSize: WidgetStateProperty.all(const Size(0, 48)),
+        ),
+      );
+}
+
+/// The **top action button** to the watcher list, for somebody who is both.
+///
+/// PLAN.md puts the button on this screen rather than making the watched person
+/// navigate: they tap daily, the watcher does not, so the watcher pays the tap.
+@visibleForTesting
+class WatcherListButton extends StatelessWidget {
+  const WatcherListButton({super.key});
+
+  static const Key buttonKey = Key('tap-watcher-list');
+
+  @override
+  Widget build(BuildContext context) => IconButton(
+        key: buttonKey,
+        onPressed: () => Navigator.of(context).push(
+          MaterialPageRoute<void>(builder: (_) => const WatcherScreen()),
+        ),
+        icon: const Icon(Icons.people_outline),
+        // Labelled, because an unlabelled icon button is a control a
+        // screen-reader user cannot identify at all — and this one is the whole
+        // of their route to the other half of the app.
+        tooltip: WatcherCopy.title,
+      );
+}
+
 class _AudienceLine extends StatelessWidget {
   const _AudienceLine({required this.state});
 

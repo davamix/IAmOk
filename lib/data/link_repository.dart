@@ -96,6 +96,47 @@ class LinkRepository {
     return true;
   }
 
+  /// Links on which [uid] is the **watched** party, as they change.
+  ///
+  /// The one streaming read in this app, and it exists for one screen: the
+  /// pairing flow assumes a family member sets up both phones **in one sitting**
+  /// (`ui-ux/screens.md`), so the phone showing the code has to notice the
+  /// moment the other phone redeems it, without anybody navigating.
+  ///
+  /// ## Why this does not weaken §3
+  ///
+  /// §3 says Firestore is the source of truth and a **listener's live state is
+  /// invisible to background isolates** (§4). Both still hold: nothing decides
+  /// anything from this stream. It is a *nudge*, exactly as an FCM push is — the
+  /// screen reacts by calling `syncLinks()`, which is the same
+  /// read-and-replace path a launch and a resume use, and the store is what
+  /// everything else reads afterwards. Losing the stream costs the reader a
+  /// live update, never correctness.
+  ///
+  /// ## One query, not the two `fromServer` makes
+  ///
+  /// Only the watched half is watched, because that is the half this screen is
+  /// about: *has anybody redeemed my code*. §8 grants the read on
+  /// `watchedUid == uid`, so the rules can see this query is safe with no
+  /// disjunction to decompose.
+  ///
+  /// Cache hits are welcome here, unlike in [fromServer]: this is a change
+  /// signal rather than a verification, and the verification is the `syncLinks`
+  /// the caller does next.
+  Stream<List<Link>> watchWatchedBy(String uid) {
+    if (uid == LocalStore.signedOutUid) return const Stream.empty();
+    return _firestore
+        .collection('links')
+        .where('watchedUid', isEqualTo: uid)
+        .snapshots()
+        .map((snapshot) => [
+              // A document this build cannot interpret is dropped rather than
+              // thrown on, exactly as `syncInto` drops one — on this side an
+              // exception is a screen that never updates.
+              for (final doc in snapshot.docs) ?_decode(doc),
+            ]);
+  }
+
   /// Either party may end a link, and may change **nothing else** (§8).
   ///
   /// Revocation is final: ADR-0004 decision 7 has the watcher *withdraw* any

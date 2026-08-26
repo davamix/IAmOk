@@ -149,8 +149,9 @@ Consequences that shape the design:
 
 ```
 ┌─ Presentation ──────────────────────────────────────────────┐
-│  CheckInShell (watched mode)   WatchShell (watcher mode)     │
-│  OnboardingFlow   HealthPanel   PairingScreens   AwayScreen  │
+│  TapScreen (watched main)      WatcherScreen (watcher main)  │
+│  Home (routes on HomeRoute)    OnboardingScreen              │
+│  ShareCodeScreen  EnterCodeScreen   HealthPanel  AwayScreen  │
 │  DebugHarness                                                │
 ├─ Application (Riverpod) ────────────────────────────────────┤
 │  CheckInController  WatchListController  OnboardingController│
@@ -161,7 +162,9 @@ Consequences that shape the design:
 │  ReminderPolicy  which of 12/18/21 should exist, given state │
 │  WarningPolicy   should the watcher warn for day D?          │
 │  Reconciler      desired-state calculator (both sides)       │
-│  Link, CheckIn, WatchStatus  entities                        │
+│  HomeRoute       which main screen, from role + links        │
+│  InviteCode      the §7 code format, parsed and normalised   │
+│  Link, CheckIn, WatchStatus, PairingOutcome  entities        │
 ├─ Data ──────────────────────────────────────────────────────┤
 │  AuthRepository  UserRepository  LinkRepository              │
 │  CheckInRepository  AwayRepository  LocalStore(SQLite)       │
@@ -199,7 +202,7 @@ thing some readers get.
 | `LinkRepository` | Data | Read links for either role; revoke; per-link warning time | UI |
 | `CheckInRepository` | Data | Write today's check-in; read a watched person's days | UI, Alarm |
 | `AwayRepository` | Data | Read / set / cancel the away period for a watched user | UI, FCM, Alarm |
-| `InviteService` | Data | Create invite; call `redeemInvite` | UI |
+| `InviteService` | Data | Call `createInvite`; call `redeemInvite` ([ADR-0011](decisions/0011-creating-an-invite-is-a-function-too.md)). **Both are callables** — it holds no Firestore reference, because §8 makes `invites/{code}` unwritable as well as unreadable by every client. This row said *"create invite"* until Phase 5, which read as a client write and is one no client may perform. | UI |
 | `LocalStore` | Data | SQLite. Per-link `lastConfirmedDate`, `warningsShownFor` (day → **which** warning is standing, [ADR-0004](decisions/0004-refused-is-not-unreachable.md)), `correctionsOwedFor` (days whose warning has been **disproved and taken down** but whose retraction has not been spoken — a separate fact from the one above, and separate because that one is the sole input to the row's warned state, [ADR-0010](decisions/0010-a-push-may-not-post-a-warning-early.md)), `lastDecidedDay` ([ADR-0009](decisions/0009-decide-about-every-completed-day.md)'s catch-up pointer), `activeFrom`, `watchedTimezone`, cached `awayPeriod`, `accessLostSince` + `accessLostCause` + `accessLostNotifiedOn`; plus `deviceTimezone`, `pendingAlarms`, `lastReconcileAt` (a **timestamp** — §10 renders "offline since 10:14"), and the `reconcileLock` lease ([ADR-0006](decisions/0006-reconcile-is-serialised-on-disk.md)); plus three device-health settings that §13's panel reads in Phase 7 and `dump` shows meanwhile — `warningAlarmsExact` (the exact-alarm degradation actually happened), `linkReconcileFailed` (a link this app silently stopped checking), and `uses24HourClock` (a device fact a bare isolate cannot ask for, cached exactly as `deviceTimezone` is) | **All three** |
 | `AlarmScheduler` | Platform | Schedule / cancel / enumerate alarms; `rescheduleOnReboot` | UI, Alarm |
 | `NotificationService` | Platform | Channels, display, cancel, replace-by-id, tap routing | All three |
@@ -366,17 +369,36 @@ list of codes.
 
 ## 9. Cloud Functions
 
-Three required, one optional. All in `europe-west1`.
+**Four** required, one optional. All in `europe-west1`.
 
 | Function | Trigger | Does |
 |---|---|---|
 | `onCheckInCreated` | `checkins/{uid}/days/{date}` created | Read accepted links where `watchedUid == uid` → collect watcher tokens → send **data-only, high-priority** FCM `{watchedUid, date, deviceTappedAt, tz, watchedName}` → delete tokens that return `UNREGISTERED` |
 | `onAwayChanged` | `users/{uid}/shared/away` written or deleted | Fan out a data-only nudge to **every party** — all watchers *and* the watched device, since either may have made the change. Each device reconciles and renders its own notification. |
+| `createInvite` | Callable | Generate a §7 code → `create` it (so a collision is the write failing, not a read-then-write race) with `expiresAt` = **24 h** and `watchedUid` from `request.auth`, never from the body. A live unconsumed code is **reused** rather than replaced, and the call sweeps the caller's own expired unconsumed invites. |
 | `redeemInvite` | Callable | Validate code + expiry + not-consumed → create `links/{watched}_{watcher}` with `activeFrom = today in watched tz`, `watchedName`/`watchedTimezone` **and `watcherName`** denormalized (§7) → mark invite consumed. Atomic in a transaction. |
 | `revokeLink` | Callable *(optional)* | Could be a client write under rules; a Function gives an audit point. Decide at implementation. |
 
 Redemption **must** be a Function: the client cannot enforce single-use or expiry, and cannot
 be allowed to read another user's uid out of an invite.
+
+> **`createInvite` was missing from this table until Phase 5, and its absence contradicted §8**
+> ([ADR-0011](decisions/0011-creating-an-invite-is-a-function-too.md)). §8 has always said
+> `invites/{code}` is **Function-written** and `firestore.rules` has enforced it since Phase 4 with
+> `allow read, write: if false` — while §6 gave `InviteService` the job of *"create invite"*, a write
+> no client may perform. Adding the row is what makes §6, §8 and §9 agree; it is not new policy.
+>
+> Granting the client a narrowed `create` instead was rejected: a create that fails because the
+> document exists tells the caller that code is **live**, which is the enumeration the deny exists to
+> prevent, arriving through the write path.
+
+**Both callables return expected outcomes as a `status` field on a successful call**, and reserve
+thrown errors for the two things that genuinely are faults — no identity, and a database that did not
+answer. A mistyped code, an expired one and one somebody else already used are ordinary things a
+person does. A status enum crossing the wire is what makes the client's mapping *total*; the
+alternative is what `OPEN-QUESTIONS.md` #5 records elsewhere in this app, where an **English
+substring** decides which message a family reads and anything unrecognised falls through to a claim
+that is false.
 
 `onAwayChanged` sends a nudge, not a command. There is deliberately **no "away finished"
 message** — expiry is arithmetic against `through`, computed independently on every device
@@ -857,8 +879,9 @@ survival — and it has not been met by a platform limit, only by one plugin's h
 
 | Concern | Package |
 |---|---|
-| Firebase | `firebase_core`, `firebase_auth`, `cloud_firestore`, `firebase_messaging`, `firebase_app_check` |
+| Firebase | `firebase_core`, `firebase_auth`, `cloud_firestore`, `firebase_messaging`, `firebase_app_check`, `cloud_functions` |
 | Sign-in | `google_sign_in` |
+| Sharing an invite code | `share_plus` |
 | Display alarms + boot restore | `flutter_local_notifications` |
 | Logic-bearing alarms | `android_alarm_manager_plus` |
 | Time | `timezone`, `flutter_timezone` |
@@ -866,6 +889,19 @@ survival — and it has not been met by a platform limit, only by one plugin's h
 | Permissions | `permission_handler` — **deferred to Phase 7**, see below |
 | Connectivity | `connectivity_plus` |
 | State | `flutter_riverpod` |
+
+**`cloud_functions` and `share_plus` joined in Phase 5**, and both were the same kind of
+documentation gap this table has had twice before rather than new decisions. `cloud_functions` is
+what calls §9's two callables, which §6 has always required; `share_plus` is the *"+ Android share
+sheet"* half of PLAN.md's locked pairing decision, and a code that cannot leave the phone serves only
+the both-phones-on-one-table case. **Both are UI-isolate only** — no background entry point calls a
+function or opens a share sheet, and `domain_purity_test.dart` holds that line.
+
+**`firebase_core` is pinned to an exact version rather than caret-ranged**, which is a build fix
+recorded in `pubspec.yaml`: adding `cloud_functions` re-resolved the graph to `firebase_core` 4.14.0,
+against which `firebase_auth` 6.5.7 does not compile. `flutter analyze` and `flutter test` both stay
+green through it — only the Android build fails — which is why a debug APK is part of this project's
+definition of done.
 
 **`firebase_app_check` was missing from this table until Phase 4 step 6**, which is a documentation
 bug rather than a decision: App Check has been named in PLAN.md step 6, in
@@ -932,9 +968,14 @@ New relative to HANDOVER.md's inventory.
 
 Not decided, and not blocking a first build.
 
-- **Watcher-side onboarding when the watched person has no phone skills.** Realistically the
+- ~~**Watcher-side onboarding when the watched person has no phone skills.** Realistically the
   family member sets up both devices. The pairing flow should assume that, and probably support
-  doing it in one sitting on two phones.
+  doing it in one sitting on two phones.~~ **Designed and built in Phase 5.** Three things follow
+  from the one-sitting assumption and they are the design: the code is sized and grouped to be
+  **read aloud across a table**; the phone that *made* the code notices the moment the other phone
+  redeems it, without anybody navigating, because the family member is holding the other phone at
+  that moment; and every refusal names a next action, because in a sitting there is somebody there
+  to carry it out. Proven on two devices — see `ui-ux/screens.md` and `testing/device-matrix.md`.
 - **What the watcher sees on cold open after weeks away.** A history strip? Just today?
 - **Multiple watched people per watcher.** The model supports it; the UI has not been designed.
 - **Future-dated away periods.** The data model supports it (§12); whether the UI exposes it is

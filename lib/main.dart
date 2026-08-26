@@ -6,9 +6,11 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'application/onboarding_controller.dart';
 import 'application/providers.dart';
 import 'application/push_handler.dart';
 import 'application/watcher_reconcile_service.dart';
+import 'copy/tap_copy.dart';
 import 'data/auth_repository.dart';
 import 'data/firebase_bootstrap.dart';
 import 'data/local_store.dart';
@@ -20,6 +22,7 @@ import 'platform/notification_router.dart';
 import 'platform/notification_service.dart';
 import 'platform/permission_service.dart';
 import 'presentation/app_theme.dart';
+import 'presentation/onboarding_screen.dart';
 import 'presentation/tap_screen.dart';
 import 'presentation/watcher_screen.dart';
 
@@ -135,7 +138,11 @@ Future<void> main() async {
 
   runApp(
     ProviderScope(
-      overrides: [appServicesProvider.overrideWithValue(services)],
+      // `launchServicesProvider`, not `appServicesProvider`: the latter is
+      // derived from this plus whoever is signed in *now*, so that onboarding's
+      // sign-in rebuilds it without the restart the debug harness could ask a
+      // developer for and a family cannot be asked for.
+      overrides: [launchServicesProvider.overrideWithValue(services)],
       child: const IAmOkApp(),
     ),
   );
@@ -482,8 +489,11 @@ class _IAmOkAppState extends ConsumerState<IAmOkApp>
     // identical screen. `_openIfWatched` captures its link id before awaiting,
     // so the list consuming the tap does not prevent this.
     if (WatcherScreen.isShowing) return;
-    // Phase 5 routes on role; until then the watched screen is home and this is
-    // pushed on top, so Back returns where the reader came from.
+    // **Pushed on top of whatever home is, still.** With Phase 5 routing on
+    // role, home may already *be* the watcher list — for a watcher who is not
+    // also watched — and the guard above is what stops this stacking a second
+    // copy of it. Where home is the Tap screen, Back returns there, which is
+    // where the reader came from.
     navigator.push(
       MaterialPageRoute<void>(builder: (_) => const WatcherScreen()),
     );
@@ -499,8 +509,70 @@ class _IAmOkAppState extends ConsumerState<IAmOkApp>
     // colours, and it was being asserted against Flutter's defaults.
     theme: AppTheme.light,
     darkTheme: AppTheme.dark,
-    // PLAN.md routes on the two onboarding selections in Phase 5. Until
-    // then the watched side is the whole app, which is what Phase 2 is for.
-    home: const TapScreen(),
+    // **Phase 5's routing.** The decision itself is `HomeRoute.decide`, a pure
+    // function asserted as a truth table; this only renders its answer. See
+    // [Home].
+    home: const Home(),
   );
+}
+
+/// Whichever main screen this user belongs on.
+///
+/// ## The decision is not here, deliberately
+///
+/// `main.dart` hard-coded `home: const TapScreen()` for three phases and its own
+/// comment named what getting the successor wrong would cost: *"someone who is
+/// both watched and watcher lands on the Tap screen by design, so their watcher
+/// alarms would never be re-armed by opening the app at all"*. That is a
+/// predicate over four booleans deciding whether a dead man's switch is
+/// repaired, and `docs/testing/strategy.md` puts a predicate over booleans where
+/// it can be asserted without a device — [HomeRoute.decide], with a truth table
+/// in `test/domain/onboarding/home_route_test.dart`.
+///
+/// ## Nothing is rendered until the inputs are in
+///
+/// The answer depends on two disk reads. Guessing a main screen and correcting it
+/// a frame later would **move the tap target**, and `guidelines.md` calls a
+/// layout that reflows a bug — on the one control an 80-year-old presses from
+/// muscle memory every morning. So a null route is a spinner, not a default.
+class Home extends ConsumerWidget {
+  const Home({super.key});
+
+  /// The route, as a screen. **A pure function, and that is deliberate.**
+  ///
+  /// The same move [IAmOkApp.repairOnResume] makes, for the same reason: pumping
+  /// the shell to find out which screen it picked needs a whole composition root
+  /// — a real `LocalStore`, real notification channels — and every one of those
+  /// is irrelevant to the question *did the router honour the route*. Worse, it
+  /// puts the answer somewhere only an integration test can reach, on the wiring
+  /// that decides whether a watcher can reach the screen that re-arms their
+  /// warning alarms.
+  ///
+  /// So the widget holds no decision, only a lookup, and
+  /// `test/presentation/onboarding_routing_test.dart` asserts this directly.
+  static Widget screenFor(HomeRoute? route) => switch (route?.screen) {
+        // **Null is a spinner, never a default screen.** The answer depends on
+        // two disk reads; guessing a main screen and correcting it a frame later
+        // would move the tap target, and `guidelines.md` calls a layout that
+        // reflows a bug — on the one control an 80-year-old presses from muscle
+        // memory every morning.
+        null => Scaffold(
+            body: Semantics(
+              // A bare spinner says nothing at all to TalkBack — the same gap
+              // `TapCopy.loadingLabel` was written for, and the same words,
+              // because it is the same wait.
+              label: TapCopy.loadingLabel,
+              child: const Center(child: CircularProgressIndicator()),
+            ),
+          ),
+        HomeScreen.onboarding => const OnboardingScreen(),
+        HomeScreen.tap => TapScreen(
+            watcherListReachable: route!.watcherListReachable,
+          ),
+        HomeScreen.watcherList => const WatcherScreen(),
+      };
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) =>
+      screenFor(ref.watch(homeRouteProvider));
 }

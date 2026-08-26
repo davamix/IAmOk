@@ -16,6 +16,7 @@
 | [0008](0008-the-warning-is-late-in-doze-and-the-app-says-so.md) | The warning is late in Doze; accept it, surface it, and do not promise a time | Accepted · revisit in Phase 4 | ARCHITECTURE.md §9, §10, §13, §14 |
 | [0009](0009-decide-about-every-completed-day.md) | Decide about every completed day, not only the most recent | Accepted | ARCHITECTURE.md §10 · `ui-ux/screens.md` |
 | [0010](0010-a-push-may-not-post-a-warning-early.md) | A push may not post a warning before `warningLocalTime` | Accepted | ARCHITECTURE.md §10 · `ui-ux/screens.md` · `testing/device-matrix.md` |
+| [0011](0011-creating-an-invite-is-a-function-too.md) | Creating an invite is a Function too | Accepted | ARCHITECTURE.md §6, §9, §15 |
 
 ## What belongs here
 

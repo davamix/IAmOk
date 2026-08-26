@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_app_check/firebase_app_check.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -59,6 +60,15 @@ abstract final class FirebaseBootstrap {
   // fall-through to production.
   static const int _authPort = 9099;
   static const int _firestorePort = 8080;
+  static const int _functionsPort = 5001;
+
+  /// Where the callables live (§1, §9) — co-located with Firestore, and named
+  /// at every call site because the library default is `us-central1`.
+  ///
+  /// A callable invoked in the wrong region does not fall back: it 404s, which
+  /// reads like a function that was never deployed rather than one that was
+  /// asked for in the wrong place.
+  static const String functionsRegion = 'europe-west1';
 
   /// True when this build talks to the emulator suite instead of the project.
   static bool get usesEmulator => emulatorHost.isNotEmpty;
@@ -136,12 +146,19 @@ abstract final class FirebaseBootstrap {
 
   static bool _wired = false;
 
-  /// Points Auth and Firestore at the emulator suite.
+  /// Points Auth, Firestore **and Functions** at the emulator suite.
   ///
   /// Guarded by a flag rather than by `Firebase.apps`, because these are
   /// per-isolate SDK settings and re-applying them after use throws. The flag is
   /// isolate-local, which is correct: each isolate has its own SDK instance and
   /// each has to be told separately.
+  ///
+  /// **Functions joined the list in Phase 5**, and it belongs here for the same
+  /// reason the other two do rather than at the call site: a build pointed at the
+  /// emulator whose *callables* still went to the live project would mint real
+  /// invites and write real links into `i-am-ok-c74ca` while every read around
+  /// them came from the emulator, with both halves reporting success. That is
+  /// this class's whole failure mode, one service later.
   static void _useEmulators() {
     if (!usesEmulator || _wired) return;
     _wired = true;
@@ -164,6 +181,31 @@ abstract final class FirebaseBootstrap {
     FirebaseFirestore.instance.useFirestoreEmulator(
       emulatorHost,
       _firestorePort,
+      automaticHostMapping: false,
+    );
+    // **The region has to match here too.** `instanceFor` is what every call
+    // site uses, and pointing the default instance at the emulator would leave
+    // the regional one talking to the live project — the split-brain this
+    // method exists to prevent, arriving through the one service that takes a
+    // region.
+    //
+    // **`automaticHostMapping: false` here as well, and it is a THIRD plugin
+    // doing it — measured on the POCO F3, 2026-08-26.** The note above says
+    // "both plugins"; `cloud_functions` makes three, and it defaults the flag to
+    // `true` exactly as the other two do. The failure is quieter than theirs,
+    // because Auth and Firestore were already mapped correctly: the phone signed
+    // in, wrote `users/{uid}`, showed the pairing screen — and then every
+    // callable went to `10.0.2.2`, which means nothing on a physical handset, so
+    // `redeemInvite` **hung until it timed out** and the Functions emulator
+    // logged nothing at all. Half the app worked, so it read as a backend fault
+    // rather than as a host that was never reached.
+    //
+    // The general rule, since this is now three for three: **every FlutterFire
+    // API that takes an emulator host rewrites it on Android unless told not
+    // to.** Assume the next one does too.
+    FirebaseFunctions.instanceFor(region: functionsRegion).useFunctionsEmulator(
+      emulatorHost,
+      _functionsPort,
       automaticHostMapping: false,
     );
   }

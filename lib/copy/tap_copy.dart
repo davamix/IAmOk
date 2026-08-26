@@ -78,11 +78,20 @@ abstract final class TapCopy {
   /// re-proposal of anything rejected; it is the same line, made true in both
   /// states.
   ///
-  /// It names a next human, which is the shape the health panel's dead-end row
-  /// already uses (*"ask whoever set up the app"*) — the pairing flow assumes a
-  /// family member sets up both phones, so this is the real next step.
-  static const String nobodyYet = "No one is set up to know you're OK. "
-      'Ask a family member to help you add someone.';
+  /// **The second sentence was removed in Phase 5, and removing it was
+  /// required rather than tidying.**
+  ///
+  /// It read *"Ask a family member to help you add someone."* — the **dead-end**
+  /// wording, which `notificationsOff` two screens down records the rule for:
+  /// *"ask a family member" is only honest once there is nothing left to press*.
+  /// Phase 5 put an **Add someone** button directly beneath this line, so there
+  /// is now something to press, and the sentence would have been sending a
+  /// reader away from a control in front of them.
+  ///
+  /// What remains is the same true statement about the same two states — before
+  /// pairing has ever happened, and after the last watcher revokes — with the
+  /// next step supplied by the button instead of by a sentence.
+  static const String nobodyYet = "No one is set up to know you're OK.";
 
   /// Joins names the way a person would say them out loud.
   ///

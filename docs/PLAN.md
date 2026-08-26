@@ -290,24 +290,37 @@ allowances mean effectively €0 at this scale, but the card must be on the acco
 
 ## Phase 5 — Onboarding and pairing
 
-> **NEXT. Start from [phases/phase-5-brief.md](phases/phase-5-brief.md)**, which carries what already
-> exists to build on, the design decisions not to re-litigate, and the emulator-first instruction.
+> **BUILT, and the exit criterion is MET on two devices.** Start from
+> [phases/phase-5-summary.md](phases/phase-5-summary.md). **Not signed off** — every new
+> user-visible string is owed the owner's approval, including **two changes to already-approved
+> copy**, and the five reviewers have not yet run.
 >
-> **Build against the local Firebase Emulator Suite.** A 2nd-gen deploy would currently **fail** —
-> four of the seven prerequisite APIs are missing (Cloud Build, Artifact Registry, Eventarc, Cloud
-> Run), verified read-only with `gcloud` on 2026-08-25 — and Blaze is on, so enabling them is
-> billable rather than blocked. The Functions emulator hosts callables, so `redeemInvite` needs no
-> deploy to be built and driven from two real devices.
+> Built against the emulator suite as the brief instructed, so **nothing here says anything about a
+> deployed `redeemInvite`**; the 2nd-gen deploy is still blocked on four missing APIs and remains
+> the owner's call.
 >
-> `InviteService` and `redeemInvite` do not exist yet. `firestore.rules` already denies every client
-> read and write on `invites/{code}`, and `Link` already carries every field `redeemInvite` has to
-> denormalise.
+> **[ADR-0011](architecture/decisions/0011-creating-an-invite-is-a-function-too.md) landed here and
+> was not in this plan.** §8 has always said `invites/{code}` is Function-written and the deployed
+> rules enforce it, while §9 listed only `redeemInvite` and §6 gave `InviteService` a "create
+> invite" no client may perform. There is now a **fourth** Function, `createInvite`, which is what
+> makes the three sections agree.
+>
+> **Two defects were found by the device run and by nothing else** — every callable was being sent
+> to `10.0.2.2` from a physical handset because a third FlutterFire plugin rewrites the emulator
+> host, and the summary screen was unreachable because the router left onboarding the moment a
+> question was answered. Both are in `testing/device-matrix.md` under *Pairing on two phones*.
 
-**Deliverables** — the three screens with both Skip options, identical for every user; invite
-creation and the `redeemInvite` callable; role routing from the two selections; the summary screen.
+**Deliverables** — ~~the three screens with both Skip options, identical for every user; invite
+creation and the `redeemInvite` callable; role routing from the two selections; the summary
+screen.~~ **All built**, plus three things the list did not name and the phase could not be finished
+without: a **sign-in screen** (every link is keyed by a uid, and Phase 4 signed in from the debug
+harness), **`createInvite`** (ADR-0011), and a **route back into pairing** from both main screens
+(without it a skipped first question is a dead end and a second watcher can never be added).
 
-**Exit criteria** — two phones pair from a cold install using only a shared code, and each lands on
-the correct main screen.
+**Exit criteria** — ~~two phones pair from a cold install using only a shared code, and each lands on
+the correct main screen.~~ **MET, 2026-08-26**, AVD ↔ POCO F3, both uninstalled first, code read off
+one screen and typed into the other. Mum landed on the Tap screen naming Ana; Ana landed on the
+watcher list showing Mum. **The AVD also tapped**, which closes the half Phase 4 left owed.
 
 ---
 

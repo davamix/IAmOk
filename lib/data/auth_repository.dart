@@ -32,6 +32,40 @@ class AuthRepository {
   static const String serverClientId =
       '744276314021-uour1dugadnlu0kf4atdmgs9bv00sd6n.apps.googleusercontent.com';
 
+  /// Which synthetic identity an **emulator** build signs in as.
+  ///
+  /// ## This was a blocker for Phase 5's exit criterion, not a convenience
+  ///
+  /// [_emulatorCredential] had a hard-coded subject, so every emulator build
+  /// signed in as the same person. Two phones pointed at one suite therefore got
+  /// **one uid** — and pairing two phones from a cold install using a shared code
+  /// is precisely what Phase 5 has to demonstrate. `redeemInvite` would have
+  /// refused it as a self-link, correctly, and the criterion could not have been
+  /// run at all.
+  ///
+  /// ```
+  /// flutter run --dart-define=IAMOK_EMULATOR_HOST=10.0.2.2 \
+  ///             --dart-define=IAMOK_EMULATOR_USER=emulator-mum \
+  ///             --dart-define=IAMOK_EMULATOR_NAME=Mum
+  /// ```
+  ///
+  /// **Compile-time, like `IAMOK_EMULATOR_HOST` and for the stronger of its two
+  /// reasons.** `String.fromEnvironment` is a const, so [_emulatorCredential] —
+  /// a function that mints an identity with no password — stays behind a branch
+  /// the tree shaker removes from a release build. A runtime setting would make
+  /// that a thing a restore or a rooted device could flip.
+  ///
+  /// The default is the subject this project has always used, so an existing
+  /// emulator export and the POCO's seeded link keep resolving to the same uid.
+  static const String emulatorUser =
+      String.fromEnvironment('IAMOK_EMULATOR_USER',
+          defaultValue: 'emulator-watcher');
+
+  /// The display name that emulator identity carries into `users/{uid}` and,
+  /// through `redeemInvite`, onto both sides of the link (§7).
+  static const String emulatorUserName =
+      String.fromEnvironment('IAMOK_EMULATOR_NAME', defaultValue: 'Ana');
+
   final LocalStore _store;
 
   // **Resolved on use, not in the constructor.** `FirebaseAuth.instance` throws
@@ -164,15 +198,24 @@ class AuthRepository {
   /// could flip. It is the same argument `main.dart` makes for gating the debug
   /// clock offset on `kDebugMode`, one step stronger.
   ///
-  /// The fixed subject means the emulator hands back the **same uid every run**,
-  /// which is what lets `tools/emulators.ps1` export and re-import a link graph
-  /// that still belongs to somebody after a restart.
+  /// A **stable** subject per build means the emulator hands back the same uid
+  /// every run, which is what lets `tools/emulators.ps1` export and re-import a
+  /// link graph that still belongs to somebody after a restart. It is
+  /// [emulatorUser] rather than a literal so two phones can be two people — see
+  /// that constant for why the literal was a blocker.
+  ///
+  /// **The email is derived from the subject and must stay derived.** The Auth
+  /// emulator will link a new provider identity onto an existing account that
+  /// shares an email address, and hand back *that* account's uid — so two builds
+  /// with different subjects and one shared email address would collapse back to
+  /// a single uid, which is the exact failure [emulatorUser] exists to remove,
+  /// arriving silently through the claim nobody was looking at.
   AuthCredential _emulatorCredential() => GoogleAuthProvider.credential(
         idToken: jsonEncode({
-          'sub': 'emulator-watcher',
-          'email': 'watcher@example.test',
+          'sub': emulatorUser,
+          'email': '$emulatorUser@example.test',
           'email_verified': true,
-          'name': 'Ana',
+          'name': emulatorUserName,
         }),
       );
 }

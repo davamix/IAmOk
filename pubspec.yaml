@@ -67,7 +67,30 @@ dependencies:
   # `play-services-basement`. `docs/security/threat-model.md` leaned on its
   # absence until Phase 4 and no longer does — the claim was re-derived rather
   # than inherited, and `test/android_manifest_test.dart` says so.
-  firebase_core: ^4.13.0
+  # **`firebase_core` is PINNED, not caret-ranged, and that is a build fix.**
+  #
+  # Adding `cloud_functions` in Phase 5 re-resolved the graph and pulled
+  # `firebase_core` 4.13.0 -> 4.14.0. `firebase_auth` 6.5.7 compiles against
+  # `FlutterFirebaseCorePlugin.customAuthDomain`, which 4.14.0 no longer has, so
+  # `:firebase_auth:compileDebugJavaWithJavac` fails with *cannot find symbol* —
+  # in a plugin's own Java, from a Dart package addition that touched neither.
+  #
+  # `flutter test` and `flutter analyze` both stayed green through it: nothing
+  # about it is visible until the **Android** build runs, which is why the debug
+  # APK is part of this project's definition of done rather than a formality.
+  #
+  # Pinned to the exact version Phase 4 built and verified against, so the
+  # combination is the known-good one rather than whatever resolves next.
+  #
+  # 6.5.7 is the newest `firebase_auth` there is, so this is not a case of one
+  # package lagging behind an upgrade that exists — `firebase_core` 4.14.0 was
+  # released ahead of an auth that compiles against it. `cloud_functions` is held
+  # at ^6.3.6 for the same reason: 6.4.0 requires core ^4.14.0 and would drag the
+  # broken combination back in.
+  #
+  # Lift both together, with a `firebase_auth` that names 4.14.0, and only with
+  # a real `flutter build apk --debug` behind it.
+  firebase_core: 4.13.0
   firebase_auth: ^6.5.7
 
   # Identity (§1). Google Sign-In: free, one tap on Android, and the uid survives
@@ -110,6 +133,34 @@ dependencies:
   # and `docs/infrastructure/deploy-notes.md` have all named it since Phase 0.
   # §15 now lists it.
   firebase_app_check: ^0.4.6
+
+  # Callables (§9), added in Phase 5. `createInvite` and `redeemInvite` are the
+  # only two, and both exist because the client cannot be trusted with the job:
+  # §8 makes `invites/{code}` unreadable and unwritable by every client, so
+  # minting a code and redeeming one both happen server-side or not at all.
+  #
+  # **UI isolate only.** No background entry point calls a function — a nudge
+  # carries no authority (§3) and an isolate with seconds to live has nothing to
+  # ask. `test/domain/domain_purity_test.dart` holds that line.
+  #
+  # The region has to be named at the call site: `instanceFor(region:
+  # 'europe-west1')`. The library default is `us-central1`, and a callable
+  # invoked there simply does not exist — a 404 that reads like a deploy that
+  # never happened. See `InviteService`.
+  cloud_functions: ^6.3.6
+
+  # The Android share sheet, which is half of PLAN.md's locked pairing decision:
+  # *"Invite codes + Android share sheet. No READ_CONTACTS, no address-book
+  # upload, works on day one."* A code that cannot leave the phone only serves
+  # the both-phones-on-one-table case.
+  #
+  # §15's package table did not list it — the same **documentation** gap
+  # `firebase_app_check` had above, and resolved the same way rather than left
+  # for a reader to find two documents disagreeing. §15 now lists it.
+  #
+  # UI isolate only, and it holds nothing: the sheet is handed a string and the
+  # app does not learn, or care, where it went.
+  share_plus: ^13.3.0
 
 dev_dependencies:
   flutter_test:

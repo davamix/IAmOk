@@ -1,8 +1,9 @@
 # UI/UX guidelines
 
-**Date:** 2026-08-15 · **Status:** Current · The Tap screen, the watcher list, the debug harness
-and the failure screens are **built**; onboarding, pairing, the away picker and the health panel are
-not. *"No UI has been built"* stood here until 2026-08-25, four screens after it stopped being true.
+**Date:** 2026-08-15 · **Status:** Current · The Tap screen, the watcher list, the debug harness,
+the failure screens, **sign-in, the three onboarding screens and both pairing screens** are built;
+the away picker and the health panel are not. *"No UI has been built"* stood here until 2026-08-25,
+four screens after it stopped being true.
 
 Two audiences with opposite needs share one app.
 
@@ -126,7 +127,10 @@ Recorded here so they are not silently decided by whoever writes the widget firs
 - **The first day back after away.** Routine is most likely to break the day someone returns from a
   trip. No grace day is planned — the reminders do their job — but the copy could acknowledge it.
 - **Whether the watched person's screen should show anything about the watchers at all**, beyond
-  the fact that someone is watching.
+  the fact that someone is watching. *Phase 5 added one thing and no more:* an **"Add someone"**
+  control beneath the audience line. It is an action, not a status message, and it is what makes the
+  empty line honest — that line used to end *"Ask a family member to help you add someone"*, the
+  dead-end wording, which stops being true the moment there is something to press.
 - **Whether the watcher ever chooses, or even sees, `warningLocalTime`.** Nothing sets it but link
   creation and the debug harness, and no screen shows it.
   [ADR-0008](../architecture/decisions/0008-the-warning-is-late-in-doze-and-the-app-says-so.md)

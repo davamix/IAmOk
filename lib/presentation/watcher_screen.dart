@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:timezone/timezone.dart' as tz;
@@ -6,9 +8,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../application/providers.dart';
 import '../application/watcher_reconcile_service.dart';
 import '../copy/notification_copy.dart';
+import '../copy/onboarding_copy.dart';
 import '../copy/watcher_copy.dart';
 import '../domain/domain.dart';
 import '../platform/notification_router.dart';
+import 'pairing_screens.dart';
 
 /// The watcher's list — one row per watched person.
 ///
@@ -92,7 +96,18 @@ class _WatcherScreenState extends ConsumerState<WatcherScreen>
     final state = ref.watch(watcherStateProvider);
 
     return Scaffold(
-      appBar: AppBar(title: const Text(WatcherCopy.title)),
+      appBar: AppBar(
+        title: const Text(WatcherCopy.title),
+        // **In the app bar, not the body.** This is a watcher's screen: a busy
+        // family member who may not open the app for weeks, for whom an action
+        // in the bar is the ordinary place to look. The floor `guidelines.md`
+        // sets on the *watched* screen — one screen, one action — is about the
+        // person who taps daily and does not apply here.
+        //
+        // It is in the bar rather than only in the empty state because a watcher
+        // with one person still needs a route to add a second.
+        actions: const [EnterCodeButton(inAppBar: true)],
+      ),
       body: state.when(
         // A bare spinner says nothing at all to TalkBack, which is the whole
         // experience for the reader who depends on it.
@@ -173,14 +188,24 @@ class _Empty extends StatelessWidget {
               child: Center(
                 child: Padding(
                   padding: const EdgeInsets.all(24),
-                  child: Text(
-                    WatcherCopy.nobody,
-                    textAlign: TextAlign.center,
-                    // Ordinary secondary text, never a warning colour. Styling
-                    // an empty state as an alarm makes it a status message
-                    // about other people's behaviour, which is the thing this
-                    // app deliberately does not do.
-                    style: Theme.of(context).textTheme.bodyLarge,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        WatcherCopy.nobody,
+                        textAlign: TextAlign.center,
+                        // Ordinary secondary text, never a warning colour.
+                        // Styling an empty state as an alarm makes it a status
+                        // message about other people's behaviour, which is the
+                        // thing this app deliberately does not do.
+                        style: Theme.of(context).textTheme.bodyLarge,
+                      ),
+                      const SizedBox(height: 16),
+                      // What makes the line above honest — see `WatcherCopy
+                      // .nobody`, which dropped "ask a family member" the moment
+                      // there was something to press.
+                      const EnterCodeButton(),
+                    ],
                   ),
                 ),
               ),
@@ -188,6 +213,63 @@ class _Empty extends StatelessWidget {
           ],
         ),
       );
+}
+
+/// Opens the code screen so this watcher can start looking after somebody else.
+///
+/// **Redeeming a code is the watcher's half of pairing**, which is why this side
+/// reaches [EnterCodeScreen] and the Tap screen reaches [ShareCodeScreen]. A
+/// watcher does not produce codes; the watched person does, because §2 makes
+/// *the watched person's device generating and sharing the code* the consent
+/// record.
+///
+/// Rendered as an icon in the app bar and as a labelled button in the empty
+/// state — the same action, sized for where it is. The empty state is where a
+/// reader is stuck and needs a wide target; the bar is where a reader with a
+/// list already knows to look.
+@visibleForTesting
+class EnterCodeButton extends ConsumerWidget {
+  const EnterCodeButton({this.inAppBar = false, super.key});
+
+  final bool inAppBar;
+
+  static const Key buttonKey = Key('watcher-add-someone');
+  static const Key appBarKey = Key('watcher-add-someone-appbar');
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    Future<void> open() async {
+      await Navigator.of(context).push<bool>(
+        MaterialPageRoute(builder: (_) => const EnterCodeScreen()),
+      );
+      // **Reconcile on the way back, whatever came out of that screen.** A new
+      // link needs its warning alarm armed, and §3's rule is that nothing
+      // patches state incrementally — so this re-reads rather than inserting a
+      // row. `userInitiated` stays true: they pressed the button that led here.
+      await ref.read(watcherStateProvider.notifier).refresh();
+    }
+
+    if (inAppBar) {
+      return IconButton(
+        key: appBarKey,
+        onPressed: () => unawaited(open()),
+        icon: const Icon(Icons.person_add_alt),
+        // An unlabelled icon button is a control a screen-reader user cannot
+        // identify at all.
+        tooltip: OnboardingCopy.addSomeone,
+      );
+    }
+    return FilledButton.tonalIcon(
+      key: buttonKey,
+      onPressed: () => unawaited(open()),
+      icon: const Icon(Icons.person_add_alt),
+      label: const Text(OnboardingCopy.addSomeone),
+      style: ButtonStyle(
+        // `guidelines.md`: 48dp floor for secondary controls, no exceptions.
+        minimumSize: WidgetStateProperty.all(const Size(0, 48)),
+      ),
+    );
+  }
 }
 
 /// The list itself, split out from [WatcherScreen] so it can be pumped in a

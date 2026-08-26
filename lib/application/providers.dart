@@ -5,6 +5,7 @@ import '../data/check_in_repository.dart';
 import '../data/check_in_reader.dart';
 import '../data/debug_backend_override.dart';
 import '../data/firestore_check_in_reader.dart';
+import '../data/invite_service.dart';
 import '../data/link_repository.dart';
 import '../data/local_store.dart';
 import '../data/push_registration.dart';
@@ -61,7 +62,34 @@ class AppServices {
   ///
   /// It is a snapshot: signing in or out rebuilds `AppServices`, because
   /// changing identity changes every answer below it.
+  ///
+  /// **Phase 5 gave that sentence a mechanism.** Until onboarding existed the
+  /// only way to sign in was the debug harness, whose own button says *"RESTART
+  /// the app: selfUid is read once, at launch"* — which is not something a real
+  /// sign-in screen may ask an 80-year-old to do. [signedInUidProvider] now holds
+  /// the live value and [appServicesProvider] derives from it, so signing in
+  /// rebuilds this object and everything watching it.
   final String selfUid;
+
+  /// The same services, for a different account.
+  ///
+  /// Every field except [selfUid] is a property of the *phone* — the store, the
+  /// clock, the notification channels, the alarm scheduler — so identity is the
+  /// only thing that changes. Rebuilding rather than mutating is the point: §3's
+  /// rule is that nothing patches state incrementally, and a mutable uid under a
+  /// tree that has already read it is exactly the incremental patch that rule
+  /// forbids.
+  AppServices withSelfUid(String uid) => AppServices(
+    store: store,
+    clock: clock,
+    notifications: notifications,
+    alarms: alarms,
+    permissions: permissions,
+    clockService: clockService,
+    selfUid: uid,
+    auth: auth,
+    push: _push,
+  );
 
   /// Google Sign-In → the Firebase uid (§6). UI isolate only.
   final AuthRepository auth;
@@ -112,6 +140,14 @@ class AppServices {
 
   /// `users/{uid}` and its token subcollection (§7). UI isolate only.
   UserRepository get users => UserRepository();
+
+  /// Pairing — the two callables (§6, §9). **UI isolate only.**
+  ///
+  /// No background entry point may reach this. A nudge carries no authority
+  /// (§3), and an isolate with seconds to live has nothing to ask a function;
+  /// `test/domain/domain_purity_test.dart` is what holds that line, because
+  /// `cloud_functions` is a plugin and a bare isolate has no registrant for it.
+  InviteService get invites => InviteService();
 
   final PushRegistration? _push;
 
@@ -354,11 +390,65 @@ class AppServices {
   );
 }
 
-/// Overridden in `main()`. Reading it without that override is a wiring bug,
-/// and failing loudly here beats a half-built app.
-final appServicesProvider = Provider<AppServices>(
-  (ref) => throw StateError('appServicesProvider must be overridden in main()'),
+/// The composition root as `main()` built it, at launch, for whoever was signed
+/// in **then**.
+///
+/// Overridden in `main()`. Reading it without that override is a wiring bug, and
+/// failing loudly here beats a half-built app.
+///
+/// Nothing outside this file should read it: [appServicesProvider] is the one
+/// that knows who is signed in *now*.
+final launchServicesProvider = Provider<AppServices>(
+  (ref) =>
+      throw StateError('launchServicesProvider must be overridden in main()'),
 );
+
+/// Whose app this is, right now.
+///
+/// Seeded from the launch-time snapshot and moved by onboarding's sign-in and by
+/// sign-out. It exists because Phase 5 put a **sign-in screen inside the app**:
+/// before that the only route was the debug harness, which could honestly tell a
+/// developer to restart, and onboarding cannot tell a family to.
+///
+/// The uid is written to `LocalStore` by `AuthRepository.signIn` on the same
+/// path — that row is what §4's background isolates read, and this notifier is
+/// what the *UI* reads. Two readers of one fact, deliberately, because the
+/// isolates share no memory and only one of them can hold state in RAM.
+class SignedInUid extends Notifier<String> {
+  @override
+  String build() => ref.watch(launchServicesProvider).selfUid;
+
+  /// After a successful sign-in. Rebuilds [appServicesProvider] and everything
+  /// derived from it, which is how the reconcilers start answering for the new
+  /// account without a restart.
+  void signedInAs(String uid) => state = uid;
+
+  /// After [AppServices.signOut]. `LocalStore.clearSelfUid` has already taken
+  /// the cache and the links; this is the in-memory half of the same fact.
+  void signedOut() => state = LocalStore.signedOutUid;
+}
+
+final signedInUidProvider =
+    NotifierProvider<SignedInUid, String>(SignedInUid.new);
+
+/// The services **for the account that is signed in now**.
+///
+/// A derived provider rather than the overridden one, so that a sign-in during
+/// onboarding rebuilds it and every dependent — `watchedStateProvider` and
+/// `watcherStateProvider` both `ref.watch` this, so both re-reconcile under the
+/// new identity rather than going on answering for the previous one.
+///
+/// Still overridable with a plain value: every widget test in this suite does
+/// exactly that, and a test that supplies a whole `AppServices` is stating the
+/// identity along with everything else.
+final appServicesProvider = Provider<AppServices>((ref) {
+  final launched = ref.watch(launchServicesProvider);
+  final uid = ref.watch(signedInUidProvider);
+  // Identity-equal in the overwhelmingly common case — the app launched signed
+  // in and nobody has signed in or out since — so this does not rebuild the
+  // world on every read.
+  return launched.selfUid == uid ? launched : launched.withSelfUid(uid);
+});
 
 /// The Tap screen's state, recomputed by a full reconcile.
 ///

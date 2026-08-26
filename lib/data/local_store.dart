@@ -447,6 +447,22 @@ class LocalStore {
   static const String _keyLinkReconcileFailed = 'link_reconcile_failed';
   static const String _keyUses24HourClock = 'uses_24_hour_clock';
   static const String _keySelfUid = 'self_uid';
+  static const String _keyOnboardingWatched = 'onboarding_wants_to_be_watched';
+  static const String _keyOnboardingWatcher = 'onboarding_wants_to_watch';
+  static const String _keyOnboardingCompleted = 'onboarding_completed';
+
+  /// The keys that belong to the signed-in **account** rather than to the phone.
+  ///
+  /// Named once because [clearSelfUid] deletes them and nothing else may: the
+  /// device facts sit in the same table and are deliberately kept across a
+  /// sign-out, so a loop over `settings` would take the zone and the clock format
+  /// with the account and put the next session back on ADR-0002's UTC fallback.
+  static const List<String> _accountSettings = [
+    _keySelfUid,
+    _keyOnboardingWatched,
+    _keyOnboardingWatcher,
+    _keyOnboardingCompleted,
+  ];
 
   Future<String?> _setting(String key) async {
     final rows = await _db.query(
@@ -516,6 +532,35 @@ class LocalStore {
 
   Future<void> setSelfUid(String uid) => _putSetting(_keySelfUid, uid);
 
+  /// The two answers onboarding collected on this phone, and whether it ran.
+  ///
+  /// **Not in Firestore, deliberately.** §1 says roles live on links; a `role`
+  /// field on `users/{uid}` would be a second answer to a question the link
+  /// graph already answers, and one the rules would have to validate. See
+  /// [OnboardingChoices], and [HomeRoute.decide] for how these combine with the
+  /// links — which outrank them, because a reinstall keeps the links and loses
+  /// this table.
+  ///
+  /// Absent reads as `false`, which is the correct cold-install answer for all
+  /// three: nothing asked, nothing selected, flow not run.
+  Future<OnboardingChoices> onboardingChoices() async => OnboardingChoices(
+        wantsToBeWatched: await _setting(_keyOnboardingWatched) == 'true',
+        wantsToWatch: await _setting(_keyOnboardingWatcher) == 'true',
+        completed: await _setting(_keyOnboardingCompleted) == 'true',
+      );
+
+  /// Records [choices] as a whole, rather than one answer at a time.
+  ///
+  /// The three are read together by [HomeRoute.decide] and a partial write is a
+  /// routing decision made against half an answer — so the setter takes the same
+  /// value object the getter returns, and a caller that wants to change one
+  /// field uses [OnboardingChoices.copyWith].
+  Future<void> setOnboardingChoices(OnboardingChoices choices) async {
+    await _putSetting(_keyOnboardingWatched, '${choices.wantsToBeWatched}');
+    await _putSetting(_keyOnboardingWatcher, '${choices.wantsToWatch}');
+    await _putSetting(_keyOnboardingCompleted, '${choices.completed}');
+  }
+
   /// Clears the uid **and everything decided on its behalf**.
   ///
   /// The per-link cache has to go with the account, because every row in it
@@ -531,11 +576,26 @@ class LocalStore {
   /// the first resume. That is the fresh-install window `main()` closes on
   /// purpose.
   ///
+  /// **The onboarding answers go**, and they are the Phase 5 addition to this
+  /// list. They are what *this user* said about who is watching them, so leaving
+  /// them would route the next account by the previous one's answers — a watcher
+  /// signing in behind a watched person would land on the Tap screen, where the
+  /// list that arms their warning alarms is unreachable. [HomeRoute.decide]
+  /// unions the answers with the links, so it cannot correct for a stale answer
+  /// that outranks nothing.
+  ///
   /// Tearing the platform alarms down is **not** done here and must not be: §3's
   /// rule is that nothing patches state incrementally, so the caller reconciles
   /// afterwards and the empty desired set cancels them.
   Future<void> clearSelfUid() => _db.transaction((txn) async {
-        await txn.delete('settings', where: 'key = ?', whereArgs: [_keySelfUid]);
+        await txn.delete(
+          'settings',
+          // The named list rather than a loop over the whole table: the device
+          // facts live here too and must survive. See [_accountSettings].
+          where: 'key IN (${List.filled(_accountSettings.length, '?')
+              .join(', ')})',
+          whereArgs: _accountSettings,
+        );
         for (final table in [
           'warnings_shown',
           'corrections_owed',

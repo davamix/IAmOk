@@ -10,7 +10,7 @@ measured and accepted. **What does not:** a defect. A defect gets fixed or gets 
 Every row says what would make it a **blocker**, because that is the only thing that decides when it
 gets picked up.
 
-**Date:** 2026-08-25 · Opened at the end of Phase 4.
+**Date:** 2026-08-25 · Opened at the end of Phase 4. · Row 11 added at the end of Phase 5.
 
 ---
 
@@ -28,6 +28,7 @@ gets picked up.
 | 8 | Phase 7 surfaces for fields already stored | Phase 7 |
 | 9 | `ensureVisible` cannot reach a far-down row | Phase 7's multi-person layout |
 | 10 | A warning erased by force-stop is not re-posted | Accepted in ADR-0007; never, unless measured harmful |
+| 11 | Nothing rate-limits `redeemInvite` guessing | Before App Check is enforced, or if abuse is ever observed |
 
 ---
 
@@ -160,6 +161,29 @@ recorded in **ADR-0007 decision 4** — a force-stop is silent and total, and th
 the ledger) re-posts warnings a family has already read and acted on.
 
 **Blocker when:** only if measured to matter in practice. It is a recorded acceptance, not a gap.
+
+## 11. Nothing rate-limits guessing at `redeemInvite`
+
+Added at the end of Phase 5, when pairing became real.
+
+**The arithmetic, so the acceptance is a position rather than a shrug.** A code is 6 characters from
+a 32-character alphabet — 32^6 ≈ **1.07 billion**. Codes are single-use, live for **24 hours**, and at
+family scale a handful exist at any moment. Guessing one is not a realistic threat with the numbers as
+they are.
+
+**What a hit would cost is not small, which is why this is written down.** A successful guess makes
+the attacker a **watcher of a stranger** — the check-in history and display name of an identifiable
+elderly person living alone, which `security/threat-model.md` calls the more sensitive half of this
+data. The callable never returns a uid, so the blast radius stops there, and either party can revoke.
+
+**The designed control is App Check enforcement**, which row 5 records as structurally gated on the
+app reaching an internal test track. A per-caller failure counter was considered and not built: it is
+a Firestore document per uid on the pairing path, with contention and its own failure modes, for a
+threat the numbers already bound.
+
+**Blocker when:** before App Check is enforced — fold it into that work rather than building a second
+mechanism — or immediately, if abuse is ever observed. `redeemInvite` logs the outcome and the
+caller's uid on every call, so the evidence exists to notice.
 
 ---
 

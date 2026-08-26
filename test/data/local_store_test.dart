@@ -710,4 +710,88 @@ void main() {
       expect(await store.allLinks(), hasLength(1));
     });
   });
+
+  /// The onboarding answers, and what a sign-out does to them.
+  ///
+  /// `clearSelfUid` had **no test of its own** before Phase 5, which is what
+  /// made adding a second thing for it to delete worth covering rather than
+  /// assuming: the method's whole job is that one class of row goes and another
+  /// class stays, and the two live in the same table.
+  group('onboarding choices', () {
+    test('a cold install has answered nothing', () async {
+      expect(await store.onboardingChoices(), const OnboardingChoices.none());
+    });
+
+    test('round-trips all three flags', () async {
+      const choices = OnboardingChoices(
+        wantsToBeWatched: true,
+        wantsToWatch: false,
+        completed: true,
+      );
+      await store.setOnboardingChoices(choices);
+      expect(await store.onboardingChoices(), choices);
+    });
+
+    test('round-trips the both-skipped state as completed', () async {
+      const skipped = OnboardingChoices(
+        wantsToBeWatched: false,
+        wantsToWatch: false,
+        completed: true,
+      );
+      await store.setOnboardingChoices(skipped);
+      final read = await store.onboardingChoices();
+      expect(read.completed, isTrue,
+          reason: 'a skip is an answer — losing it re-asks every launch');
+      expect(read.wantsToBeWatched, isFalse);
+      expect(read.wantsToWatch, isFalse);
+    });
+
+    test('a later write replaces the earlier one in both directions', () async {
+      await store.setOnboardingChoices(const OnboardingChoices(
+        wantsToBeWatched: true,
+        wantsToWatch: true,
+        completed: true,
+      ));
+      await store.setOnboardingChoices(const OnboardingChoices.none());
+      expect(await store.onboardingChoices(), const OnboardingChoices.none());
+    });
+  });
+
+  group('signing out', () {
+    test('takes the uid, the answers and the per-link cache', () async {
+      await store.setSelfUid('mum');
+      await store.setOnboardingChoices(const OnboardingChoices(
+        wantsToBeWatched: true,
+        wantsToWatch: true,
+        completed: true,
+      ));
+      await store.upsertLink(linkTo('ana'));
+
+      await store.clearSelfUid();
+
+      expect(await store.selfUid(), isNull);
+      expect(
+        await store.onboardingChoices(),
+        const OnboardingChoices.none(),
+        reason: 'the next account would otherwise be routed by this one\'s '
+            'answers, and HomeRoute unions rather than overrides',
+      );
+      expect(await store.allLinks(), isEmpty);
+    });
+
+    test('KEEPS the device facts, which belong to the phone', () async {
+      await store.setSelfUid('mum');
+      await store.setDeviceTimezone('Europe/Madrid');
+      await store.setUses24HourClock(false);
+
+      await store.clearSelfUid();
+
+      expect(
+        await store.deviceTimezone(),
+        'Europe/Madrid',
+        reason: 'dropping it puts the next session on ADR-0002\'s UTC fallback',
+      );
+      expect(await store.uses24HourClock(), isFalse);
+    });
+  });
 }

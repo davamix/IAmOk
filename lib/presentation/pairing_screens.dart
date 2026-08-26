@@ -1,0 +1,520 @@
+import 'dart:async';
+
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:share_plus/share_plus.dart';
+
+import '../application/onboarding_controller.dart';
+import '../application/providers.dart';
+import '../copy/onboarding_copy.dart';
+import '../domain/domain.dart';
+import 'onboarding_screen.dart';
+
+/// The two pairing screens: **make a code**, and **use a code**.
+///
+/// ## Both are built for one sitting
+///
+/// `ui-ux/screens.md` calls it out and leaves it undesigned: *"realistically the
+/// family member sets up both phones in one sitting; the pairing flow should
+/// assume that rather than assuming two people configuring independently."*
+///
+/// Three things follow, and they are the design:
+///
+/// 1. **The code is sized to be read across a table**, grouped three and three,
+///    because it is spoken aloud as often as it is typed.
+/// 2. **The phone that made the code notices when it is used**, without anybody
+///    navigating — the family member is holding the *other* phone at that
+///    moment, and a confirmation only they can see would leave the person the
+///    app is for looking at an unchanged screen.
+/// 3. **Every refusal names a next action**, because in a sitting there is
+///    somebody there to carry it out.
+///
+/// Both are reachable from onboarding **and** from either main screen, which is
+/// why they are ordinary pushed routes rather than steps of a flow.
+
+/// Shows a code, and waits for somebody to use it.
+///
+/// Pops `true` if at least one person paired while it was open, so the caller
+/// can record that this user is now watched.
+class ShareCodeScreen extends ConsumerStatefulWidget {
+  const ShareCodeScreen({super.key});
+
+  @override
+  ConsumerState<ShareCodeScreen> createState() => _ShareCodeScreenState();
+}
+
+class _ShareCodeScreenState extends ConsumerState<ShareCodeScreen> {
+  InviteOutcome? _outcome;
+
+  /// Watchers already accepted when this screen opened.
+  ///
+  /// The **baseline is the point**. Somebody who already has two watchers and
+  /// adds a third must see *the third one's* name, not a confirmation about a
+  /// pairing from last month — and `WatchedAudience` is explicit that this app
+  /// never renders a status *change* about watchers on the watched side. This is
+  /// a confirmation of an action taken seconds ago on this screen, which is a
+  /// different thing and the only reason it is allowed.
+  Set<String>? _knownWatchers;
+
+  /// The name to confirm, once somebody redeems.
+  String? _newWatcherName;
+
+  StreamSubscription<List<Link>>? _links;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(_createCode());
+      _listenForRedemption();
+    });
+  }
+
+  @override
+  void dispose() {
+    unawaited(_links?.cancel());
+    super.dispose();
+  }
+
+  Future<void> _createCode() async {
+    final outcome = await ref.read(appServicesProvider).invites.create();
+    if (!mounted) return;
+    setState(() => _outcome = outcome);
+  }
+
+  /// Notices the moment the other phone redeems.
+  ///
+  /// A **nudge, not a decision** (§3): the stream says *something changed*, and
+  /// the response is `syncLinks()` — the same read-and-replace path a launch and
+  /// a resume use — after which the local store is what everything else reads.
+  /// Losing the stream costs a live update and never correctness; the pairing is
+  /// already durable in Firestore before this fires.
+  void _listenForRedemption() {
+    final services = ref.read(appServicesProvider);
+    if (!services.signedIn) return;
+    _links = services.links.watchWatchedBy(services.selfUid).listen(
+      (links) async {
+        final accepted = {
+          for (final link in links)
+            if (link.isAccepted) link.watcherUid: link.watcherName,
+        };
+        final baseline = _knownWatchers ??= accepted.keys.toSet();
+        final arrived = accepted.keys.where((uid) => !baseline.contains(uid));
+        if (arrived.isEmpty) return;
+
+        // The store first, so that popping back to a main screen finds the link
+        // already there rather than racing the next reconcile for it.
+        await services.syncLinks();
+        if (!mounted) return;
+        setState(() => _newWatcherName = accepted[arrived.first] ?? '');
+        // The answer to screen 1 now has evidence behind it. Recorded here
+        // because this screen is also reachable from the Tap screen, where
+        // somebody who once skipped the question has just changed their mind.
+        unawaited(
+          ref
+              .read(onboardingControllerProvider.notifier)
+              .recordPairing(asWatched: true),
+        );
+      },
+      // A stream error is not a failed pairing and must not be rendered as one.
+      // The code on screen is still valid and still redeemable; all that is lost
+      // is the live confirmation, and the next reconcile finds the link anyway.
+      onError: (Object _, StackTrace _) {},
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final paired = _newWatcherName;
+    return Scaffold(
+      appBar: AppBar(title: const Text(OnboardingCopy.yourCodeTitle)),
+      body: SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(24),
+          child: switch ((paired, _outcome)) {
+            (final String name, _) => _Paired(
+                watcherName: name,
+                onAddAnother: _addAnother,
+                onDone: () => Navigator.of(context).pop(true),
+              ),
+            (_, final InviteReady ready) => _CodeOnOffer(ready: ready),
+            (_, final InviteRefused refused) => _Refused(
+                message: OnboardingCopy.inviteRefusal(refused.reason),
+                onRetry: () {
+                  setState(() => _outcome = null);
+                  unawaited(_createCode());
+                },
+              ),
+            _ => const _Working(),
+          },
+        ),
+      ),
+    );
+  }
+
+  /// A second watcher needs a **second code** — an invite is single-use (§8).
+  void _addAnother() {
+    setState(() {
+      _newWatcherName = null;
+      _outcome = null;
+      // The freshly-paired watcher joins the baseline, so the next confirmation
+      // is about the next person rather than firing again for this one.
+      _knownWatchers = null;
+    });
+    unawaited(_createCode());
+  }
+}
+
+class _CodeOnOffer extends ConsumerWidget {
+  const _CodeOnOffer({required this.ready});
+
+  final InviteReady ready;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(OnboardingCopy.yourCodeBlurb, style: theme.textTheme.bodyLarge),
+        const SizedBox(height: 32),
+        _BigCode(code: ready.code),
+        const SizedBox(height: 16),
+        _ExpiryLine(expiresAt: ready.expiresAt),
+        const SizedBox(height: 32),
+        FilledButton.tonalIcon(
+          onPressed: () => SharePlus.instance.share(
+            ShareParams(text: OnboardingCopy.shareMessage(ready.code)),
+          ),
+          icon: const Icon(Icons.share),
+          label: const Text(OnboardingCopy.shareCode),
+          style: tallButton,
+        ),
+        const SizedBox(height: 32),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+            const SizedBox(width: 12),
+            Flexible(
+              child: Text(
+                OnboardingCopy.waitingForCode,
+                style: theme.textTheme.bodyMedium,
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+/// The code itself — the one thing on this screen somebody has to read out.
+class _BigCode extends StatelessWidget {
+  const _BigCode({required this.code});
+
+  final String code;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Semantics(
+      // **Spelled out for a screen reader**, because "K7RTQX" is read as a word
+      // and a listener cannot spell a word back. The visual grouping is for the
+      // eye; this is the same information for the ear.
+      label: code.split('').join(' '),
+      excludeSemantics: true,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 16),
+        decoration: BoxDecoration(
+          color: theme.colorScheme.primaryContainer,
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Center(
+          child: Text(
+            InviteCode.forReading(code),
+            textAlign: TextAlign.center,
+            style: theme.textTheme.displaySmall?.copyWith(
+              // Monospaced digits and letters, so `K7R TQX` does not shift width
+              // as it is read, and the two groups stay the same size.
+              fontFeatures: const [FontFeature.tabularFigures()],
+              fontWeight: FontWeight.w700,
+              letterSpacing: 6,
+              color: theme.colorScheme.onPrimaryContainer,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// *"It stops working at 09:00 on Thursday 27 August."*
+///
+/// Rendered in the **device's** zone and its own 12/24-hour setting, both read
+/// from `LocalStore` where `ClockService` cached them (ADR-0002). A watched
+/// person reading this is in their own zone by definition, so the device's is
+/// the right one — unlike a warning, which is about somebody else's day.
+class _ExpiryLine extends ConsumerWidget {
+  const _ExpiryLine({required this.expiresAt});
+
+  final DateTime expiresAt;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final facts = ref.watch(deviceFactsProvider).value;
+    if (facts == null) return const SizedBox.shrink();
+    return Text(
+      OnboardingCopy.codeExpiry(
+        expiresAt: expiresAt,
+        zone: facts.zone,
+        uses24Hour: facts.uses24Hour,
+      ),
+      style: Theme.of(context).textTheme.bodyMedium,
+      textAlign: TextAlign.center,
+    );
+  }
+}
+
+class _Paired extends StatelessWidget {
+  const _Paired({
+    required this.watcherName,
+    required this.onAddAnother,
+    required this.onDone,
+  });
+
+  final String watcherName;
+  final VoidCallback onAddAnother;
+  final VoidCallback onDone;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const SizedBox(height: 24),
+        Icon(Icons.check_circle, size: 64, color: theme.colorScheme.primary),
+        const SizedBox(height: 24),
+        Text(
+          OnboardingCopy.nowWatching(watcherName),
+          style: theme.textTheme.headlineSmall,
+          textAlign: TextAlign.center,
+        ),
+        const SizedBox(height: 40),
+        FilledButton(
+          onPressed: onDone,
+          style: tallButton,
+          child: const Text(OnboardingCopy.done),
+        ),
+        const SizedBox(height: 12),
+        TextButton(
+          onPressed: onAddAnother,
+          style: tallButton,
+          child: const Text(OnboardingCopy.addAnother),
+        ),
+      ],
+    );
+  }
+}
+
+/// Types a code somebody was given.
+///
+/// Pops `true` if a link was made, so the caller can record that this user is
+/// now a watcher.
+class EnterCodeScreen extends ConsumerStatefulWidget {
+  const EnterCodeScreen({super.key});
+
+  @override
+  ConsumerState<EnterCodeScreen> createState() => _EnterCodeScreenState();
+}
+
+class _EnterCodeScreenState extends ConsumerState<EnterCodeScreen> {
+  final _field = TextEditingController();
+  bool _busy = false;
+  String? _error;
+  String? _pairedWith;
+
+  @override
+  void dispose() {
+    _field.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    final outcome =
+        await ref.read(appServicesProvider).invites.redeem(_field.text);
+    if (!mounted) return;
+
+    switch (outcome) {
+      case Paired(:final watchedName):
+        // The link exists on the server; pull it down before leaving, so the
+        // watcher list this pops back to has the row and its warning alarm gets
+        // armed by the next reconcile rather than the one after.
+        await ref.read(appServicesProvider).syncLinks();
+        if (!mounted) return;
+        await ref
+            .read(onboardingControllerProvider.notifier)
+            .recordPairing(asWatcher: true);
+        if (!mounted) return;
+        setState(() {
+          _busy = false;
+          _pairedWith = watchedName;
+        });
+      case PairingRefused(:final reason):
+        setState(() {
+          _busy = false;
+          _error = OnboardingCopy.pairingRefusal(reason);
+        });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final paired = _pairedWith;
+
+    return Scaffold(
+      appBar: AppBar(title: const Text(OnboardingCopy.enterCodeTitle)),
+      body: SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(24),
+          child: paired != null
+              ? Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    const SizedBox(height: 24),
+                    Icon(
+                      Icons.check_circle,
+                      size: 64,
+                      color: theme.colorScheme.primary,
+                    ),
+                    const SizedBox(height: 24),
+                    Text(
+                      OnboardingCopy.nowLookingAfter(paired),
+                      style: theme.textTheme.headlineSmall,
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 40),
+                    FilledButton(
+                      onPressed: () => Navigator.of(context).pop(true),
+                      style: tallButton,
+                      child: const Text(OnboardingCopy.done),
+                    ),
+                  ],
+                )
+              : Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Text(
+                      OnboardingCopy.enterCodeBlurb,
+                      style: theme.textTheme.bodyLarge,
+                    ),
+                    const SizedBox(height: 32),
+                    TextField(
+                      controller: _field,
+                      autofocus: true,
+                      enabled: !_busy,
+                      textCapitalization: TextCapitalization.characters,
+                      textInputAction: TextInputAction.done,
+                      onSubmitted: (_) => _busy ? null : unawaited(_submit()),
+                      // Not `TextInputType.text`: the alphabet is letters AND
+                      // digits, so a numeric keyboard would hide half of it and
+                      // an email keyboard would autocorrect it.
+                      keyboardType: TextInputType.visiblePassword,
+                      // Upper-cased as they type, so the field shows the same
+                      // characters the other phone is displaying.
+                      inputFormatters: [UpperCaseFormatter()],
+                      style: theme.textTheme.headlineMedium?.copyWith(
+                        letterSpacing: 6,
+                        fontFeatures: const [FontFeature.tabularFigures()],
+                      ),
+                      textAlign: TextAlign.center,
+                      decoration: InputDecoration(
+                        labelText: OnboardingCopy.codeFieldLabel,
+                        border: const OutlineInputBorder(),
+                        errorText: _error,
+                        // Never truncated to a line: these sentences all name a
+                        // next action, and the action is the half that would be
+                        // cut off.
+                        errorMaxLines: 4,
+                      ),
+                    ),
+                    const SizedBox(height: 32),
+                    FilledButton(
+                      onPressed: _busy ? null : () => unawaited(_submit()),
+                      style: tallButton,
+                      child: _busy
+                          ? const SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Text(OnboardingCopy.useCode),
+                    ),
+                  ],
+                ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Upper-cases as the person types.
+///
+/// Public because `pairing_screens_test.dart` asserts it directly: it is the
+/// only piece of this screen that transforms what somebody typed, and a
+/// formatter that mangled a cursor position would be a code nobody could finish
+/// entering.
+class UpperCaseFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) =>
+      // The selection is carried through unchanged: upper-casing is
+      // length-preserving for this alphabet, so the caret does not move.
+      newValue.copyWith(text: newValue.text.toUpperCase());
+}
+
+class _Working extends StatelessWidget {
+  const _Working();
+
+  @override
+  Widget build(BuildContext context) => const Padding(
+        padding: EdgeInsets.symmetric(vertical: 64),
+        child: Center(child: CircularProgressIndicator()),
+      );
+}
+
+class _Refused extends StatelessWidget {
+  const _Refused({required this.message, required this.onRetry});
+
+  final String message;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) => Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const SizedBox(height: 24),
+          Text(message, style: Theme.of(context).textTheme.bodyLarge),
+          const SizedBox(height: 32),
+          FilledButton(
+            onPressed: onRetry,
+            style: tallButton,
+            child: const Text(OnboardingCopy.tryAgain),
+          ),
+        ],
+      );
+}
+

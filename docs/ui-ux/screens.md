@@ -1,9 +1,13 @@
 # Screen inventory
 
 **Date:** 2026-08-16 · **Status:** Specification-in-progress. **The Tap screen and the debug harness
-were built in Phase 2, and the watcher list in Phase 3** — see *Built in Phase 3* below; the rest is
-still specification. (This line said *"everything else is still specification"* until 2026-08-25;
-`guidelines.md` had the identical claim corrected the same day and this file was missed.)
+were built in Phase 2, the watcher list in Phase 3, and sign-in, the three onboarding screens and
+both pairing screens in Phase 5.** What remains specification is the away picker and the health
+panel. (This line said *"everything else is still specification"* until 2026-08-25; `guidelines.md`
+had the identical claim corrected the same day and this file was missed.)
+
+**Every Phase 5 string below is owed the owner's approval**, like every user-visible string in this
+project. Two of them are *changes to already-approved copy* and are called out where they appear.
 
 What is recorded here is **only what has actually been decided** — mostly behaviour and copy,
 carried over from [PLAN.md](../PLAN.md) and [ARCHITECTURE.md](../architecture/ARCHITECTURE.md).
@@ -14,10 +18,11 @@ here as a free choice: add the decision to this file when it is made.
 |---|---|---|
 | Tap (watched main) | 2 | **Built.** Behaviour, copy and layout decided |
 | Debug harness | 2 | **Built.** Debug builds only |
-| Onboarding 1 — "Who should know you're OK?" | 5 | Purpose and routing decided; copy partial |
-| Onboarding 2 — "Who are you looking after?" | 5 | Purpose and routing decided; copy partial |
-| Onboarding 3 — summary | 5 | Exists; content undesigned |
-| Pairing — create invite / redeem code | 5 | Mechanism decided; screens undesigned |
+| Sign-in | 5 | **Built.** Not in this inventory before Phase 5 — see below |
+| Onboarding 1 — "Who should know you're OK?" | 5 | **Built.** Copy below, **owed the owner's approval** |
+| Onboarding 2 — "Who are you looking after?" | 5 | **Built.** Copy below, **owed the owner's approval** |
+| Onboarding 3 — summary | 5 | **Built.** Reports the links that exist, never what was tapped |
+| Pairing — create invite / redeem code | 5 | **Built**, and proven on two devices |
 | Away picker | 6 | Copy decided; layout undesigned |
 | Watcher list (watcher main) | 7 | Row content decided; multi-person layout undesigned |
 | Health panel | 7 | Checks decided incl. backend access (ADR-0004); layout undesigned |
@@ -42,7 +47,163 @@ People **I** watch ⇒ I am a **watcher** ⇒ main screen is the watcher list.
 watcher list. The person who taps daily should never have to navigate to reach their one action.
 
 Realistically the family member sets up *both* phones in one sitting; the pairing flow should
-assume that rather than assuming two people configuring independently. Not yet designed.
+assume that rather than assuming two people configuring independently.
+
+> **Designed and built in Phase 5, and proven on two devices.** Three things follow from the
+> one-sitting assumption, and they *are* the design:
+>
+> 1. **The code is sized and grouped to be read aloud across a table** — `K7R TQX`, two groups of
+>    three, because six unbroken characters is what people misread and the group boundary is what a
+>    reader uses to keep their place when the listener asks them to repeat it.
+> 2. **The phone that made the code notices the moment it is used**, with nobody touching it. In the
+>    sitting this assumes, the family member is holding the *other* phone — so a confirmation only
+>    they could see would leave the person the app is actually for staring at an unchanged screen.
+> 3. **Every refusal names a next action**, because in a sitting there is somebody there to carry it
+>    out.
+
+---
+
+### Sign-in — **new in Phase 5, and this inventory never specified it**
+
+Phase 4 signed in from the debug harness *precisely so that no un-approved elderly-facing surface
+shipped early*. It cannot be avoided here: every link is keyed by a uid, `createInvite` needs one to
+name the watched party, and `redeemInvite` needs one to be the watcher. So it is the first thing
+onboarding does.
+
+| | Text |
+|---|---|
+| Title | **"I Am Ok"** |
+| Body | *"Tap once a day to say you are OK. The people you choose are told if a day goes by without a tap."* |
+| Action | **"Sign in with Google"** |
+| Sign-in failed | *"Could not sign in. Check your internet connection and try again."* |
+| Signed in, profile write failed | *"Signed in, but this phone could not finish getting ready. Try again."* |
+
+**The body deliberately does not say "your family will be told."** At this point nobody is set up,
+and a promise the very next screen has to walk back is worse than a plain description — the same rule
+that made `TapCopy.tapTargetLabel` stop saying *"tell your family"*.
+
+**A dismissed account chooser shows nothing at all.** It is a choice, not a fault.
+
+**The profile failure has its own sentence** because it is its own state: the account exists and the
+app still cannot be paired with, since `redeemInvite` copies the name and timezone off
+`users/{uid}` onto the link (§7). *"Could not sign in"* would send somebody to retry the half that
+worked.
+
+### The three screens, as built
+
+| | Screen 1 | Screen 2 |
+|---|---|---|
+| Question | *"Who should know you're OK?"* | *"Who are you looking after?"* |
+| Body | *"Add the people who look after you. They will see that you are OK each day, and they are told if a day goes by without a tap."* | *"If someone has given you a code, type it in here. You will be told if they miss a day."* |
+| Action | **"Add someone"** | **"I have a code"** |
+| Skip | **"Skip for now"** | **"Skip for now"** |
+
+**"Skip for now" keeps its *"for now"***, and that is the opposite of the choice `TapCopy.nobodyYet`
+made when it dropped *"yet"*. There the word asserted a history the app does not track; here it
+describes the button honestly — the question really can be answered later, from either main screen.
+
+**A skip is an answer, not an absence.** Somebody who skips both still *completes* onboarding, which
+is what stops the app asking an 80-year-old the same two questions every single morning.
+
+### Making a code
+
+| | Text |
+|---|---|
+| Title | **"Your code"** |
+| Body | *"Give this code to the person who will look after you. They type it into their own phone."* |
+| The code | `K7R TQX` — large, high contrast, two groups of three |
+| Expiry | *"It stops working at 11:14 am on Thursday 27 August."* |
+| Share | **"Share this code"** — the Android share sheet |
+| Waiting | *"Waiting for them to type it in."* |
+| Someone redeemed it | *"Ana will now know you're OK."* |
+| Then | **"Done"** · **"Add someone else"** |
+
+**The expiry is 24 hours**, the owner's decision, and it is rendered in the device's own zone and its
+own 12/24-hour setting through `NotificationCopy`'s formatters — not a third set. The date is written
+out; never `27/08`.
+
+**The code is spelled out for a screen reader** — `K 7 R T Q X` — because "K7RTQX" is read as a word
+and a listener cannot spell a word back. The visual grouping is for the eye; the spelling is the same
+information for the ear.
+
+***"Ana will now know you're OK."* reuses `TapCopy.willKnow`'s sentence shape on purpose**, so the
+words that confirm the pairing are the words the Tap screen shows every day afterwards.
+
+**This is not a status-change message about watchers.** `WatchedAudience` rejects *"X started
+watching you"* outright, and this does not reopen it: it confirms an action taken seconds ago on this
+screen, against a baseline captured when the screen opened, and it is never shown for a pairing that
+happened at any other time.
+
+### Using a code
+
+| | Text |
+|---|---|
+| Title | **"Type the code"** |
+| Body | *"Type the six characters you were given."* |
+| Field label | **"Code"** |
+| Action | **"Use this code"** |
+| Paired | *"You are now looking after Mum."* |
+
+**Lower case is accepted and upper-cased as they type**, and spaces and hyphens are stripped — a
+phone keyboard defaults to lower case, and somebody who types the grouping they were read must not be
+punished for it.
+
+**`O` is not silently read as `0`, and `I` is not read as `1`.** Neither digit is in the alphabet
+either, so there is no character a substitution could arrive at, and guessing at what somebody meant
+is how a family ends up paired to the wrong person.
+
+### Why a code did not work — **every branch is a claim**
+
+| The device knows | Says |
+|---|---|
+| no invite with that code | *"That code is not right. Check it and type it again."* |
+| the code's 24 hours are up | *"That code has expired. Ask for a new one."* |
+| somebody else redeemed it | *"That code has already been used. Ask for a new one."* |
+| it is the redeemer's own code | *"That is your own code. Ask the person you are looking after for theirs."* |
+| the other party's profile or timezone is unusable | *"That code did not work. Ask them to open I Am Ok on their phone, then try again."* |
+| **this** phone has no profile | *"This phone could not finish getting ready. Try again."* |
+| the call did not complete | *"Could not reach the internet. Check your connection and try again."* |
+| nobody is signed in | *"You are not signed in. Sign in and try again."* |
+
+**The failures are distinguished rather than collapsed**, and that is a deliberate trade recorded in
+ADR-0011: collapsing them leaks marginally less, but these tell a family three different next
+actions, and *check what you typed* against *ask for a fresh one* is the difference between a loop
+that can succeed and one that cannot.
+
+**The last three are not the reader's mistake and none of them says "not right".** *"Could not reach
+the internet"* in particular claims nothing about the code — nothing was decided.
+
+### The summary
+
+| Who | Says |
+|---|---|
+| watched | *"Ana will know you are OK when you tap each day."* + *"Tap once a day. That is all."* |
+| watcher, one person | *"You will be told if Mum misses a day."* |
+| watcher, several | *"You will be told if Granddad and Mum miss a day."* |
+| nothing set up | *"Nobody is set up yet. You can add someone at any time."* |
+| Action | **"Finish"** |
+
+**Built from the links that exist, never from what was tapped.** Somebody who chose *"Add someone"*
+and closed the code screen without anybody redeeming has set nothing up, and a summary claiming
+otherwise would be the first false claim this app ever made to a family. `HomeRoute` unions intent
+with evidence to decide *where to go*; this screen reports evidence only.
+
+### Getting back to pairing — **"Add someone"**
+
+Reachable from **both** main screens: a secondary text button on the Tap screen beneath the audience
+line, and an app-bar action plus an empty-state button on the watcher list. Without it, somebody who
+skipped the first question lands on a Tap screen naming nobody with nothing to press, and a second
+watcher could never be added at all — an invite is single-use, so every watcher needs their own code.
+
+> **It forced a change to two already-approved strings, and the change was required rather than
+> tidying.** `TapCopy.nobodyYet` ended *"Ask a family member to help you add someone."* and
+> `WatcherCopy.nobody` ended the same way. That is the **dead-end** wording, and
+> `TapCopy.notificationsOff` records the rule it follows: *"ask a family member" is only honest once
+> there is nothing left to press*. There is now something to press, directly beneath both lines, so
+> both second sentences are gone. What remains is the same true statement about the same two states,
+> with the next step supplied by the button instead of by a sentence.
+>
+> **Both shortened lines are owed the owner's approval**, like every user-visible string here.
 
 ---
 
@@ -104,9 +265,29 @@ is not what happened. That message is reserved for a failed initial load.
 | Missed check-ins | *"Tells you when someone you watch has not checked in."* |
 | App problems | *"Tells you when I Am Ok cannot check on someone."* |
 
-These are user-visible text and are approved here like any other string. **Open before Phase 5:**
-all three are created on every phone, so a watched person browsing Android's settings sees two
-channels describing things she does not do. Role is not known until onboarding runs.
+These are user-visible text and are approved here like any other string.
+
+> **Settled in Phase 5: all three channels are still created on every phone, deliberately.**
+>
+> This was marked *"open before Phase 5"* on the grounds that role is not known until onboarding
+> runs, so a watched person browsing Android's settings sees two channels describing things she does
+> not do. Onboarding now *does* know the role — and creating the channels conditionally was still
+> rejected, for three reasons:
+>
+> - **A channel that does not exist is a notification that silently does not post.** That trades a
+>   cosmetic oddity in a settings screen nobody opens for a lost warning, which is the worst thing
+>   this app can do. The trade is not close.
+> - **Role is not stable.** Any user can be handed a code and become a watcher minutes later, from
+>   either main screen. A channel set fixed at onboarding would be wrong for exactly the people who
+>   changed their mind — and the alarm and FCM isolates create channels too, from a bare isolate that
+>   would have to read the role off disk to decide.
+> - **Android remembers a deleted channel's settings**, so "delete it and recreate it if the role
+>   changes" does not restore a default — it restores whatever that user had last set, including
+>   *off*.
+>
+> The descriptions are **honest for everyone as written**: each says what the channel does, and a
+> channel that never fires is not a false claim about anybody. Recorded here as a decision so it is
+> not re-opened as an oversight.
 
 ### The layout is a Stack, and that is load-bearing
 

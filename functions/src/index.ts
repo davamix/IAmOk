@@ -1,7 +1,7 @@
 /**
  * Cloud Functions for I Am Ok — ARCHITECTURE.md §9.
  *
- * Three are required and one is optional; the first of them is here.
+ * Four are required and one is optional; three of them are here.
  *
  * ## Two rules that hold for every function added here
  *
@@ -21,8 +21,14 @@
  * | Function          | Trigger                             | Phase |
  * |-------------------|-------------------------------------|-------|
  * | `onCheckInCreated`| `checkins/{uid}/days/{date}` created | 4     |
- * | `onAwayChanged`   | `users/{uid}/shared/away` written    | 6     |
+ * | `createInvite`    | callable                            | 5     |
  * | `redeemInvite`    | callable                            | 5     |
+ * | `onAwayChanged`   | `users/{uid}/shared/away` written    | 6     |
+ *
+ * `createInvite` was **not in §9's original table**, and adding it is what makes
+ * §9 agree with §8 rather than a new decision — §8 has always said
+ * `invites/{code}` is Function-written, and the deployed rules deny every client
+ * write. ADR-0011 records it.
  *
  * Deliberately absent: a scheduled "who didn't check in" function. §9 and
  * ADR-0007 record what that costs and why the escape hatch stays shut.
@@ -33,9 +39,16 @@ import { getFirestore } from 'firebase-admin/firestore';
 import { getMessaging } from 'firebase-admin/messaging';
 import { logger, setGlobalOptions } from 'firebase-functions/v2';
 import { onDocumentCreated } from 'firebase-functions/v2/firestore';
+import { HttpsError, onCall } from 'firebase-functions/v2/https';
 
 import type { PushSender } from './check_in_fan_out';
 import { checkInFactFrom, fanOutCheckIn, isDayKey } from './check_in_fan_out';
+import {
+  INVITE_ALPHABET,
+  INVITE_CODE_LENGTH,
+  createInviteFor,
+  redeemInviteFor,
+} from './invites';
 
 /**
  * `europe-west1`, co-located with Firestore, and **not** a per-function default
@@ -138,3 +151,102 @@ export const onCheckInCreated = onDocumentCreated(
     }
   },
 );
+
+/**
+ * The uid the callable was invoked as, or a refusal.
+ *
+ * `request.auth` is populated by the SDK from a verified Firebase ID token, so
+ * this is the one identity either callable may act on. Nothing in the request
+ * body is ever read as a uid: a `watchedUid` parameter would let anybody mint an
+ * invite that pairs a stranger's phone to their own.
+ */
+function callerUid(auth: { uid: string } | undefined): string {
+  if (auth === undefined || auth.uid.length === 0) {
+    throw new HttpsError('unauthenticated', 'Sign in first.');
+  }
+  return auth.uid;
+}
+
+/**
+ * **Expected outcomes come back as results, not as thrown errors.**
+ *
+ * A mistyped code, an expired one, and one somebody else already used are all
+ * ordinary things a person does — not faults. Returning them as a `status` field
+ * on a successful call makes the client's mapping **total**: every value has a
+ * case, and a new status added here is a compile-time hole on the Dart side
+ * rather than an unrecognised string falling through to the wrong sentence.
+ *
+ * That last part is not hypothetical in this repo. `OPEN-QUESTIONS.md` #5
+ * records `_mentionsAppCheck` matching an **English substring** to decide which
+ * message a family is shown, with anything unrecognised falling through to a
+ * claim about the device that is false — §17's fleet-wide false alarm arriving
+ * through the copy layer. A status enum crossing the wire is the version of that
+ * which cannot mis-parse.
+ *
+ * `HttpsError` is kept for the two things that genuinely are faults: no
+ * identity, and a database that did not answer.
+ */
+export const createInvite = onCall(async (request) => {
+  const watchedUid = callerUid(request.auth);
+  try {
+    const result = await createInviteFor(getFirestore(), watchedUid, new Date());
+    if ('status' in result) {
+      logger.warn('createInvite: no profile for caller', { watchedUid });
+      return { status: 'watched-profile-missing' };
+    }
+    // The code itself is **never logged**. It is a bearer credential for the
+    // duration of its life: anyone holding it can become a watcher of this
+    // person, which is the link graph the threat model calls the map of who is
+    // vulnerable. Counts and uids only, exactly as the fan-out logs no token.
+    logger.info('createInvite: issued', { watchedUid, reused: result.reused });
+    return { status: 'created', ...result };
+  } catch (error) {
+    logger.error('createInvite: failed', { watchedUid, error });
+    throw new HttpsError('internal', 'Could not create a code.');
+  }
+});
+
+/**
+ * Turns a code into a link, with the caller as the **watcher** (§9).
+ *
+ * The caller's uid is the watcher and is never taken from the request body; the
+ * watched party comes out of the invite document, which no client may read (§8).
+ * So the only thing this call reveals to a redeemer is what §7 already
+ * denormalises onto the link they now hold — a display name — and never a uid.
+ */
+export const redeemInvite = onCall(async (request) => {
+  const watcherUid = callerUid(request.auth);
+
+  // Shape-checked here as well as on the client, because functions bypass the
+  // rules and the client is untrusted by definition. A code of the wrong shape
+  // cannot match a document, so this is not a security boundary — it is what
+  // keeps a 4 MB request body out of a Firestore document path.
+  const raw = (request.data ?? {}) as Record<string, unknown>;
+  const code = typeof raw['code'] === 'string' ? raw['code'].toUpperCase() : '';
+  const wellFormed =
+    code.length === INVITE_CODE_LENGTH &&
+    [...code].every((char) => INVITE_ALPHABET.includes(char));
+  if (!wellFormed) return { status: 'unknown-code' };
+
+  try {
+    const outcome = await redeemInviteFor(
+      getFirestore(),
+      code,
+      watcherUid,
+      new Date(),
+    );
+    // The **outcome**, never the code: a log line naming a live code is a log
+    // line anyone with access to it can pair themselves with.
+    logger.info('redeemInvite: decided', {
+      watcherUid,
+      status: outcome.status,
+      ...(outcome.status === 'linked'
+        ? { linkId: outcome.linkId, alreadyLinked: outcome.alreadyLinked }
+        : {}),
+    });
+    return outcome;
+  } catch (error) {
+    logger.error('redeemInvite: failed', { watcherUid, error });
+    throw new HttpsError('internal', 'Could not use that code.');
+  }
+});

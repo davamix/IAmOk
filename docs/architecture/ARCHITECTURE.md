@@ -581,6 +581,8 @@ FCM/reconcile sees checkin for D
                  remove D from correctionsOwedFor
           no   → cancel notification id hash(link,D)
                  KEEP D in correctionsOwedFor - the sentence is still owed
+      → D older than ADR-0009's catch-up floor?
+          → drop D from correctionsOwedFor, silently, never spoken
 ```
 
 One handler covers both causes. This is the highest-value thing to test.
@@ -593,6 +595,13 @@ days that are still warned, and D was no longer one of them. The family found an
 not tell *resolved* from *I swiped it in the night*. The predicate is
 `delivery.warning.consumesReminder`, the identical one the warning path uses, so *"record what was
 delivered, not what was decided"* now holds on both.
+
+**And the sentence expires with the window.** A retraction may not outlive the days
+[ADR-0009](decisions/0009-decide-about-every-completed-day.md) would still warn about — same floor,
+same constant, same argument about not coming back after a month and posting about a month. Safe to
+drop because the two ungated effects above already happened: the false claim left the tray and the
+row went honest when the correction was computed. A day still **standing** is never dropped, because
+its correction is what cancels it.
 
 **Two facts, two fields, deliberately.** Folding the owed day back into `warningsShownFor` is the
 tempting shortcut and it is a trap: that map is the **sole input to the watcher row's warned state**,

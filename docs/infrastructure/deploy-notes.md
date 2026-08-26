@@ -226,6 +226,39 @@ All Phase 4, all from [firebase-setup-prompt.md](firebase-setup-prompt.md):
   > (The command probes the *v1* endpoint while our functions are 2nd-gen; not the discrepancy it
   > looks like, since both generations live behind the same `cloudfunctions.googleapis.com`.)
   >
+  > **SETTLED 2026-08-25 with `gcloud`, and four of them are MISSING.** The paragraph below said
+  > this could not be checked from this machine. That was wrong: `gcloud` **is** installed
+  > (Google Cloud SDK 581.0.0, authenticated, project already set to `i-am-ok-c74ca`), and
+  > `gcloud services list --enabled` is read-only, costs nothing, and answers it outright.
+  >
+  > | | API | State |
+  > |---|---|---|
+  > | ✅ | Cloud Functions | `cloudfunctions.googleapis.com` — enabled |
+  > | ✅ | Pub/Sub | `pubsub.googleapis.com` — enabled |
+  > | ✅ | Cloud Storage (build artifacts) | `storage.googleapis.com` — enabled |
+  > | ❌ | **Cloud Build** | `cloudbuild.googleapis.com` — **missing** |
+  > | ❌ | **Artifact Registry** | `artifactregistry.googleapis.com` — **missing** |
+  > | ❌ | **Eventarc** | `eventarc.googleapis.com` — **missing** |
+  > | ❌ | **Cloud Run** | `run.googleapis.com` — **missing** |
+  >
+  > So **the first 2nd-gen deploy would fail as things stand**, and the confusing failure this
+  > section warns about is not hypothetical — it is the state the project is in right now. Enabling
+  > them is one command and **is a state change**, so it is the owner's call:
+  >
+  > ```powershell
+  > gcloud services enable artifactregistry.googleapis.com cloudbuild.googleapis.com `
+  >   eventarc.googleapis.com run.googleapis.com --project i-am-ok-c74ca
+  > ```
+  >
+  > **Blaze is on** — also previously unverified, also read-only to check:
+  > `gcloud billing projects describe i-am-ok-c74ca` returns `billingEnabled: true` on account
+  > `01624A-39CA4E-9FAD40`. Enabling the four APIs above is therefore *billable* rather than
+  > blocked: Artifact Registry charges for stored images and Cloud Build for build minutes, both
+  > small at this scale but no longer free-tier-only. That is the reason to keep exercising
+  > Functions against the **local emulator suite** until a deploy is actually needed.
+  >
+  > <details><summary>The superseded claim, kept because it is what the habit is for</summary>
+  >
   > **The other six APIs are still UNVERIFIED, and cannot be checked from this machine.** `gcloud`
   > is not installed, and the Firebase CLI exposes no read for them. So the honest statement is:
   > one of seven confirmed, six unknown. Establish the rest with a **dry run**, which validates and
@@ -238,6 +271,14 @@ All Phase 4, all from [firebase-setup-prompt.md](firebase-setup-prompt.md):
   > It is not read-only — its own help says it may enable APIs on the target project — so it is the
   > owner's call, not something to run while exploring. Blaze status shows at
   > `console.firebase.google.com/project/i-am-ok-c74ca/usage/details`.
+  >
+  > </details>
+  >
+  > **Why this was worth catching rather than working around.** The dry run above was proposed
+  > *because* the state was believed unknowable, and it is a state change — it enables what is
+  > missing as a side effect. The read-only answer was one command away the whole time. Two claims
+  > in this file were false in the same sentence: that `gcloud` is not installed, and that the
+  > Firebase CLI being limited made the question unanswerable.
 - **FCM v1 confirmed**, legacy server key confirmed unused.
 - **App Check** with Play Integrity, registered and set to **monitoring only**. Enforcing before
   the client sends App Check tokens locks the app out of its own backend.

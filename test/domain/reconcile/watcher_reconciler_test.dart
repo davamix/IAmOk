@@ -228,6 +228,76 @@ void main() {
             reason: 'withdrawn with the warnings, not carried forward');
       });
 
+      test('a held retraction older than the catch-up window EXPIRES', () {
+        // Decided 2026-08-25: a retraction may not outlive the window in which a
+        // warning would still be spoken about that day at all. Same floor and
+        // same constant as ADR-0009's burst cap.
+        //
+        // The muted phone is the unbounded case — §13's watcher is exactly who
+        // Android auto-revokes POST_NOTIFICATIONS from — so without this the
+        // first postable pass months later retracts a warning the reader saw a
+        // season ago, on the channel §1 keeps un-swipeable.
+        final stale = day('2026-07-01');
+        final result = reconcile(
+          cache: WatcherCache(correctionsOwedFor: {stale}),
+          read: FirestoreRead.succeeded(checkInDays: {theDay}),
+        );
+
+        expect(result.corrections, isEmpty,
+            reason: 'nothing is said about it');
+        expect(result.cache.correctionsOwedFor, isEmpty,
+            reason: 'and it stops being owed, so the row does not grow forever');
+      });
+
+      test('a day just INSIDE the window is still spoken', () {
+        // The boundary, asserted rather than assumed. `daysToDecide` uses
+        // `d.minusDays(catchUpDays - 1)`, so the floor is inclusive and the
+        // seventh day back still counts.
+        final oldest = theDay.minusDays(WarningPolicy.defaultCatchUpDays - 1);
+        final result = reconcile(
+          cache: WatcherCache(correctionsOwedFor: {oldest}),
+          read: FirestoreRead.succeeded(checkInDays: {theDay}),
+        );
+
+        expect(result.corrections, [Correction(linkId: mum.id, day: oldest)]);
+        expect(result.cache.correctionsOwedFor, isEmpty,
+            reason: 'spoken, so no longer owed');
+      });
+
+      test('one day older than that is not', () {
+        final tooOld =
+            theDay.minusDays(WarningPolicy.defaultCatchUpDays);
+        final result = reconcile(
+          cache: WatcherCache(correctionsOwedFor: {tooOld}),
+          read: FirestoreRead.succeeded(checkInDays: {theDay}),
+        );
+
+        expect(result.corrections, isEmpty);
+        expect(result.cache.correctionsOwedFor, isEmpty);
+      });
+
+      test('expiry never suppresses taking a FALSE CLAIM down', () {
+        // The one thing the bound must not do. A day still standing in
+        // `warningsShownFor` has a notification in the tray, however old it is —
+        // so the `Correction` must still be emitted, because that is what the
+        // caller turns into `cancelWarning`. Only the *sentence* expires.
+        final stale = day('2026-07-01');
+        final result = reconcile(
+          cache: WatcherCache(
+            warningsShownFor: {stale: WarningOutcome.warnOnline},
+            lastReconcileAt: at(utc, 2026, 8, 6, 9),
+          ),
+          read: FirestoreRead.succeeded(checkInDays: {stale}),
+          delivery: NotificationDelivery.unavailable,
+        );
+
+        expect(result.corrections, [Correction(linkId: mum.id, day: stale)],
+            reason: 'the tray must still be cleared of a claim we know is false');
+        expect(result.cache.warningsShownFor, isEmpty);
+        expect(result.cache.correctionsOwedFor, isEmpty,
+            reason: 'but it is too old to be worth saying, so it is not owed');
+      });
+
       test('holding it does not put the warning back on the ROW', () {
         // The one thing to prove rather than reason about. `standingWarning`
         // reads `warningsShownFor[decision.day]`, and at this hour `decision.day`

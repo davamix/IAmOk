@@ -536,14 +536,66 @@ abstract final class WatcherReconciler {
       // `redundant` means the reader is on the list watching the row correct
       // itself — seeing it on screen is being told.
       final delivered = delivery.warning.consumesReminder;
+
+      // **A retraction may not outlive the window in which a warning would still
+      // be spoken about that day at all** — decided 2026-08-25.
+      //
+      // Same floor and same constant as [WarningPolicy.daysToDecide]'s burst
+      // cap, and the same argument its docstring already makes: *a device unable
+      // to decide for a month must not wake up and post thirty notifications on
+      // the one channel §1 is built to keep un-swipeable.* An unbounded owed set
+      // reaches that same fatigue from the other end — one notification, but
+      // months stale, retracting a warning the reader saw a season ago.
+      //
+      // **What makes it safe to drop is that the load-bearing half already
+      // happened.** `withCorrectionFor` takes the day out of `warningsShownFor`
+      // and advances `lastConfirmedDay` **ungated**, so the false claim left the
+      // tray and the row went honest at the moment the correction was first
+      // computed. Only the sentence is outstanding, and its value decays.
+      // Nothing false is left standing by letting it expire.
+      final floor = lastCompletedDay(now, watchedZone)
+          .minusDays(WarningPolicy.defaultCatchUpDays - 1);
+
+      // **The day the read has just disproved is never filtered by the floor,
+      // and that is the whole reason these are two sets rather than one.** Such
+      // a day may still be STANDING in the tray — `warningsShownFor` holds it —
+      // and the `Correction` emitted below is what the caller turns into
+      // `cancelWarning`. Dropping it to save a stale sentence would leave a
+      // claim the device knows is false on a family's phone for ever, which is
+      // the opposite of what this bound is for. It is expired *after* the loop
+      // instead, so it is cancelled and then not owed.
+      final disproved = cache.warnedDays.where(confirmed.contains).toSet();
+
+      // A held day past the floor is dropped **before** anything can say it.
+      // Expiring after the loop would emit it, and a pass that can post would
+      // then speak the very sentence this bound exists to retire — the bound
+      // doing nothing in the one case it was added for. A test caught that.
+      final stale = cache.correctionsOwedFor
+          .where((d) => d < floor && !disproved.contains(d))
+          .toSet();
+
       final owed = <DayKey>{
-        ...cache.warnedDays.where(confirmed.contains),
-        ...cache.correctionsOwedFor,
+        ...disproved,
+        ...cache.correctionsOwedFor.where((d) => !stale.contains(d)),
       }.toList()
         ..sort();
       for (final day in owed) {
         corrections.add(Correction(linkId: link.id, day: day));
         next = next.withCorrectionFor(day, delivered: delivered);
+      }
+
+      // Both kinds of expiry, in one place and read off `next`: the held days
+      // filtered out above, and any day this pass disproved, could not deliver,
+      // and has just parked below the floor.
+      //
+      // ADR-0009's window is seven days and `FirestoreCheckInReader` reads
+      // eight, deliberately — so a day below this floor is one the reader can no
+      // longer even return, and `disproved` is empty down there in practice.
+      // This does not rely on that: `reconcile` must be correct over its
+      // explicit inputs, not over what one backend happens to produce.
+      for (final day
+          in next.correctionsOwedFor.where((d) => d < floor).toList()) {
+        next = next.withCorrectionExpired(day);
       }
     }
 

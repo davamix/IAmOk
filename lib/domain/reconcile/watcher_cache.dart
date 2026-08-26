@@ -337,6 +337,26 @@ class WatcherCache {
     );
   }
 
+  /// Forgets a retraction that has **aged out** — it is no longer owed, and it
+  /// was never spoken.
+  ///
+  /// Deliberately **not** [withCorrectionFor] with `delivered: true`. That
+  /// parameter answers *did this reach the reader*, and the honest answer here
+  /// is no. Overloading it would make the one field that records an undischarged
+  /// obligation unable to tell *said* from *given up on*, which is the
+  /// distinction the field exists for.
+  ///
+  /// Nothing else moves. The day left [warningsShownFor] and [lastConfirmedDay]
+  /// advanced when the correction was first computed — both ungated, both
+  /// already done — so the false claim came out of the tray at that moment and
+  /// the row has been honest ever since. What expires is only the sentence.
+  WatcherCache withCorrectionExpired(DayKey day) {
+    if (!correctionsOwedFor.contains(day)) return this;
+    return copyWith(
+      correctionsOwedFor: {...correctionsOwedFor}..remove(day),
+    );
+  }
+
   /// Drops every standing warning without correcting any of them.
   ///
   /// For revocation (§10 step 2): the warnings are not *wrong*, they are simply

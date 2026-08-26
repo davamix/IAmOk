@@ -769,17 +769,18 @@ than silent ones — alarm fatigue is not a risk at that frequency.
 > pass that can post says the already-approved sentence then. Nothing new is written for it:
 > `correctionBody` already names a day that is not yesterday.
 >
-> **OPEN, and owed to the owner: how stale is too stale?** `correctionsOwedFor` has no age bound —
-> the only exits are a postable pass and revocation. ADR-0010's hour bounds the delay to hours; a
-> **muted** channel does not bound it at all, and §13's watcher is exactly the person Android
-> auto-revokes `POST_NOTIFICATIONS` from. So months later the first postable pass can put
-> *"Correction: Mum did check in on Saturday 15 August."* on the *Missed check-ins* channel, alone,
-> retracting a warning cancelled out of the tray a season ago. The copy is honest and correctly dated
-> — `_when` gives the written-out date, never *"yesterday"* — so this is not a false claim; it is a
-> question of whether a very old retraction is worth saying, and the argument three paragraphs down
-> (*a bare correction arriving alone reads as a warning the reader somehow slept through*) applies to
-> it with more force the older it gets. **Either bound it or state that it is deliberately unbounded.**
-> Bounding it is code, not copy.
+> **And it expires. DECIDED 2026-08-25: a retraction may not outlive the window in which a warning
+> would still be spoken about that day at all.** Same seven-day floor and same constant as ADR-0009's
+> catch-up burst cap, for the same reason its docstring already gives — a device that has been unable
+> to speak for a month must not come back and post about a month. An unbounded owed set reaches that
+> fatigue from the other end: one notification, but months stale, retracting a warning the reader saw
+> a season ago, on the channel §1 keeps un-swipeable.
+>
+> **Dropping it is safe because the load-bearing half already happened.** The day leaves
+> `warningsShownFor` and `lastConfirmedDay` advances **ungated**, so the false claim came out of the
+> tray and the row went honest the moment the correction was computed. Only the sentence expires, and
+> nothing false is ever left standing by letting it. **A day still standing in the tray is never
+> filtered** — its `Correction` is still emitted, because that is what cancels it.
 >
 > **Also open, and smaller:** a day drained out of `correctionsOwedFor` under `redundant` is consumed
 > with nothing said on any channel, because the row was *already* correct before that reconcile and so

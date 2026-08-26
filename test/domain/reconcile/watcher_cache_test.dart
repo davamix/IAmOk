@@ -228,6 +228,26 @@ void main() {
       expect(withdrawn.warningsShownFor, isEmpty);
     });
 
+    test('an expired retraction is forgotten, and nothing else moves', () {
+      final held = warned.withCorrectionFor(day('2026-08-05'), delivered: false);
+      final expired = held.withCorrectionExpired(day('2026-08-05'));
+
+      expect(expired.correctionsOwedFor, isEmpty);
+      expect(expired.warningsShownFor, isEmpty,
+          reason: 'it left the tray ledger when the correction was computed');
+      expect(expired.lastConfirmedDay, day('2026-08-05'),
+          reason: 'the evidence about HER is untouched — only the sentence '
+              'expires, and nothing false is left standing');
+    });
+
+    test('expiring a day that is not owed changes nothing', () {
+      final held = warned.withCorrectionFor(day('2026-08-05'), delivered: false);
+      expect(
+        identical(held.withCorrectionExpired(day('2026-08-01')), held),
+        isTrue,
+      );
+    });
+
     test('withWarningsWithdrawn still fires when ONLY a retraction is owed', () {
       // The early return used to test `warningsShownFor.isEmpty` alone, which is
       // exactly the state a held correction leaves behind: no standing warning,

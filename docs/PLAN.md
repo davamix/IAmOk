@@ -290,13 +290,36 @@ allowances mean effectively €0 at this scale, but the card must be on the acco
 
 ## Phase 5 — Onboarding and pairing
 
-> **BUILT, the exit criterion is MET on two devices, and all five reviewers have run with their
-> findings applied.** Start from [phases/phase-5-handover.md](phases/phase-5-handover.md) to close
-> it out, or [phases/phase-5-summary.md](phases/phase-5-summary.md) for what was built. **Not
-> signed off** — every new user-visible string is owed the owner's approval, including **two changes
-> to already-approved copy**, and **six review findings are open on purpose**, two of them owner
-> decisions: the cross-role dead end, and the 21:00 reminder's promise to a family that may not
-> exist.
+> **COMPLETE and SIGNED OFF, 2026-08-26.** Built, the exit criterion met on two devices, all five
+> reviewers run with their findings applied, **all three owner decisions taken**, and the review
+> round's six open items closed or recorded. Start from
+> [phases/phase-5-summary.md](phases/phase-5-summary.md) — *Closing the phase* is what happened at
+> the gate. [phases/phase-5-handover.md](phases/phase-5-handover.md) was the close-out plan and is
+> now historical.
+>
+> **The three owner decisions.** Copy approved as drafted, with four amendments — `ownCode` rewritten
+> to name a phone rather than a relationship, the expiry added to the share message, an action label
+> for the watcher-list control, and a fourth refusal. **The cross-role dead end** closed with a
+> chooser behind the Tap screen's *Add someone*: it opened `ShareCodeScreen` and only that, while the
+> only route to `EnterCodeScreen` was reachable solely by somebody already a watcher — so anybody who
+> skipped onboarding's second question was shut out of that role for good. **The 21:00 reminder** now
+> drops its *"so your family knows you're well"* clause when nobody is set up; `screens.md` no longer
+> says *"Owed before Phase 5"*.
+>
+> **The gate found more than it closed**, which is the usual shape here. `couldNotReach` was said on
+> four paths where the server had answered — ADR-0004's *refused is not unreachable*, one layer down
+> — and the exception mapping that decided it sat inside a `catch` no test can enter. The
+> `@types/node` in the TypeScript program was **four majors ahead** of the deployed runtime while
+> `deploy-notes.md` said it was not installed at all. The documented release-manifest check greps for
+> a *permission*, so it could not see `share_plus` contributing a content provider. And every
+> two-line source lint in the suite would fail on a fresh clone on Windows, because Git's default
+> `autocrlf` disagrees with what the repo stores.
+>
+> **The mutation harnesses are in the repo now** — `tools/mutate-dart.mjs`,
+> `tools/functions-mutate.ps1` — rather than being a claim nobody could re-run. Rebuilt and re-run,
+> they found four further test gaps in `functions/test/invites.test.js`, including a TTL assertion
+> that imported the constant it was checking. They also **refused to score twice before scoring
+> once**, both times on a mistake in the caller rather than in the suite.
 >
 > Built against the emulator suite as the brief instructed, so **nothing here says anything about a
 > deployed `redeemInvite`**; the 2nd-gen deploy is still blocked on four missing APIs and remains

@@ -23,11 +23,17 @@ class _RecordingScheduler implements AlarmScheduler {
 
   bool exact = true;
 
+  /// The last `hasAudience` this scheduler was given. Null until `apply` runs,
+  /// so a test can tell *not called* from *called with false*.
+  bool? lastHadAudience;
+
   @override
   Future<bool> apply({
     required Set<ScheduledReminder> toCancel,
     required Set<ScheduledReminder> desired,
+    required bool hasAudience,
   }) async {
+    lastHadAudience = hasAudience;
     for (final reminder in toCancel) {
       calls.add('cancel ${reminder.day} ${reminder.slot.name}');
       armed.remove(reminder);
@@ -352,6 +358,38 @@ void main() {
       await seedWatchers(['Ana']);
       await service().reconcile(selfUid: selfUid);
       expect(scheduler.armed, withNobody);
+    });
+
+    // The 21:00 body drops its *"so your family knows you're well"* clause when
+    // nobody is set up. That decision is made here, from the same reconcile
+    // that produced the reminders, so the notification and the Tap screen's own
+    // audience line cannot disagree — and it reaches the scheduler as a flag
+    // rather than riding on `ScheduledReminder`, whose equality is diffed
+    // against a store with no audience column.
+    test('the audience reaches the scheduler, from this same reconcile',
+        () async {
+      await service().reconcile(selfUid: selfUid);
+      expect(scheduler.lastHadAudience, isFalse,
+          reason: 'no links: the 21:00 nudge must promise nobody');
+
+      await seedWatchers(['Ana']);
+      await service().reconcile(selfUid: selfUid);
+      expect(scheduler.lastHadAudience, isTrue);
+    });
+
+    test('a revoked last watcher takes the promise with it', () async {
+      await seedWatchers(['Ana']);
+      await service().reconcile(selfUid: selfUid);
+      expect(scheduler.lastHadAudience, isTrue);
+
+      await store.upsertLink(
+        (await store.linksWatching(selfUid))
+            .single
+            .copyWith(status: LinkStatus.revoked),
+      );
+      await service().reconcile(selfUid: selfUid);
+      expect(scheduler.lastHadAudience, isFalse,
+          reason: 'the reminders stay armed — only the claim goes');
     });
 
     test('links where this user is the WATCHER are not the audience', () async {

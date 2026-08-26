@@ -46,9 +46,21 @@ void main() {
       expect(used.toLowerCase(), contains('already been used'));
     });
 
-    test('the own-code refusal names the mistake, so it is not repeated', () {
-      final line = OnboardingCopy.pairingRefusal(PairingRefusal.ownCode);
-      expect(line.toLowerCase(), contains('your own code'));
+    // **Rewritten when Phase 5 closed, and the old assertion is why it needed
+    // rewriting.** This test used to pin `contains('your own code')`, which the
+    // sentence *"That is your own code. Ask the person you are looking after
+    // for theirs."* satisfied — while telling a family member holding the wrong
+    // one of two phones on a table to go and ask a question of the person
+    // sitting next to them. The branch fires on the watched person's OWN phone,
+    // so "you" is usually not whose code it is.
+    test('the own-code refusal names the phone, not a relationship', () {
+      final line =
+          OnboardingCopy.pairingRefusal(PairingRefusal.ownCode).toLowerCase();
+      expect(line, contains('this phone'));
+      expect(line, contains('the other one'),
+          reason: 'the fix is to move phones, and the sentence must say so');
+      expect(line, isNot(contains('looking after')),
+          reason: 'names a relationship the reader may not have');
     });
 
     // Not the reader's mistake and not fixable by re-typing, so the sentence
@@ -77,10 +89,49 @@ void main() {
           reason: 'nothing was decided — claiming otherwise is a false claim');
     });
 
+    // ADR-0004's *refused is not unreachable*, one layer down. `couldNotReach`
+    // names an action — check your connection — that only works when the claim
+    // is true, so it must not be the sentence for a server that answered.
+    // Until Phase 5 closed it was: a failed transaction, an unrecognised
+    // status, a malformed payload and a region mismatch all read it.
+    test('the server-fault sentence claims nothing about either side', () {
+      final line = OnboardingCopy.pairingRefusal(PairingRefusal.serverFault)
+          .toLowerCase();
+      expect(line, isNot(contains('internet')),
+          reason: 'the phone reached the server and read its answer');
+      expect(line, isNot(contains('connection')));
+      expect(line, isNot(contains('code')),
+          reason: 'nothing is known about the code — it was never decided on');
+      expect(line, contains('try again'),
+          reason: 'the one action that can work is the one it must name');
+    });
+
+    test('server fault and unreachable are not the same sentence', () {
+      expect(
+        OnboardingCopy.pairingRefusal(PairingRefusal.serverFault),
+        isNot(OnboardingCopy.pairingRefusal(PairingRefusal.couldNotReach)),
+      );
+      expect(
+        OnboardingCopy.inviteRefusal(InviteRefusal.serverFault),
+        isNot(OnboardingCopy.inviteRefusal(InviteRefusal.couldNotReach)),
+      );
+    });
+
+    // The same words on both screens for the same condition. A family who hit
+    // it while making a code and again while using one should not be told two
+    // different things about one fault.
+    test('both sides say it identically', () {
+      expect(
+        OnboardingCopy.pairingRefusal(PairingRefusal.serverFault),
+        OnboardingCopy.inviteRefusal(InviteRefusal.serverFault),
+      );
+    });
+
     test('no sentence blames the reader for a fault that is not theirs', () {
       for (final reason in [
         PairingRefusal.watcherProfileMissing,
         PairingRefusal.couldNotReach,
+        PairingRefusal.serverFault,
         PairingRefusal.notSignedIn,
       ]) {
         expect(
@@ -158,6 +209,77 @@ void main() {
 
     test('and names the app, so a stranger knows what it is for', () {
       expect(OnboardingCopy.shareMessage('K7RTQX'), contains('I Am Ok'));
+    });
+
+    // **The only string in this app that reaches a phone without it
+    // installed.** A code shared at 9pm and read the next morning is dead, and
+    // the recipient's first experience of I Am Ok is a code that fails with no
+    // way to tell an expired one from a mistyped one.
+    test('carries the expiry when the sender knows it', () {
+      final expiry = OnboardingCopy.codeExpiry(
+        expiresAt: DateTime.utc(2026, 8, 27, 9),
+        zone: madrid,
+        uses24Hour: true,
+      );
+      final message = OnboardingCopy.shareMessage('K7RTQX', expiry: expiry);
+
+      expect(message, contains('K7R TQX'));
+      expect(message, contains('Thursday 27 August'));
+      expect(message, contains(expiry),
+          reason: 'the sender reads this sentence on screen; the recipient '
+              'must read the same one');
+    });
+
+    // A full stop after the code is a character somebody can type into a
+    // six-character field, and `InviteCode.tryParse` strips only spaces and
+    // hyphens.
+    test('nothing is punctuated after the code', () {
+      final message = OnboardingCopy.shareMessage(
+        'K7RTQX',
+        expiry: 'It stops working at 11:00 on Thursday 27 August.',
+      );
+      final codeLine = message
+          .split('\n')
+          .firstWhere((line) => line.contains('K7R TQX'));
+      expect(codeLine.trimRight(), endsWith('K7R TQX'));
+    });
+
+    test('goes without the expiry rather than not going', () {
+      expect(OnboardingCopy.shareMessage('K7RTQX'), contains('K7R TQX'));
+      expect(OnboardingCopy.shareMessage('K7RTQX'), isNot(contains('stops')));
+    });
+  });
+
+  group('the two ways to add somebody', () {
+    // **The cross-role dead end.** Until Phase 5 closed, the Tap screen's one
+    // route out produced a code and only a code, so anybody who answered "Skip
+    // for now" to onboarding's second question could never take up that role.
+    test('are two people, never two roles', () {
+      for (final line in [
+        OnboardingCopy.addSomeoneToWatchMe,
+        OnboardingCopy.addSomeoneIWatch,
+      ]) {
+        expect(line, isNotEmpty);
+        expect(line.toLowerCase(), isNot(contains('watcher')),
+            reason: 'PLAN.md: role is never asked directly');
+        expect(line.toLowerCase(), isNot(contains('elderly')));
+        expect(line.toLowerCase(), startsWith('someone'));
+      }
+    });
+
+    test('are told apart, and each says which direction it is', () {
+      expect(
+        OnboardingCopy.addSomeoneToWatchMe,
+        isNot(OnboardingCopy.addSomeoneIWatch),
+      );
+      expect(
+        OnboardingCopy.addSomeoneToWatchMe.toLowerCase(),
+        contains('look after me'),
+      );
+      expect(
+        OnboardingCopy.addSomeoneIWatch.toLowerCase(),
+        contains('i look after'),
+      );
     });
   });
 

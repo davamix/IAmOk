@@ -24,12 +24,21 @@ class _RecordingNotifications extends NotificationService {
 
   final List<String> calls = [];
 
+  /// One entry per `scheduleReminder`, in call order.
+  final List<bool> audienceFlags = [];
+
   /// Set to false to simulate `exact_alarms_not_permitted`.
   bool exact = true;
 
+  /// Records the audience flag alongside the schedule, so a test can assert
+  /// that the 21:00 wording follows it rather than only that a call happened.
   @override
-  Future<bool> scheduleReminder(ScheduledReminder reminder) async {
+  Future<bool> scheduleReminder(
+    ScheduledReminder reminder, {
+    required bool hasAudience,
+  }) async {
     calls.add('schedule ${reminder.day} ${reminder.slot.name}');
+    audienceFlags.add(hasAudience);
     return exact;
   }
 
@@ -82,7 +91,7 @@ void main() {
     };
 
     return scheduler
-        .apply(toCancel: inMadrid, desired: inNewYork)
+        .apply(toCancel: inMadrid, desired: inNewYork, hasAudience: true)
         .then((_) {
       final firstSchedule =
           notifications.calls.indexWhere((c) => c.startsWith('schedule'));
@@ -97,10 +106,41 @@ void main() {
     });
   });
 
+  // `hasAudience` chooses the 21:00 wording and must reach every reminder in
+  // the desired set — `NotificationCopy.reminderBody` is where it is spent, and
+  // a scheduler that dropped it would post *"so your family knows you're
+  // well"* to a phone whose own screen says nobody is set up.
+  group('the audience flag reaches the body', () {
+    test('every scheduled reminder is given it', () async {
+      final desired = {
+        for (final slot in ReminderSlot.values) reminderOn('2026-08-17', slot),
+      };
+
+      await scheduler.apply(
+        toCancel: const {},
+        desired: desired,
+        hasAudience: false,
+      );
+
+      expect(notifications.audienceFlags, hasLength(desired.length));
+      expect(notifications.audienceFlags, everyElement(isFalse));
+    });
+
+    test('and it is the value passed, not a default', () async {
+      await scheduler.apply(
+        toCancel: const {},
+        desired: {reminderOn('2026-08-17', ReminderSlot.night)},
+        hasAudience: true,
+      );
+      expect(notifications.audienceFlags, [true]);
+    });
+  });
+
   test('a cancel-only diff issues no schedules', () async {
     await scheduler.apply(
       toCancel: {reminderOn('2026-08-17', ReminderSlot.midday)},
       desired: const {},
+      hasAudience: true,
     );
     expect(notifications.calls, ['cancel 2026-08-17 midday']);
   });
@@ -109,12 +149,17 @@ void main() {
     await scheduler.apply(
       toCancel: const {},
       desired: {reminderOn('2026-08-17', ReminderSlot.night)},
+      hasAudience: true,
     );
     expect(notifications.calls, ['schedule 2026-08-17 night']);
   });
 
   test('an empty diff touches the platform not at all', () async {
-    await scheduler.apply(toCancel: const {}, desired: const {});
+    await scheduler.apply(
+      toCancel: const {},
+      desired: const {},
+      hasAudience: true,
+    );
     expect(notifications.calls, isEmpty,
         reason: 'a no-op reconcile must be a no-op at the platform too');
   });
@@ -137,7 +182,11 @@ void main() {
           reminderOn('2026-08-17', slot),
       };
 
-      final exact = await scheduler.apply(toCancel: const {}, desired: desired);
+      final exact = await scheduler.apply(
+        toCancel: const {},
+        desired: desired,
+        hasAudience: true,
+      );
 
       expect(exact, isFalse, reason: 'the degradation is reported, not hidden');
       expect(notifications.calls.where((c) => c.startsWith('schedule')),
@@ -150,6 +199,7 @@ void main() {
       final exact = await scheduler.apply(
         toCancel: const {},
         desired: {reminderOn('2026-08-17', ReminderSlot.midday)},
+      hasAudience: true,
       );
       expect(exact, isTrue);
     });

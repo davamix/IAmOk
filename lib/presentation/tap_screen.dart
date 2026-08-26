@@ -487,12 +487,89 @@ class AddSomeoneButton extends ConsumerWidget {
 
   static const Key buttonKey = Key('tap-add-someone');
 
+  static const Key watchedChoiceKey = Key('tap-add-someone-watched');
+  static const Key watcherChoiceKey = Key('tap-add-someone-watcher');
+
+  /// Which of the two pairing screens the reader wants.
+  ///
+  /// **A sheet rather than a second button**, because `guidelines.md`'s first
+  /// principle is one screen one action and `WatchedAudience` records how firmly
+  /// this screen refuses extra surfaces. The chooser costs nothing in daily use:
+  /// the elderly person never presses the control it sits behind.
+  ///
+  /// Returns null when dismissed — a back gesture or a tap outside — which is a
+  /// choice and not a failure, so nothing is said.
+  @visibleForTesting
+  static Future<bool?> chooseRole(BuildContext context) =>
+      showModalBottomSheet<bool>(
+        context: context,
+        builder: (sheetContext) => SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(height: 8),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(24, 16, 24, 8),
+                child: Text(
+                  OnboardingCopy.addSomeone,
+                  style: Theme.of(sheetContext).textTheme.headlineSmall,
+                ),
+              ),
+              // The order is onboarding's order: the watched question first,
+              // because this control lives on the watched person's screen.
+              ListTile(
+                key: watchedChoiceKey,
+                // 48dp floor, as everywhere else on this screen. A ListTile's
+                // default height already clears it; the constraint is stated so
+                // a later density change cannot quietly drop below it.
+                minTileHeight: 56,
+                leading: const Icon(Icons.person_add_alt),
+                title: Text(OnboardingCopy.addSomeoneToWatchMe),
+                onTap: () => Navigator.of(sheetContext).pop(true),
+              ),
+              ListTile(
+                key: watcherChoiceKey,
+                minTileHeight: 56,
+                leading: const Icon(Icons.people_outline),
+                title: Text(OnboardingCopy.addSomeoneIWatch),
+                onTap: () => Navigator.of(sheetContext).pop(false),
+              ),
+              const SizedBox(height: 16),
+            ],
+          ),
+        ),
+      );
+
+  /// The answer, as the screen it opens.
+  ///
+  /// A pure mapping and `@visibleForTesting` for the same reason
+  /// `Home.screenFor` is: the branch that decides which half of pairing a
+  /// person reaches is the part that can be wrong, and asserting it needs no
+  /// composition root. Pumping either screen would need a real `LocalStore`,
+  /// real notification channels and a live callable to answer a question about
+  /// which of two widgets was chosen.
+  @visibleForTesting
+  static Widget pairingScreenFor(bool wantsToBeWatched) =>
+      wantsToBeWatched ? const ShareCodeScreen() : const EnterCodeScreen();
+
   @override
   Widget build(BuildContext context, WidgetRef ref) => TextButton.icon(
         key: buttonKey,
         onPressed: () async {
+          // **Both roles, from the one control.** This used to open
+          // `ShareCodeScreen` and nothing else, while the only route to
+          // `EnterCodeScreen` was the watcher list — which is reachable from
+          // here only by somebody who is *already* a watcher. Anybody who
+          // skipped onboarding's second question was therefore shut out of that
+          // role for good, with nothing on any screen to press.
+          final wantsToBeWatched = await chooseRole(context);
+          if (wantsToBeWatched == null) return;
+          if (!context.mounted) return;
+
           await Navigator.of(context).push<bool>(
-            MaterialPageRoute(builder: (_) => const ShareCodeScreen()),
+            MaterialPageRoute(
+              builder: (_) => pairingScreenFor(wantsToBeWatched),
+            ),
           );
           // **Reconcile on the way back, whatever the screen returned.** The
           // audience line is rendered from `WatchedState`, and a pairing that
@@ -502,6 +579,12 @@ class AddSomeoneButton extends ConsumerWidget {
           //
           // `userInitiated` is left at its default true: she pressed the button
           // that opened this, so a refresh is the answer she asked for.
+          //
+          // Run for **either** screen. A code redeemed here makes this user a
+          // watcher, which does not change the audience line — but this is the
+          // cheap read that keeps §3's one rule (re-read, never patch) with no
+          // branch to get wrong, and the watcher side is reconciled by the list
+          // it can now reach.
           await ref.read(watchedStateProvider.notifier).refresh();
         },
         icon: const Icon(Icons.person_add_alt),
@@ -533,7 +616,11 @@ class WatcherListButton extends StatelessWidget {
         // Labelled, because an unlabelled icon button is a control a
         // screen-reader user cannot identify at all — and this one is the whole
         // of their route to the other half of the app.
-        tooltip: WatcherCopy.title,
+        //
+        // `WatcherCopy.openLabel`, not `WatcherCopy.title`: the title is
+        // approved as a **heading**, and read out as a control's name it
+        // announces a place rather than an action. See that field.
+        tooltip: WatcherCopy.openLabel,
       );
 }
 

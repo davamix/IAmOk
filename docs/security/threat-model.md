@@ -42,6 +42,17 @@ being dead, the app being force-stopped, and detecting that the person is incapa
 | Invite codes | Medium, short-lived. A live code grants a link to a watched person. | `invites/{CODE}` |
 | Release signing key | **Critical.** Signs updates to every install. | `.local/` — never the repo |
 | Admin service-account credentials | **Critical.** Bypasses all rules. | `.local/` — never the repo |
+| Pairing decisions in Cloud Logging | Medium. `redeemInvite` logs the caller's uid and the `linkId` on **every** call, so the log is a record of the link graph as it forms. | Cloud Logging, project `i-am-ok-c74ca` |
+
+**That last row is deliberate and is load-bearing elsewhere**, which is why it is named here rather
+than left as an implementation detail somebody later removes as noise. `OPEN-QUESTIONS.md` #11 accepts
+the guessing risk partly on the grounds that *"`redeemInvite` logs the outcome and the caller's uid on
+every call, so the evidence exists to notice"* abuse. Deleting the log line would quietly remove the
+only detection this design has.
+
+It is a real asset all the same: a `linkId` is `{watchedUid}_{watcherUid}`, so anybody with project
+log access can reconstruct who watches whom without touching Firestore. Access to Cloud Logging is
+therefore access to the link graph, and should be treated as such when project IAM is reviewed.
 
 ---
 

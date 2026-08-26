@@ -18,11 +18,16 @@ library;
 
 /// Why a code could not be turned into a link.
 ///
-/// The first four are the server's answers; the last three are conditions this
-/// phone reaches on its own. They are one enum because the **screen** does not
-/// care where the refusal came from — it has to say one honest sentence either
-/// way — and splitting them would let a caller handle one set and forget the
-/// other.
+/// The first **seven** are answers the server gave; the last three are
+/// conditions this phone reaches without one. They are one enum because the
+/// **screen** does not care where the refusal came from — it has to say one
+/// honest sentence either way — and splitting them would let a caller handle one
+/// set and forget the other.
+///
+/// The count in that first sentence was wrong before Phase 5 closed — it said
+/// *"the first four"* against seven server statuses — which is the small version
+/// of the failure this whole file exists to prevent: a claim nobody read back
+/// against the thing it describes.
 enum PairingRefusal {
   /// No invite with that code. A typo, or a code that was never real.
   unknownCode,
@@ -51,10 +56,26 @@ enum PairingRefusal {
   /// cannot detect in itself"*.
   unusableTimezone,
 
-  /// The call did not complete. Distinct from every refusal above, because
-  /// nothing was decided — trying again is the right next action, and none of
-  /// the other sentences would be true.
+  /// **This phone could not reach the backend at all.** A dead radio, a
+  /// captive portal, a request that timed out on the wire.
+  ///
+  /// Narrow on purpose, because its sentence names an action — *check your
+  /// connection* — that only works when the claim is true. ADR-0004's *refused
+  /// is not unreachable* rule is the same rule one layer down: this build used
+  /// to say it whenever it had no better case, which told somebody whose phone
+  /// had just carried a request and an answer to go and check their internet.
+  /// [serverFault] is where "no better case" goes now.
   couldNotReach,
+
+  /// The backend was reached, answered, and the answer was one this build
+  /// cannot act on — a fault on the far side, or a payload it does not
+  /// understand.
+  ///
+  /// Its sentence deliberately claims nothing about **either** side. The reader
+  /// cannot repair a failed transaction and cannot repair a build that is a
+  /// version behind the backend; the only true thing to say is that it did not
+  /// work and that trying again is reasonable.
+  serverFault,
 
   /// Nobody is signed in, so there is no watcher for the link to name.
   notSignedIn,
@@ -66,8 +87,13 @@ enum InviteRefusal {
   /// to copy onto the link.
   profileMissing,
 
-  /// The call did not complete. Nothing was created; trying again is right.
+  /// This phone could not reach the backend. Nothing was created; trying again
+  /// is right. Narrow, for the reason its [PairingRefusal] twin records.
   couldNotReach,
+
+  /// The backend answered and this build cannot act on the answer. Nothing was
+  /// created either way, and the sentence claims nothing about which side.
+  serverFault,
 
   /// Nobody is signed in, so there is no watched person for a code to name.
   notSignedIn,

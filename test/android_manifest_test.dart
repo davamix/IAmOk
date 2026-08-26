@@ -219,6 +219,42 @@ void main() {
   /// This is the routine the docstring above predicts: a plugin was added, the
   /// release build was run, and the diff is stated rather than guessed.
   ///
+  /// **Re-measured a fourth time, when Phase 5 closed — 2026-08-26.** Two
+  /// plugins were added that phase (`share_plus`, `cloud_functions`). The
+  /// permission answer is again **no change at all**: still the same fourteen,
+  /// and neither plugin contributes one of its own.
+  ///
+  /// **But the permission check alone would have missed what they did add**, and
+  /// that is the finding worth keeping. `deploy-notes.md`'s standing command is
+  /// `Select-String … -Pattern INTERNET`, which greps for a *permission* — and
+  /// `share_plus` contributes two **components**:
+  ///
+  /// ```
+  /// provider#dev.fluttercommunity.plus.share.ShareFileProvider
+  ///   android:exported="false"
+  ///   android:grantUriPermissions="true"
+  ///   android:authorities="io.github.davamix.i_am_ok.flutter.share_provider"
+  /// receiver#dev.fluttercommunity.plus.share.SharePlusPendingIntent
+  ///   android:exported="false"
+  /// ```
+  ///
+  /// `cloud_functions` contributes one `meta-data` Firebase component registrar
+  /// and nothing else. Verified against the merged release manifest itself
+  /// (`build/app/intermediates/merged_manifest/release/…`) rather than the
+  /// merger report, because **the report lists attribute names without their
+  /// values** — it says `android:exported` was added and not what it was set
+  /// to, which is the whole question.
+  ///
+  /// **Both components are `exported="false"`**, so neither is reachable from
+  /// another app, and the provider's authority is scoped to this application id.
+  /// `grantUriPermissions="true"` is what a FileProvider is for: it lets the app
+  /// hand a share target temporary read access to a file. **This app shares only
+  /// text** — `ShareParams(text: …)`, the invite code and its expiry — so the
+  /// provider is present and unused. Recorded rather than removed: it is a
+  /// plugin's own manifest entry, it grants nothing while nothing calls it, and
+  /// stripping a dependency's component is the kind of change that should be
+  /// made with a device run behind it, alongside the biometric question below.
+  ///
   /// **The two biometric permissions are a live question for Phase 8**, not a
   /// curiosity. This app has no biometric feature and never asks for one; they
   /// come from a library behind `firebase_auth`. An app for elderly people

@@ -25,9 +25,15 @@ abstract interface class AlarmScheduler {
   /// diff; every implementation owes both guarantees.
   /// Returns false when any reminder had to be armed **inexactly** — §13's
   /// documented degradation, which the health panel reports in Phase 7.
+  ///
+  /// [hasAudience] is whether an accepted link exists. It selects the 21:00
+  /// wording and never the schedule — required rather than defaulted, because
+  /// the default that preserves today's behaviour is the one that promises a
+  /// family to a phone that has none.
   Future<bool> apply({
     required Set<ScheduledReminder> toCancel,
     required Set<ScheduledReminder> desired,
+    required bool hasAudience,
   });
 
   /// Tears down every reminder.
@@ -84,10 +90,25 @@ class NotificationAlarmScheduler implements AlarmScheduler {
   ///
   /// The diff is still needed for [toCancel], because a reminder that should no
   /// longer exist cannot be removed by re-asserting the ones that should.
+  ///
+  /// ## [hasAudience] is the wording, not the schedule
+  ///
+  /// It changes the 21:00 body and nothing else — see
+  /// `NotificationCopy.reminderBody`. Reminders are armed for a phone with no
+  /// watchers exactly as they are for one with three, because they exist for the
+  /// watched person's own routine; what changes is that the notification stops
+  /// promising a family that does not exist.
+  ///
+  /// It is applied here rather than carried on `ScheduledReminder` because
+  /// audience is not part of a reminder's identity, and putting it there would
+  /// put it in the equality this class diffs against a store that cannot record
+  /// it. Scheduling the whole desired set every time — see above — is what makes
+  /// the wording follow the audience with no diff involved.
   @override
   Future<bool> apply({
     required Set<ScheduledReminder> toCancel,
     required Set<ScheduledReminder> desired,
+    required bool hasAudience,
   }) async {
     for (final reminder in toCancel) {
       await _notifications.cancelReminder(reminder.day, reminder.slot);
@@ -96,7 +117,11 @@ class NotificationAlarmScheduler implements AlarmScheduler {
     for (final reminder in desired) {
       // Per reminder, so one refusal degrades that alarm rather than aborting
       // the loop and leaving the rest of the window unarmed.
-      exact = await _notifications.scheduleReminder(reminder) && exact;
+      exact = await _notifications.scheduleReminder(
+            reminder,
+            hasAudience: hasAudience,
+          ) &&
+          exact;
     }
     return exact;
   }

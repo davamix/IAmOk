@@ -224,6 +224,23 @@ describe('createInvite', () => {
     assert.equal(doc.data().consumedBy, undefined);
   });
 
+  // **The assertion above cannot see the value change**, and the mutation
+  // harness proved it: `INVITE_TTL_MS` is *imported from the module under test*,
+  // so widening the TTL to a week moves both sides of that comparison together
+  // and the suite stays green. The comment said "the owner chose 24 hours" while
+  // nothing checked that it still was.
+  //
+  // Same shape as `CLAUDE.md`'s rule for anything derived that outlives the
+  // process: pin it with a KNOWN value. Three things depend on this number being
+  // what it says — the owner's decision, the sentence the share message now
+  // sends to somebody else's phone, and `OPEN-QUESTIONS.md` #11's brute-force
+  // arithmetic, which multiplies against a 24-hour window.
+  it('the TTL is 24 hours, stated as a number and not as itself', () => {
+    assert.equal(INVITE_TTL_MS, 24 * 60 * 60 * 1000);
+    assert.equal(INVITE_CODE_LENGTH, 6);
+    assert.equal(INVITE_ALPHABET.length, 32);
+  });
+
   it('refuses when the caller has no users/{uid} document', async () => {
     await db.doc(`users/${MUM}`).delete();
     const result = await createInviteFor(db, MUM, NOW);
@@ -241,6 +258,34 @@ describe('createInvite', () => {
       second.expiresAt,
       first.expiresAt,
       'reuse must not silently extend the window either',
+    );
+  });
+
+  // **Which live code reuse picks, when there is more than one.**
+  //
+  // `createInviteFor` is not atomic — two racing calls can leave two live codes,
+  // which ADR-0011 records as accepted — so more than one is a state that really
+  // occurs. The rule is *the one that dies last*, so re-entering the screen
+  // never shortens the window a family is already working inside.
+  //
+  // Nothing covered it: every other test here has at most one live code, so
+  // inverting the comparison to pick the code that dies FIRST left the suite
+  // green. Found by mutation.
+  it('reuses the code that dies LAST, never the one that dies first', async () => {
+    await seedInvite('AAAAAA', {
+      expiresAt: Timestamp.fromMillis(NOW.getTime() + 60 * 60 * 1000),
+    });
+    await seedInvite('BBBBBB', {
+      expiresAt: Timestamp.fromMillis(NOW.getTime() + 20 * 60 * 60 * 1000),
+    });
+
+    const result = await createInviteFor(db, MUM, NOW);
+
+    assert.equal(result.reused, true);
+    assert.equal(
+      result.code,
+      'BBBBBB',
+      'picking the sooner expiry shortens a window a family is already using',
     );
   });
 
@@ -272,6 +317,34 @@ describe('createInvite', () => {
     await new Promise((resolve) => setTimeout(resolve, 300));
     const stale = await db.doc('invites/AAAAAA').get();
     assert.equal(stale.exists, false, 'an expired unconsumed invite is dead weight');
+  });
+
+  // **That the sweep is AWAITED, asserted as source — and it is a lint.**
+  //
+  // The behaviour it protects **cannot be observed in the emulator at all**,
+  // which is exactly why the defect reached the Phase 5 review: 2nd-gen
+  // functions are throttled the moment the response is written, so work started
+  // and not awaited is dropped — and nothing throttles a local Node process, so
+  // `void` and `await` are indistinguishable here. The test above even sleeps
+  // 300ms to avoid racing it, which is precisely the slack a dropped promise
+  // hides in.
+  //
+  // Confirmed by mutation: `await` -> `void` left the whole suite green.
+  //
+  // This is the design's **only** garbage collection — §9 has no scheduled
+  // function, deliberately — so if it silently no-ops, expired invites
+  // accumulate for ever under a `watchedUid ==` read that is on the pairing path.
+  it('the sweep is awaited, so Cloud Run cannot drop it', () => {
+    const source = readFileSync(join(__dirname, '..', 'src', 'invites.ts'), 'utf8')
+      .replace(/\r\n/g, '\n');
+    assert.ok(
+      source.includes('await Promise.allSettled('),
+      'the invite sweep must be awaited',
+    );
+    assert.ok(
+      !/\bvoid Promise\.allSettled\(/.test(source),
+      'a fire-and-forget sweep works ONLY in the emulator',
+    );
   });
 
   it('KEEPS an expired CONSUMED invite — it is the idempotence record', async () => {
@@ -615,6 +688,58 @@ describe('redeemInvite', () => {
       assert.notEqual(result.code, 'AAAAAA');
       assert.equal(result.code, INVITE_ALPHABET[1].repeat(6));
       assert.equal(draw, 2, 'exactly one retry');
+    });
+
+    // **Only gRPC code 6 — ALREADY_EXISTS — is retried, and nothing checked it.**
+    //
+    // Both tests around this one collide for real, so they pass whether or not
+    // the `code !== 6` half of the guard is there. Removing it left the suite
+    // green; found by mutation.
+    //
+    // It matters because a transient `DEADLINE_EXCEEDED` on a write that had in
+    // fact LANDED would be retried, minting a **second live code** for the same
+    // person — doubling their guessing surface and orphaning one that nothing
+    // sweeps until it expires. That is the defect the Phase 5 review fixed, and
+    // until now the fix was not pinned by anything.
+    it('rethrows a non-collision error instead of minting a second code', async () => {
+      let draws = 0;
+      const randomBytes = () => {
+        draws++;
+        return Buffer.from([0, 0, 0, 0, 0, 0]);
+      };
+
+      // Everything delegates to the real emulator except `invites/{code}.create`,
+      // which fails the way a transient backend fault does: NOT code 6.
+      const transient = Object.assign(new Error('DEADLINE_EXCEEDED'), { code: 4 });
+      const failingDb = {
+        __proto__: db,
+        collection: (path) => {
+          const real = db.collection(path);
+          if (path !== 'invites') return real;
+          return {
+            __proto__: real,
+            where: (...args) => real.where(...args),
+            doc: (id) => ({
+              __proto__: real.doc(id),
+              create: async () => {
+                throw transient;
+              },
+            }),
+          };
+        },
+        doc: (path) => db.doc(path),
+      };
+
+      await assert.rejects(
+        () => createInviteFor(failingDb, ANA, NOW, randomBytes),
+        (error) => error.code === 4,
+        'a transient fault must propagate, not be retried as a collision',
+      );
+      assert.equal(
+        draws,
+        1,
+        'retrying a write that may have LANDED mints a second live code',
+      );
     });
 
     it('gives up rather than looping for ever', async () => {

@@ -8,9 +8,14 @@ import 'package:test/test.dart';
 /// **Every branch here is a claim**, and the failure this pins is the one
 /// `OPEN-QUESTIONS.md` #5 records elsewhere in the app: a status this build has
 /// no case for must not fall through to a sentence that says something else
-/// happened. `couldNotReach` is the only honest answer to *the backend said
-/// something I do not understand*, because nothing was decided that this build
-/// can describe.
+/// happened.
+///
+/// **The header above used to name `couldNotReach` as that answer**, and it was
+/// wrong in the way this file exists to catch: a backend that *"said something I
+/// do not understand"* was reached, so the one thing certainly false about it is
+/// that the phone could not reach the internet. `serverFault` is the honest
+/// answer, and `couldNotReach` is now narrow — the two gRPC codes that mean the
+/// request did not arrive.
 void main() {
   group('createInvite', () {
     test('a created code, with the expiry as an absolute instant', () {
@@ -46,21 +51,21 @@ void main() {
       );
     });
 
-    test('an unrecognised status is unreachable, never invented', () {
+    test('an unrecognised status is a server fault, never invented', () {
       expect(
         InviteService.inviteFrom(const {'status': 'something-new'}),
-        const InviteRefused(InviteRefusal.couldNotReach),
+        const InviteRefused(InviteRefusal.serverFault),
       );
     });
 
-    test('an empty or shapeless payload is unreachable', () {
+    test('an empty or shapeless payload is a server fault', () {
       expect(
         InviteService.inviteFrom(const {}),
-        const InviteRefused(InviteRefusal.couldNotReach),
+        const InviteRefused(InviteRefusal.serverFault),
       );
     });
 
-    test('created with a missing or unparseable field is unreachable', () {
+    test('created with a missing or unparseable field is a server fault', () {
       for (final broken in <Map<String, Object?>>[
         {'status': 'created', 'expiresAt': '2026-08-27T09:00:00.000Z'},
         {'status': 'created', 'code': 'K7RTQX'},
@@ -75,8 +80,9 @@ void main() {
       ]) {
         expect(
           InviteService.inviteFrom(broken),
-          const InviteRefused(InviteRefusal.couldNotReach),
-          reason: 'payload $broken',
+          const InviteRefused(InviteRefusal.serverFault),
+          reason: 'payload $broken — the phone read this, so it reached the '
+              'backend; saying otherwise names an action that cannot work',
         );
       }
     });
@@ -153,14 +159,14 @@ void main() {
       }
     });
 
-    test('an unrecognised status is unreachable, never invented', () {
+    test('an unrecognised status is a server fault, never invented', () {
       expect(
         InviteService.pairingFrom(const {'status': 'brand-new-refusal'}),
-        const PairingRefused(PairingRefusal.couldNotReach),
+        const PairingRefused(PairingRefusal.serverFault),
       );
     });
 
-    test('linked with no usable link id is unreachable, not a pairing', () {
+    test('linked with no usable link id is a server fault, not a pairing', () {
       for (final broken in <Map<String, Object?>>[
         {'status': 'linked', 'watchedName': 'Mum'},
         {'status': 'linked', 'linkId': '', 'watchedName': 'Mum'},
@@ -168,7 +174,7 @@ void main() {
       ]) {
         expect(
           InviteService.pairingFrom(broken),
-          const PairingRefused(PairingRefusal.couldNotReach),
+          const PairingRefused(PairingRefusal.serverFault),
           reason: 'payload $broken',
         );
       }
@@ -182,6 +188,93 @@ void main() {
       });
       expect(outcome, isA<Paired>());
       expect((outcome as Paired).watchedName, '');
+    });
+  });
+
+  // The half of this mapping that had no test, because it lived inside a
+  // `catch` no unit test can enter — and it was wrong there for the whole of
+  // Phase 5: everything that was not `unauthenticated` said *"Could not reach
+  // the internet. Check your connection and try again."*
+  //
+  // ADR-0004's rule is that **refused is not unreachable**. A phone that
+  // received `internal` carried a request to Cloud Functions and read an answer
+  // back; telling that reader to check their connection names the one action
+  // that certainly cannot help.
+  group('a FirebaseFunctionsException code, as a refusal', () {
+    // Only the two codes that mean *the request did not get there*.
+    // `unavailable` is a dead radio or a refused connection; `deadline-exceeded`
+    // is a request that went out and never came back — unreachable from this
+    // phone's point of view, which is all the sentence claims.
+    test('only two codes claim the internet', () {
+      for (final code in ['unavailable', 'deadline-exceeded']) {
+        expect(InviteService.refusalForCode(code), PairingRefusal.couldNotReach,
+            reason: code);
+        expect(InviteService.inviteRefusalForCode(code),
+            InviteRefusal.couldNotReach,
+            reason: code);
+      }
+    });
+
+    test('an unauthenticated call is the one the reader can fix', () {
+      expect(InviteService.refusalForCode('unauthenticated'),
+          PairingRefusal.notSignedIn);
+      expect(InviteService.inviteRefusalForCode('unauthenticated'),
+          InviteRefusal.notSignedIn);
+    });
+
+    // Each of these was `couldNotReach` before Phase 5 closed, and each is a
+    // reply from a backend the phone reached.
+    test('every other code is a server fault', () {
+      const codes = <String>[
+        // The transaction failed inside `redeemInvite`.
+        'internal',
+        // The region is wrong — `us-central1` instead of `europe-west1`, which
+        // is ADR-0011's own documented trap and 404s rather than falling back.
+        'not-found',
+        // App Check, once it is enforced (OPEN-QUESTIONS.md #5).
+        'permission-denied',
+        'resource-exhausted',
+        'failed-precondition',
+        'invalid-argument',
+        'aborted',
+        'unimplemented',
+        'data-loss',
+        'cancelled',
+        // A code this build has never heard of.
+        'something-the-sdk-added-later',
+        '',
+      ];
+      for (final code in codes) {
+        expect(InviteService.refusalForCode(code), PairingRefusal.serverFault,
+            reason: 'code "$code"');
+        expect(InviteService.inviteRefusalForCode(code),
+            InviteRefusal.serverFault,
+            reason: 'code "$code"');
+      }
+    });
+
+    // The two enums answer the same question the same way. They are separate
+    // types because the two screens refuse for different sets of reasons, not
+    // because a network failure means something different on each.
+    test('the two sides agree, code for code', () {
+      const pairs = <PairingRefusal, InviteRefusal>{
+        PairingRefusal.couldNotReach: InviteRefusal.couldNotReach,
+        PairingRefusal.serverFault: InviteRefusal.serverFault,
+        PairingRefusal.notSignedIn: InviteRefusal.notSignedIn,
+      };
+      for (final code in [
+        'unauthenticated',
+        'unavailable',
+        'deadline-exceeded',
+        'internal',
+        'not-found',
+      ]) {
+        expect(
+          InviteService.inviteRefusalForCode(code),
+          pairs[InviteService.refusalForCode(code)],
+          reason: 'code "$code"',
+        );
+      }
     });
   });
 
@@ -223,7 +316,7 @@ void main() {
       expect(InviteService.asMap(null), isEmpty);
       expect(
         InviteService.pairingFrom(InviteService.asMap(null)),
-        const PairingRefused(PairingRefusal.couldNotReach),
+        const PairingRefused(PairingRefusal.serverFault),
       );
     });
   });

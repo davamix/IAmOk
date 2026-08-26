@@ -48,9 +48,46 @@ abstract final class NotificationCopy {
   /// nudge before the day closes and the watcher's alarm asks about it
   /// tomorrow, and a person who is told *why* at 21:00 has a reason to act that
   /// *"remember to tap"* does not give them.
-  static String reminderBody(ReminderSlot slot) => switch (slot) {
+  ///
+  /// ## The consequence is only said when there is somebody to consequence
+  ///
+  /// [hasAudience] is whether an accepted link exists — `WatchedAudience`, the
+  /// same value the Tap screen's own line renders from. With none, the 21:00
+  /// body **drops its second clause** and says only the instruction.
+  ///
+  /// *"so your family knows you're well"* was written when reaching this app at
+  /// all meant being paired. It is not true of a phone with no links, and that
+  /// phone still gets all three reminders **by design** — they exist for her own
+  /// routine, not for the family's benefit, and `screens.md` says so. Phase 5
+  /// made the combination easy to reach rather than theoretical: onboarding
+  /// offers *"Skip for now"* on the screen that would produce a link, and
+  /// `HomeRoute.decide` routes a both-skipped user to the Tap screen deliberately
+  /// — so at 21:00 the notification can promise a family while the screen behind
+  /// it reads *"No one is set up to know you're OK."*
+  ///
+  /// This is a **subtraction** from approved copy, which is the same move
+  /// `TapCopy.nobodyYet` made in this phase, and it is the four warning
+  /// messages' rule applied on the watched side: never claim more than the
+  /// device knows. The 12:00 and 18:00 bodies name no consequence, so neither
+  /// varies.
+  ///
+  /// **Not a field on `ScheduledReminder`.** Audience is not a scheduling fact —
+  /// day, slot and instant are — and putting it there would change that type's
+  /// equality, which `WatchedReconciler` diffs against a `LocalStore` snapshot
+  /// that has no audience column. Every stored reminder would then differ from
+  /// every desired one the moment a first watcher appeared. It is passed at the
+  /// moment the body is written instead, and `AlarmScheduler.apply` re-asserts
+  /// the whole desired set on every reconcile, so the wording follows the
+  /// audience without a diff having to notice.
+  static String reminderBody(
+    ReminderSlot slot, {
+    required bool hasAudience,
+  }) =>
+      switch (slot) {
         ReminderSlot.midday => 'Remember to tap I\'m OK today.',
         ReminderSlot.evening => 'You haven\'t tapped I\'m OK today.',
+        ReminderSlot.night when !hasAudience =>
+          'Please tap I\'m OK before the day ends.',
         ReminderSlot.night =>
           'Please tap I\'m OK before the day ends, so your family knows '
               'you\'re well.',

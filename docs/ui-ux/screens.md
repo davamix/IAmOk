@@ -65,6 +65,14 @@ assume that rather than assuming two people configuring independently.
 
 ### Sign-in — **new in Phase 5, and this inventory never specified it**
 
+> **Every string in this section and the five that follow it — *Sign-in*, *The three screens*,
+> *Making a code*, *Using a code*, *Why a code did not work*, *The summary* and *Getting back to
+> pairing* — was approved by the owner on 2026-08-26, at the Phase 5 gate.** That approval covers
+> the two **deletions** from already-approved copy (`TapCopy.nobodyYet` and `WatcherCopy.nobody`),
+> and the four amendments taken at the same time: `PairingRefusal.ownCode` rewritten, the expiry
+> added to the share message, the watcher-list control given an action label, and a fourth refusal
+> `serverFault` added. Each is marked below where it appears.
+
 Phase 4 signed in from the debug harness *precisely so that no un-approved elderly-facing surface
 shipped early*. It cannot be avoided here: every link is keyed by a uid, `createInvite` needs one to
 name the watched party, and `redeemInvite` needs one to be the watcher. So it is the first thing
@@ -114,6 +122,7 @@ is what stops the app asking an 80-year-old the same two questions every single 
 | The code | `K7R TQX` — large, high contrast, two groups of three |
 | Expiry | *"It stops working at 11:14 am on Thursday 27 August."* |
 | Share | **"Share this code"** — the Android share sheet |
+| The shared message | *"Use this code in the I Am Ok app to look after me: K7R TQX"* — then the expiry line, on its own second line |
 | Waiting | *"Waiting for them to type it in."* |
 | Someone redeemed it | *"Ana will now know you're OK."* |
 | Then | **"Done"** · **"Add someone else"** |
@@ -128,6 +137,21 @@ information for the ear.
 
 ***"Ana will now know you're OK."* reuses `TapCopy.willKnow`'s sentence shape on purpose**, so the
 words that confirm the pairing are the words the Tap screen shows every day afterwards.
+
+**The shared message is the only string in this app that reaches a phone without it installed**,
+which is why it names the app rather than assuming the reader knows what a code is for. It was
+missing from this file until Phase 5 closed.
+
+> **Amended at approval, 2026-08-26: the expiry goes with it.** The message used to end at the code.
+> A code shared at 9pm and read the next morning is dead, and the recipient's first experience of I
+> Am Ok was a code that failed with no way to tell an expired one from a mistyped one — while the
+> sender was reading the expiry on their own screen the whole time. It is `codeExpiry`'s own
+> sentence, the same one rendered above the button, in the **sender's** zone, because that is the
+> phone the code was made on.
+>
+> **The code stays at the end of its own line and nothing is punctuated after it.** A full stop
+> there is a character somebody can type into a six-character field, and `InviteCode.tryParse`
+> strips only spaces and hyphens. That is why it is a second line and not a second clause.
 
 **This is not a status-change message about watchers.** `WatchedAudience` rejects *"X started
 watching you"* outright, and this does not reopen it: it confirms an action taken seconds ago on this
@@ -159,10 +183,11 @@ is how a family ends up paired to the wrong person.
 | no invite with that code | *"That code is not right. Check it and type it again."* |
 | the code's 24 hours are up | *"That code has expired. Ask for a new one."* |
 | somebody else redeemed it | *"That code has already been used. Ask for a new one."* |
-| it is the redeemer's own code | *"That is your own code. Ask the person you are looking after for theirs."* |
+| it is the redeemer's own code | *"That code belongs to this phone. Type it into the other one."* |
 | the other party's profile or timezone is unusable | *"That code did not work. Ask them to open I Am Ok on their phone, then try again."* |
 | **this** phone has no profile | *"This phone could not finish getting ready. Try again."* |
-| the call did not complete | *"Could not reach the internet. Check your connection and try again."* |
+| this phone could not reach the backend | *"Could not reach the internet. Check your connection and try again."* |
+| the backend answered, and this build cannot act on the answer | *"That did not work just now. Try again in a moment."* |
 | nobody is signed in | *"You are not signed in. Sign in and try again."* |
 
 **The failures are distinguished rather than collapsed**, and that is a deliberate trade recorded in
@@ -170,17 +195,43 @@ ADR-0011: collapsing them leaks marginally less, but these tell a family three d
 actions, and *check what you typed* against *ask for a fresh one* is the difference between a loop
 that can succeed and one that cannot.
 
-**The last three are not the reader's mistake and none of them says "not right".** *"Could not reach
+**The last four are not the reader's mistake and none of them says "not right".** *"Could not reach
 the internet"* in particular claims nothing about the code — nothing was decided.
+
+> **Amended at approval, 2026-08-26: the own-code sentence names a phone, not a relationship.** It
+> read *"That is your own code. Ask the person you are looking after for theirs."* This branch fires
+> when the watched person's own code is typed into the watched person's own phone — and this file
+> already records that the family member realistically sets up **both handsets in one sitting**, so
+> the reader is overwhelmingly somebody holding the wrong one of two phones on a table. The old
+> sentence sent them to ask a question of the person sitting next to them, about a code they were
+> already holding. The new one names the fix: move phones.
+
+> **Added at approval, 2026-08-26: a fourth outcome, because *refused is not unreachable*.** Four
+> paths said *"Could not reach the internet"* about a phone that had demonstrably reached it — an
+> `internal` from a failed transaction, any wire status this build has no case for, a malformed
+> `created` payload, and a `not-found` from a region mismatch. It is
+> [ADR-0004](../architecture/decisions/0004-refused-is-not-unreachable.md)'s rule reappearing one
+> layer down: a claim about the **device** that is false, naming an action — *check your connection*
+> — that cannot work.
+>
+> *"That did not work just now. Try again in a moment."* is deliberately the one sentence here that
+> claims nothing about **either** side. The reader cannot repair a failed transaction on the far
+> side and cannot repair a build a version behind the backend, so naming a cause would name one they
+> cannot act on.
+>
+> *"Could not reach the internet"* is now **narrow**: `unavailable` and `deadline-exceeded`, the two
+> gRPC codes that mean the request did not arrive. Everything else is the new sentence.
 
 ### The summary
 
 | Who | Says |
 |---|---|
+| Title | **"You're all set"** — **rendered only when there is something to report** |
 | watched | *"Ana will know you are OK when you tap each day."* + *"Tap once a day. That is all."* |
 | watcher, one person | *"You will be told if Mum misses a day."* |
 | watcher, several | *"You will be told if Granddad and Mum miss a day."* |
 | nothing set up | *"Nobody is set up yet. You can add someone at any time."* |
+| this phone could not read it back | *"This phone could not check what is set up. Your main screen will show it."* |
 | Action | **"Finish"** |
 
 **Built from the links that exist, never from what was tapped.** Somebody who chose *"Add someone"*
@@ -188,12 +239,68 @@ and closed the code screen without anybody redeeming has set nothing up, and a s
 otherwise would be the first false claim this app ever made to a family. `HomeRoute` unions intent
 with evidence to decide *where to go*; this screen reports evidence only.
 
+**The title and its green tick are gated on there being something to report**, and were not until the
+Phase 5 review. Somebody who skipped both questions finished onboarding reading *"You're all set"*
+above a success tick above *"Nobody is set up yet."* — a contradiction on the last screen of setup.
+Neither the title nor its render condition was in this file before Phase 5 closed.
+
+***"Nobody is set up yet"* keeps its *"yet"*, and it is the second exception on this page.** The word
+was struck from `TapCopy.nobodyYet` and `WatcherCopy.nobody` at the Phase 2 gate because it asserts
+**not started**, which is false in the other state those lines cover — the last link was revoked, so
+something *was* set up. That objection does not reach here: this screen is the end of onboarding,
+seen once, before anything has ever been set up, so *"yet"* is true of every reader who sees it.
+Recorded rather than left to be re-derived, which is what *"Skip for now"* two sections up already
+gets.
+
+**The failed-read sentence claims nothing either way.** Without it a failed read renders as the empty
+state — somebody who has in fact paired would be told they had not, by a device that just failed to
+find out. Same rule as the four warning messages: say what is actually known.
+
 ### Getting back to pairing — **"Add someone"**
 
 Reachable from **both** main screens: a secondary text button on the Tap screen beneath the audience
 line, and an app-bar action plus an empty-state button on the watcher list. Without it, somebody who
 skipped the first question lands on a Tap screen naming nobody with nothing to press, and a second
 watcher could never be added at all — an invite is single-use, so every watcher needs their own code.
+
+**On the Tap screen it opens a chooser; the watcher list's own control is "I have a code".** That
+screen has exactly one thing to add, and until the Phase 5 review *"Add someone"* meant two opposite
+things across the two screens — produce a code here, consume one there.
+
+| The chooser | Text |
+|---|---|
+| Title | **"Add someone"** |
+| Produces a code | **"Someone to look after me"** → *Your code* |
+| Consumes one | **"Someone I look after"** → *Type the code* |
+
+> **Added at approval, 2026-08-26, and it closes a dead end rather than adding a feature.** *"Add
+> someone"* opened the code screen and only the code screen, while the only route to *Type the code*
+> was the watcher list — which is reachable from the Tap screen **only by somebody who is already a
+> watcher**. So anybody who answered *"Skip for now"* to onboarding's second question could never
+> take up that role: no error, no wrong screen, nothing anywhere to press.
+>
+> **It was invisible to the whole test suite**, for the same reason the unreachable summary screen
+> was: the defect is *a screen nobody reaches*, and no assertion about a screen's contents can
+> notice one that never opens.
+>
+> **Two options, framed as two people and never as two roles** — the same rule PLAN.md fixes for the
+> two onboarding questions these mirror. *"Are you the elderly one?"* is a question nobody wants to
+> answer.
+>
+> **A sheet rather than a second button on the screen**, because `guidelines.md`'s first principle is
+> one screen, one action, and `WatchedAudience` records at length how firmly this project refuses
+> extra surfaces there. It costs the elderly user nothing in daily use: they never press the control
+> it sits behind. Rejected: making the watcher list permanently reachable from the Tap screen (no new
+> copy, but a permanent second icon there, and it contradicts PLAN.md, which specifies that button
+> for a both-roles user); and accepting the dead end until Phase 7 (cheapest, and it leaves a real
+> family able to get stuck).
+
+**The control that opens the watcher list is labelled *"See who you look after"***, which is not the
+list's title. A title says what a screen **is**; a control's label says what pressing it **does**, and
+this one is an icon button — so that string is a screen-reader user's whole identification of their
+only route to the other half of the app. *"People you're looking after"* read out as a control's name
+announces a place somebody has landed on rather than a door. Approved as a title, it had been reused
+as a label for want of a second string; the second string was added at approval, 2026-08-26.
 
 > **It forced a change to two already-approved strings, and the change was required rather than
 > tidying.** `TapCopy.nobodyYet` ended *"Ask a family member to help you add someone."* and
@@ -203,7 +310,9 @@ watcher could never be added at all — an invite is single-use, so every watche
 > both second sentences are gone. What remains is the same true statement about the same two states,
 > with the next step supplied by the button instead of by a sentence.
 >
-> **Both shortened lines are owed the owner's approval**, like every user-visible string here.
+> **Both shortened lines were approved on 2026-08-26**, with the rest of this phase's copy. The
+> alternative — keep the sentence and *not* add the button — was rejected because it leaves a
+> skipped first question as a dead end and makes a second watcher impossible.
 
 ---
 
@@ -992,7 +1101,8 @@ there would spend the one line the reader gets on something they already know.
 |---|---|
 | 12:00 | *"Remember to tap I'm OK today."* |
 | 18:00 | *"You haven't tapped I'm OK today."* |
-| 21:00 | *"Please tap I'm OK before the day ends, so your family knows you're well."* |
+| 21:00, somebody is set up | *"Please tap I'm OK before the day ends, so your family knows you're well."* |
+| 21:00, nobody is set up | *"Please tap I'm OK before the day ends."* |
 
 **Escalating, not repeating.** Three identical notifications read as one message the phone failed
 to deliver twice; these read as the day going on. The tone stays level — no exclamation marks, no
@@ -1005,6 +1115,31 @@ small warning, which is the fatigue this design spends its whole notification bu
 
 *"tap I'm OK"* is the same phrase as the tap target's own label, so the words mean one thing on the
 screen and in the shade.
+
+**The 21:00 body drops its consequence clause when nobody is set up — settled 2026-08-26**, closing
+the *"Owed before Phase 5"* item this section used to carry further down the page.
+
+That item's proposed resolution was *"an explicit acceptance once onboarding guarantees pairing
+before reminders arm"*, and **onboarding does not guarantee that**: it offers *"Skip for now"* on the
+screen that would produce a link, and `HomeRoute.decide` routes a both-skipped user to the Tap screen
+by design. So Phase 5 made the combination easy to reach rather than theoretical — at 21:00 the
+notification could promise a family while the screen behind it read *"No one is set up to know you're
+OK."*
+
+**Reminders still arm for a phone with nobody set up, and that is unchanged.** They exist for her own
+routine, not for the family's benefit; coupling them to an audience would mean losing every watcher
+silently stops her being nudged to tap. What changes is only the **claim**, which is the same rule the
+four warning messages follow: never say more than the device knows.
+
+It is a **subtraction** from an approved string rather than a new sentence — the same move
+`TapCopy.nobodyYet` made in this phase — so the instruction a person acts on is identical in both. The
+12:00 and 18:00 bodies name no consequence and do not vary.
+
+The value is `WatchedAudience`, the same one the Tap screen's own line renders from, read off the
+reconcile that produced the reminders, so the notification and the screen cannot disagree. It reaches
+the scheduler as a flag rather than riding on `ScheduledReminder`: audience is not part of a
+reminder's identity, and putting it in that type's equality would put it in a diff taken against a
+`LocalStore` snapshot that has no audience column.
 
 ### Reminders and warnings are separate Android channels
 
@@ -1113,10 +1248,10 @@ is the normal one here rather than the edge case. It is on the Phase 3 device li
 says *"every surface that displays an away period names who set it"*. Those two contradict, and the
 string is frozen now. If a watcher marks her away, she should probably read who did.
 
-**Owed before Phase 5:** the 21:00 reminder says *"so your family knows you're well"* while the
-screen may simultaneously say nobody is set up — reminders are armed regardless of the audience by
-deliberate design, because they exist for her own routine. Either an empty-audience variant, or an
-explicit acceptance once onboarding guarantees pairing before reminders arm.
+**Settled 2026-08-26, in *The three reminders* above:** the 21:00 reminder said *"so your family
+knows you're well"* while the screen might simultaneously say nobody is set up. It now has an
+empty-audience variant that drops the clause. The acceptance this item offered as the alternative
+would have rested on onboarding guaranteeing a pairing before reminders arm — and it does not.
 
 ### A warning is not posted before the link's warning time — settled 2026-08-25
 

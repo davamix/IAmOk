@@ -420,13 +420,26 @@ class _DebugHarnessScreenState extends ConsumerState<DebugHarnessScreen> {
             // Hence the control below.
             for (final slot in ReminderSlot.values)
               _Action('Fire ${slot.name} reminder now', () async {
+                // **The audience is read, not assumed.** The 21:00 body drops
+                // its *"so your family knows you're well"* clause when nobody is
+                // set up, and a harness that hard-coded either answer would show
+                // a sentence this phone would never post — on the one control
+                // whose whole justification is that what is verified is what
+                // ships.
+                final audience = WatchedAudience.from(
+                  await services.store.linksWatching(services.selfUid),
+                );
                 await services.notifications.showNow(
                   id: AlarmIds.reminder(_testNotificationDay, slot),
                   title: NotificationCopy.reminderTitle,
-                  body: NotificationCopy.reminderBody(slot),
+                  body: NotificationCopy.reminderBody(
+                    slot,
+                    hasAudience: audience.isNotEmpty,
+                  ),
                   channel: NotificationService.remindersChannel,
                 );
-                return 'posted ${slot.name} on the reminders channel';
+                return 'posted ${slot.name} on the reminders channel'
+                    '${audience.isEmpty ? " (no audience)" : ""}';
               }),
             // Cancels exactly the three sentinel ids and nothing else.
             //

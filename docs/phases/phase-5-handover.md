@@ -4,6 +4,18 @@
 **75 rules tests**, `flutter analyze` clean, `flutter build apk --debug` succeeds, secrets guard
 clean, working tree clean.
 
+> **HISTORICAL — Phase 5 was closed out and SIGNED OFF on 2026-08-26.** Every one of the six items
+> below was taken, and all three owner decisions took the recommended option. **What actually
+> happened is in [phase-5-summary.md](phase-5-summary.md) under *Closing the phase*** — read this
+> file for the reasoning behind each suggestion, not for current state. It is deliberately frozen as
+> written, the same way `phase-4-handover.md` is.
+>
+> Two things below did not survive contact. The suggested `Home.build` lint was written against a
+> mutation that **does not compile** (`ref.watch(otherProvider)`), so it proves nothing — the real
+> one is `screenFor(null)`. And the suggested home for the mutation harnesses became four files
+> rather than two, because the engine is worth sharing and the Functions half needs a wrapper to find
+> Java.
+
 **Phase 5 is built, its exit criterion is met on two devices, and all five reviewers have run with
 their findings applied. It is NOT signed off.**
 

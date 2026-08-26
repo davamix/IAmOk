@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -9,6 +11,7 @@ import 'package:i_am_ok/domain/domain.dart';
 import 'package:i_am_ok/main.dart';
 import 'package:i_am_ok/presentation/app_theme.dart';
 import 'package:i_am_ok/presentation/onboarding_screen.dart';
+import 'package:i_am_ok/presentation/pairing_screens.dart';
 import 'package:i_am_ok/presentation/tap_screen.dart';
 import 'package:i_am_ok/presentation/watcher_screen.dart';
 
@@ -39,6 +42,13 @@ import 'package:i_am_ok/presentation/watcher_screen.dart';
 /// hanging test or a green one that proves nothing, the gap is named here and in
 /// `docs/phases/phase-5-summary.md`. It is one line, and it is the line a device
 /// run exercises every time.
+///
+/// **A source lint stands in for it** — see *the one line no behaviour test
+/// reaches*, below. It is not a proof and does not pretend to be one: it cannot
+/// tell you the app works, only that the specific regression which would be
+/// invisible has not happened. This repo has two precedents for exactly that
+/// trade (`domain_purity_test.dart`'s guards, and the `automaticHostMapping`
+/// counter added this phase).
 void main() {
   TimeZones.ensureInitialized();
   final madrid = TimeZones.location('Europe/Madrid');
@@ -171,7 +181,11 @@ void main() {
       final button = tester.widget<IconButton>(
         find.byKey(WatcherListButton.buttonKey),
       );
-      expect(button.tooltip, WatcherCopy.title);
+      // `openLabel`, not `title`. The title is approved as a heading; read out
+      // as a control's name it announces a place rather than an action, and
+      // this tooltip is a screen-reader user's whole identification of the only
+      // route to the other half of the app.
+      expect(button.tooltip, WatcherCopy.openLabel);
       expect(button.tooltip, isNotEmpty);
     });
 
@@ -241,6 +255,149 @@ void main() {
       // which is false after the last link is revoked.
       expect(TapCopy.nobodyYet.toLowerCase(), isNot(contains('yet')));
       expect(WatcherCopy.nobody.toLowerCase(), isNot(contains('yet')));
+    });
+  });
+
+  /// **The cross-role dead end, closed.**
+  ///
+  /// Until Phase 5 closed, this button opened `ShareCodeScreen` and nothing
+  /// else, while the only route to `EnterCodeScreen` was the watcher list —
+  /// which is reachable from the Tap screen only by somebody who is *already* a
+  /// watcher. So anybody who answered "Skip for now" to onboarding's second
+  /// question was shut out of that role permanently: no error, no wrong screen,
+  /// nothing anywhere to press.
+  ///
+  /// It was invisible to 1 161 tests for the same reason the unreachable
+  /// summary screen was — the defect is *a screen nobody reaches*, and no
+  /// assertion about a screen's contents can notice one that never opens.
+  group('Add someone reaches both halves of pairing', () {
+    test('the answer chooses the screen', () {
+      expect(
+        AddSomeoneButton.pairingScreenFor(true),
+        isA<ShareCodeScreen>(),
+        reason: 'someone to look after me: this phone produces a code',
+      );
+      expect(
+        AddSomeoneButton.pairingScreenFor(false),
+        isA<EnterCodeScreen>(),
+        reason: 'someone I look after: this phone consumes one — the route '
+            'that did not exist',
+      );
+    });
+
+    testWidgets('the chooser offers exactly the two, and says so in words',
+        (tester) async {
+      await tester.pumpWidget(MaterialApp(
+        theme: AppTheme.light,
+        home: Builder(
+          builder: (context) => Scaffold(
+            body: TextButton(
+              onPressed: () => AddSomeoneButton.chooseRole(context),
+              child: const Text('open'),
+            ),
+          ),
+        ),
+      ));
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+
+      expect(find.text(OnboardingCopy.addSomeoneToWatchMe), findsOneWidget);
+      expect(find.text(OnboardingCopy.addSomeoneIWatch), findsOneWidget);
+      expect(find.byKey(AddSomeoneButton.watchedChoiceKey), findsOneWidget);
+      expect(find.byKey(AddSomeoneButton.watcherChoiceKey), findsOneWidget);
+    });
+
+    testWidgets('each option answers with its own half', (tester) async {
+      Future<bool?> open(Key key) async {
+        bool? answer;
+        var opened = false;
+        await tester.pumpWidget(MaterialApp(
+          theme: AppTheme.light,
+          home: Builder(
+            builder: (context) => Scaffold(
+              body: TextButton(
+                onPressed: () async {
+                  opened = true;
+                  answer = await AddSomeoneButton.chooseRole(context);
+                },
+                child: const Text('open'),
+              ),
+            ),
+          ),
+        ));
+        await tester.tap(find.text('open'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(key));
+        await tester.pumpAndSettle();
+        expect(opened, isTrue);
+        return answer;
+      }
+
+      expect(await open(AddSomeoneButton.watchedChoiceKey), isTrue);
+      expect(await open(AddSomeoneButton.watcherChoiceKey), isFalse);
+    });
+
+    testWidgets('dismissing it chooses nothing, and nothing is said',
+        (tester) async {
+      bool? answer;
+      var returned = false;
+      await tester.pumpWidget(MaterialApp(
+        theme: AppTheme.light,
+        home: Builder(
+          builder: (context) => Scaffold(
+            body: TextButton(
+              onPressed: () async {
+                answer = await AddSomeoneButton.chooseRole(context);
+                returned = true;
+              },
+              child: const Text('open'),
+            ),
+          ),
+        ),
+      ));
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+
+      // A tap outside the sheet — a change of mind, not a failure.
+      await tester.tapAt(const Offset(10, 10));
+      await tester.pumpAndSettle();
+
+      expect(returned, isTrue);
+      expect(answer, isNull,
+          reason: 'null must be distinguishable from either choice, or a '
+              'dismissal opens a screen the reader did not ask for');
+    });
+
+    // The label of the icon button that opens the watcher list. It is an icon,
+    // so this string is a screen-reader user's whole identification of the only
+    // route to the other half of the app — and a title read out as a control's
+    // name announces a place rather than an action.
+    test('the watcher-list control is labelled with an action', () {
+      expect(WatcherCopy.openLabel, isNot(WatcherCopy.title));
+      expect(WatcherCopy.openLabel.toLowerCase(), startsWith('see'));
+    });
+  });
+
+  /// **The one line no behaviour test in this suite reaches.**
+  ///
+  /// `Home.build` is `screenFor(ref.watch(homeRouteProvider))`. Everything above
+  /// asserts `screenFor` and the argument it is handed; nothing asserts that the
+  /// widget reads *that* provider. It could watch a different one, or pass
+  /// `null` unconditionally, and every test in this file would still pass.
+  ///
+  /// A lint, not a proof. It cannot tell you the app works — a device run does
+  /// that, and did. What it stops is the specific regression that would be
+  /// invisible to the whole suite.
+  group('the routing wire, as source', () {
+    test('Home.build renders the route provider and nothing else', () {
+      final code = File('lib/main.dart').readAsStringSync();
+      expect(
+        code,
+        contains('screenFor(ref.watch(homeRouteProvider))'),
+        reason: 'if this moved, update the lint — do not delete it: the line '
+            'it guards is the only one in the routing wire that no assertion '
+            'in this file can reach',
+      );
     });
   });
 }

@@ -195,6 +195,92 @@ void main() {
     });
   });
 
+  // The three nudges (§10), which had no direct test until Phase 5 closed —
+  // only the shared title did.
+  group('the reminders', () {
+    String body(ReminderSlot slot, {required bool hasAudience}) =>
+        NotificationCopy.reminderBody(slot, hasAudience: hasAudience);
+
+    test('escalate rather than repeat', () {
+      final lines = {
+        for (final slot in ReminderSlot.values)
+          body(slot, hasAudience: true),
+      };
+      expect(lines, hasLength(ReminderSlot.values.length),
+          reason: 'three identical notifications read as one message the '
+              'phone failed to deliver twice');
+    });
+
+    test('the tone stays level — no exclamation, no emoji', () {
+      for (final hasAudience in [true, false]) {
+        for (final slot in ReminderSlot.values) {
+          final line = body(slot, hasAudience: hasAudience);
+          expect(line, isNot(contains('!')), reason: slot.name);
+          // No emoji: every rune stays inside the plain-text range. Cheaper to
+          // read than a character class, and it cannot be satisfied by an
+          // escaping mistake the way a regex can.
+          expect(line.runes.every((rune) => rune < 0x2000), isTrue,
+              reason: '${slot.name}: $line');
+        }
+      }
+    });
+
+    // **The whole point of the variant.** `screens.md` marked this "Owed before
+    // Phase 5" and its proposed resolution assumed onboarding would guarantee a
+    // pairing before reminders arm. It does not — "Skip for now" is offered on
+    // the screen that would produce one, and `HomeRoute.decide` routes a
+    // both-skipped user to the Tap screen by design. So the 21:00 nudge could
+    // promise a family while the screen behind it read "No one is set up to
+    // know you're OK."
+    test('21:00 promises a family only when there is one', () {
+      expect(
+        body(ReminderSlot.night, hasAudience: true),
+        "Please tap I'm OK before the day ends, so your family knows "
+        "you're well.",
+      );
+      expect(
+        body(ReminderSlot.night, hasAudience: false),
+        "Please tap I'm OK before the day ends.",
+      );
+    });
+
+    // A subtraction, not a rewrite — the same move `TapCopy.nobodyYet` made in
+    // this phase. The instruction a person acts on is identical in both.
+    test('the empty-audience body is the approved one, minus the claim', () {
+      final withFamily = body(ReminderSlot.night, hasAudience: true);
+      final without = body(ReminderSlot.night, hasAudience: false);
+
+      expect(withFamily, startsWith(without.substring(0, without.length - 1)),
+          reason: 'a new sentence was invented where a clause should have '
+              'been dropped');
+      expect(without.toLowerCase(), isNot(contains('family')));
+      expect(without.toLowerCase(), isNot(contains('knows')));
+    });
+
+    // Reminders are armed for a phone with nobody set up **by design** — they
+    // exist for her own routine. Only the claim about other people varies.
+    test('the other two slots do not vary at all', () {
+      for (final slot in [ReminderSlot.midday, ReminderSlot.evening]) {
+        expect(
+          body(slot, hasAudience: true),
+          body(slot, hasAudience: false),
+          reason: '${slot.name} names no consequence, so it has nothing to '
+              'drop',
+        );
+      }
+    });
+
+    test('every body is non-empty and ends a sentence, in both states', () {
+      for (final hasAudience in [true, false]) {
+        for (final slot in ReminderSlot.values) {
+          final line = body(slot, hasAudience: hasAudience);
+          expect(line, isNotEmpty);
+          expect(line, endsWith('.'), reason: slot.name);
+        }
+      }
+    });
+  });
+
   group('ADR-0004\'s three wording rules', () {
     final text = body(
       WarningOutcome.warnAccessLost,

@@ -133,6 +133,38 @@ void main() {
         expect(ratio(scheme.onPrimary, scheme.primary),
             greaterThanOrEqualTo(7.0));
       });
+
+      test('the pairing code meets AA', () {
+        // **The single most important thing on the pairing screen to read —
+        // and to read aloud across a table.** `_BigCode` draws six characters
+        // on `primaryContainer`, and a family member is reading them off one
+        // phone while typing them into another. A code misread as 0 for O
+        // fails with *"That code is not right"*, which sends them back to
+        // check the same characters again.
+        //
+        // Unmeasured for the whole of Phase 5, on the screen this phase was
+        // built to deliver.
+        //
+        // **The bar here is AA, and that is the guideline's, not a preference.**
+        // `guidelines.md` requires AAA for the tap target and for warnings, by
+        // name, and AA for all other text. Measured 2026-08-26 this pair is
+        // **5.18 light / 6.62 dark** — comfortably above AA, below AAA in both.
+        // Whether a code read aloud deserves the warning bar is a palette
+        // question and the owner's; it is recorded in `OPEN-QUESTIONS.md`
+        // rather than enforced here, because a test asserting a floor no
+        // document sets is a requirement invented by its own assertion.
+        expect(ratio(scheme.onPrimaryContainer, scheme.primaryContainer),
+            greaterThanOrEqualTo(4.5));
+      });
+
+      test('the tonal buttons meet AA', () {
+        // `secondaryContainer` carries *Share this code* on the pairing screen
+        // and the watcher list's empty-state button — the control a reader who
+        // is stuck presses, which is the worst place for text that is hard to
+        // read. Measured 5.19 light / 6.62 dark.
+        expect(ratio(scheme.onSecondaryContainer, scheme.secondaryContainer),
+            greaterThanOrEqualTo(4.5));
+      });
     });
   }
 

@@ -22,6 +22,16 @@ abstract final class WatcherCopy {
   /// the same trick the Tap screen's audience line uses.
   static const String title = 'People you\'re looking after';
 
+  /// The label of the **control that opens this screen** from the Tap screen,
+  /// and the only thing a screen-reader user gets for it — it is an icon
+  /// button, so this is its whole identity.
+  ///
+  /// Not [title]. A title says what a screen is; a control's label says what
+  /// pressing it does, and *"People you're looking after"* on a button reads as
+  /// a heading somebody has landed on rather than a door. It is approved as a
+  /// title and was reused here for want of a second string.
+  static const String openLabel = 'See who you look after';
+
   /// Nobody is being watched.
   ///
   /// Same shape as `TapCopy.nobodyYet`, and for the same reason: a screen with

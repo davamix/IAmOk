@@ -86,6 +86,7 @@ class _RecordingAlarms implements AlarmScheduler {
   Future<bool> apply({
     required Set<ScheduledReminder> toCancel,
     required Set<ScheduledReminder> desired,
+    required bool hasAudience,
   }) async {
     armed
       ..removeAll(toCancel)

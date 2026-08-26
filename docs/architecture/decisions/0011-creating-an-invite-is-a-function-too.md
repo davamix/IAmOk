@@ -68,6 +68,26 @@ history and name of an identifiable elderly person living alone. The designed co
 enforcement, which `OPEN-QUESTIONS.md` #5 records as structurally gated on an internal test track.
 Recorded here so the absence is a known position rather than an oversight.
 
+**What it also does not fix: a code shared with the wrong person cannot be withdrawn.** Recorded at
+the Phase 5 gate, because it follows directly from the reuse rule above and was not stated when this
+was written.
+
+`createInviteFor` hands back the caller's **live** code rather than replacing it — deliberately, so
+re-entering the screen cannot kill a code somebody has already written down. The consequence is that
+there is no way to displace one either. Somebody who shares a code into the wrong message thread
+cannot cancel it, cannot mint a different one to make the first irrelevant, and has no surface that
+so much as names it. Their only real option is to wait out the 24 hours, or redeem their own code —
+which `redeemInvite` refuses as a self-link.
+
+**The blast radius is bounded and the exposure is short:** a single-use code, 24 hours, and the
+redeemer appears **by name** on the watched person's Tap screen the moment they use it (ADR-0005),
+where either party can revoke. That is why this is a recorded cost rather than a defect.
+
+**A `cancelInvite` callable is cheap if it is ever wanted** — a delete of `invites/{code}` gated on
+`watchedUid == request.auth.uid`, and a control on the share screen. Not built, because nothing in
+Phase 5 needed it and a control the elderly user does not need is a surface `guidelines.md` would
+rather not have. It belongs with Phase 7's UI pass if it is built at all.
+
 ## Alternatives considered
 
 **Let the client create the invite under a narrowed rule** — `allow create: if request.auth.uid ==

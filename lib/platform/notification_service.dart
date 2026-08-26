@@ -209,11 +209,17 @@ class NotificationService implements WatcherNotifications {
   /// `USE_EXACT_ALARM` at Phase 8, since the fallback permission is denied by
   /// default when targeting Android 14+. A degraded reminder is worth far more
   /// than a screen that will not load.
-  Future<bool> scheduleReminder(ScheduledReminder reminder) async {
+  Future<bool> scheduleReminder(
+    ScheduledReminder reminder, {
+    required bool hasAudience,
+  }) async {
     Future<void> schedule(AndroidScheduleMode mode) => _plugin.zonedSchedule(
           id: AlarmIds.reminder(reminder.day, reminder.slot),
           title: NotificationCopy.reminderTitle,
-          body: NotificationCopy.reminderBody(reminder.slot),
+          body: NotificationCopy.reminderBody(
+            reminder.slot,
+            hasAudience: hasAudience,
+          ),
           scheduledDate: reminder.at,
           notificationDetails: NotificationDetails(
             android: AndroidNotificationDetails(

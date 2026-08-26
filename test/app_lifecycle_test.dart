@@ -78,6 +78,7 @@ class _NoopAlarms implements AlarmScheduler {
   Future<bool> apply({
     required Set<ScheduledReminder> toCancel,
     required Set<ScheduledReminder> desired,
+    required bool hasAudience,
   }) async =>
       true;
 

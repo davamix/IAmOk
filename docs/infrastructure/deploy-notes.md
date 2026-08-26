@@ -166,9 +166,35 @@ Measured, not assumed — the emulator says so on every start:
 `functions/package.json` pins `"engines": {"node": "22"}`, which is what Cloud Functions deploys
 against. So **the emulator runs a newer runtime than production**, which is the classic direction
 for "works locally": a Node 24 API that does not exist in 22 passes here and fails after deploy.
-`tsc` cannot catch it — `@types/node` is not installed and the target is `es2023`, not a Node
-version. Accepted for now because these functions do little beyond the Admin SDK; if that stops
-being true, install Node 22 alongside and select it, rather than relaxing the engine pin.
+
+**`tsc` now catches it, and the sentence that used to stand here was wrong.** This paragraph said
+*"`@types/node` is not installed"*. It was — `@types/node@26.2.0` came in transitively under
+`firebase-admin`, four majors ahead of the deployed runtime, so the TypeScript program was typed
+against **Node 26** while production ran **Node 22**. That is the same gap the paragraph describes,
+one layer up and with the compiler agreeing rather than staying silent, and it went unread for as
+long as the claim did.
+
+Phase 5 made it load-bearing: `invites.ts` imports `node:crypto`, this project's first Node builtin.
+A Node 23+ API would have type-checked clean, run clean in the emulator, and failed only after
+deploy.
+
+Pinned when Phase 5 closed, 2026-08-26:
+
+```powershell
+npm install --save-dev "@types/node@^22"     # from functions/, not with --prefix — see below
+npx tsc --noEmit                             # clean at 22.20.1
+```
+
+> **Run it from inside `functions/`.** `npm --prefix functions install …` typed at a shell that is
+> *already* in `functions/` resolves the prefix relative to the cwd and silently creates
+> `functions/functions/` with its own `package.json` — no error, and `npm ls` then reports a
+> package called `functions`. It happened on 2026-08-26 and was caught only by reading the output
+> rather than the exit code.
+
+The engine pin stays where it is: the target is `es2023`, not a Node version, so **the types are
+what constrain the API surface** and they now match what deploys. The runtime gap itself remains —
+if it ever needs closing, install Node 22 alongside and select it, rather than relaxing the engine
+pin.
 
 ### Reaching the emulators from a device
 
@@ -380,11 +406,29 @@ a decision on Play App Signing all land in **Phase 8**. The keystore and its pas
 
 ```powershell
 flutter build apk --release
-Select-String -Path build\app\outputs\logs\manifest-merger-release-report.txt -Pattern INTERNET
+
+# 1. permissions — the closed set, from the merger report
+Select-String -Path build\app\outputs\logs\manifest-merger-release-report.txt `
+  -Pattern 'uses-permission#' | ForEach-Object { $_.Line.Trim() } | Sort-Object -Unique
+
+# 2. components — from the merged manifest ITSELF, not the report
+$m = "build\app\intermediates\merged_manifest\release\outputReleaseAppLinkSettings\AndroidManifest.xml"
+[regex]::Matches((Get-Content $m -Raw), '<(provider|receiver|service|activity)[^>]*>') |
+  ForEach-Object { $_.Value }
 ```
 
-Expect **no output**. `docs/security/threat-model.md` states that a release build cannot transmit,
-and that claim rests entirely on `INTERNET` being absent from the merged release manifest.
+Expect the **fourteen** in `test/android_manifest_test.dart`, and no fifteenth.
+
+> **Step 2 was added when Phase 5 closed, and step 1 was widened.** This block used to be a single
+> `Select-String … -Pattern INTERNET` expecting no output — which had been wrong twice over since
+> Phase 4 measured that a release build *does* hold `INTERNET`, merged in from Firebase. Worse, it
+> greps for a **permission**, so it cannot see a plugin that adds a *component*: `share_plus`
+> contributes a `ShareFileProvider` and a `SharePlusPendingIntent` receiver and not one permission,
+> and the documented check would have reported a clean result.
+>
+> **Read the merged manifest, not the merger report, for anything about a component.** The report
+> lists attribute *names* without their *values* — it says `android:exported` was added and never
+> what it was set to, which is the entire question you are asking.
 
 **A test cannot answer this.** `test/android_manifest_test.dart` holds the half that lives in this
 repo — the source manifests, and a closed set of the permissions `main` declares — but a permission
@@ -401,6 +445,13 @@ behind `firebase_auth` for a feature this app does not have, `READ_GSERVICES` fr
 **nothing at all** from `firebase_app_check`. The re-derived claim lives in
 `docs/security/threat-model.md`; the inventory and its dates live in
 `test/android_manifest_test.dart`.
+
+**Measured a fourth time when Phase 5 closed, 2026-08-26**, after `share_plus` and `cloud_functions`
+were added. Permissions: **still fourteen, no change**. Components: `share_plus` adds a
+`ShareFileProvider` and a `SharePlusPendingIntent` receiver, **both `android:exported="false"`**, the
+provider's authority scoped to this application id; `cloud_functions` adds one `meta-data` Firebase
+registrar. Recorded with the rest in `test/android_manifest_test.dart`, including the note that the
+provider is present and unused — this app shares text, never a file.
 
 **Run this whenever a plugin is added**, including when you expect no change — a rule only honoured
 when it finds something stops being run, which is how the App Check measurement came to be skipped

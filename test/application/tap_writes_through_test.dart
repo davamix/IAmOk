@@ -188,6 +188,7 @@ class _NoAlarms implements AlarmScheduler {
   Future<bool> apply({
     required Set<ScheduledReminder> desired,
     required Set<ScheduledReminder> toCancel,
+    required bool hasAudience,
   }) async =>
       true;
 

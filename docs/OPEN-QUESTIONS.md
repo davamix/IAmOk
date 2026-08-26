@@ -10,7 +10,7 @@ measured and accepted. **What does not:** a defect. A defect gets fixed or gets 
 Every row says what would make it a **blocker**, because that is the only thing that decides when it
 gets picked up.
 
-**Date:** 2026-08-25 · Opened at the end of Phase 4. · Row 11 added at the end of Phase 5.
+**Date:** 2026-08-25 · Opened at the end of Phase 4. · Rows 11 and 12 added at the Phase 5 gate.
 
 ---
 
@@ -29,6 +29,7 @@ gets picked up.
 | 9 | `ensureVisible` cannot reach a far-down row | Phase 7's multi-person layout |
 | 10 | A warning erased by force-stop is not re-posted | Accepted in ADR-0007; never, unless measured harmful |
 | 11 | Nothing rate-limits `redeemInvite` guessing | Before App Check is enforced, or if abuse is ever observed |
+| 12 | The pairing code's colour pair meets AA, not AAA | If a reader ever mis-transcribes a code, or the palette is retuned |
 
 ---
 
@@ -213,6 +214,36 @@ alone would leave both callables open while the register said the control was on
 code change plus a Functions deploy, not only the console — or immediately, if abuse is ever
 observed. `redeemInvite` logs the outcome and the
 caller's uid on every call, so the evidence exists to notice.
+
+## 12. The pairing code is measured at AA, and it is the string most read aloud
+
+Added at the Phase 5 gate, when `contrast_test.dart` measured the two pairs it had never covered.
+
+**The numbers**, 2026-08-26, WCAG 2.x, from the palette the app actually ships:
+
+| Pair | Light | Dark | Where |
+|---|---|---|---|
+| `onPrimaryContainer` / `primaryContainer` | **5.18** | **6.62** | the six-character code itself |
+| `onSecondaryContainer` / `secondaryContainer` | **5.19** | **6.62** | *Share this code*, the watcher list's empty-state button |
+
+**Both clear the floor `guidelines.md` sets**, which is AA (4.5) for all text and AAA (7.0) for the
+tap target and any warning, **by name**. So this is not a failure — it is a measured fact with a
+question attached to it.
+
+**The question.** The code block is neither the tap target nor a warning, so AAA was never required
+of it. But it is the one string in this app that is **read aloud across a table and transcribed into
+another phone**, by an elderly person to a family member or the reverse, once, with no way to ask the
+screen to repeat itself. A mis-read character fails with *"That code is not right. Check it and type
+it again."* — which sends them back to the same characters. §7's alphabet already removes the
+confusable glyphs it can (`O`, `0`, `I`, `1`); contrast is the other half of the same concern.
+
+**Not fixed here, deliberately.** Raising it is a **palette change** to an approved theme, which is
+the owner's call and not an implementation detail — and the test now asserts the documented floor
+rather than one invented by its own assertion, which is what a test that enforced AAA would be.
+
+**Blocker when:** a reader mis-transcribes a code in practice, or the palette is retuned for any
+other reason — at which point this pair should be raised at the same time rather than measured again
+later. Phase 7's UI pass is the natural home.
 
 ---
 

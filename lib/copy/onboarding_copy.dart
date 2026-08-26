@@ -137,10 +137,29 @@ abstract final class OnboardingCopy {
 
   static const String shareCode = 'Share this code';
 
-  /// The subject line when the code goes out through the Android share sheet.
-  static String shareMessage(String code) =>
-      'Use this code in the I Am Ok app to look after me: '
-      '${InviteCode.forReading(code)}';
+  /// The message when the code goes out through the Android share sheet.
+  ///
+  /// **The only string in this app that reaches somebody who may not have
+  /// installed it**, which is why it names the app and why [expiry] is on it.
+  /// A code sent at 9pm and read the next morning is expired, and without the
+  /// second line the reader's first experience of I Am Ok is typing a code that
+  /// fails — with no way to tell a dead code from a mistyped one.
+  ///
+  /// [expiry] is [codeExpiry]'s own sentence, rendered by the caller in the
+  /// **sender's** zone, because that is the phone the code was made on and the
+  /// only zone this side knows. It is optional for the reason `_ExpiryLine`
+  /// renders nothing without device facts: a message with no expiry is worse
+  /// than one with, and much better than none at all.
+  ///
+  /// The code stays at the **end of its own line** and nothing is punctuated
+  /// after it. A full stop there is a character a reader can type into a
+  /// six-character field, and `InviteCode.tryParse` strips only spaces and
+  /// hyphens.
+  static String shareMessage(String code, {String? expiry}) {
+    final line = 'Use this code in the I Am Ok app to look after me: '
+        '${InviteCode.forReading(code)}';
+    return expiry == null ? line : '$line\n$expiry';
+  }
 
   /// While nobody has redeemed it yet.
   ///
@@ -170,6 +189,8 @@ abstract final class OnboardingCopy {
         // the whole of the advice and no other sentence would be true.
         InviteRefusal.couldNotReach =>
           'Could not reach the internet. Check your connection and try again.',
+        InviteRefusal.serverFault =>
+          'That did not work just now. Try again in a moment.',
         InviteRefusal.notSignedIn => 'You are not signed in. Sign in and try again.',
       };
 
@@ -198,10 +219,17 @@ abstract final class OnboardingCopy {
         PairingRefusal.expired => 'That code has expired. Ask for a new one.',
         PairingRefusal.alreadyUsed =>
           'That code has already been used. Ask for a new one.',
-        // Their own code. Naming the mistake is what stops them typing it again.
+        // **A phone mix-up, not a relationship mistake.** This branch fires
+        // when the watched person's own code was typed into the watched
+        // person's own phone — and `screens.md` records that the family member
+        // realistically sets up both handsets in one sitting, so the reader is
+        // overwhelmingly somebody holding the wrong one of two phones on a
+        // table. The sentence this replaced said *"Ask the person you are
+        // looking after for theirs"*, which names a relationship the reader
+        // does not have and sends them to ask a question of the person sitting
+        // next to them about a code they are already holding.
         PairingRefusal.ownCode =>
-          'That is your own code. Ask the person you are looking after for '
-              'theirs.',
+          'That code belongs to this phone. Type it into the other one.',
         // Not the reader's mistake, and not fixable by re-typing. Both of these
         // are fixed on the OTHER phone, so that is where the sentence points.
         PairingRefusal.watchedProfileMissing ||
@@ -210,8 +238,16 @@ abstract final class OnboardingCopy {
               'then try again.',
         PairingRefusal.watcherProfileMissing =>
           'This phone could not finish getting ready. Try again.',
+        // Reached, answered, and the answer was one this build cannot act on.
+        // **The one sentence here that claims nothing about either side** — the
+        // reader cannot repair a failed transaction on the far side and cannot
+        // repair a build a version behind the backend, so naming a cause would
+        // name one they cannot act on. Everything above this line either tells
+        // them about the code or points at a phone.
         PairingRefusal.couldNotReach =>
           'Could not reach the internet. Check your connection and try again.',
+        PairingRefusal.serverFault =>
+          'That did not work just now. Try again in a moment.',
         PairingRefusal.notSignedIn => 'You are not signed in. Sign in and try again.',
       };
 
@@ -271,6 +307,35 @@ abstract final class OnboardingCopy {
   /// The route back exists because without it someone who skipped both questions
   /// lands on a Tap screen naming nobody with nothing to press, and a second
   /// watcher could never be added at all.
+  ///
+  /// On the Tap screen it opens the chooser below. The watcher list's own
+  /// control is [watcherAction] instead — that screen has exactly one thing to
+  /// add, and *"Add someone"* meant two opposite things across the two screens
+  /// until the Phase 5 review renamed it there.
   static const String addSomeone = 'Add someone';
+
+  /// The two ways to add somebody, offered behind [addSomeone] on the Tap
+  /// screen.
+  ///
+  /// **The cross-role dead end this closes.** Until Phase 5 closed, that button
+  /// opened `ShareCodeScreen` and only that, and the watcher list — the only
+  /// route to `EnterCodeScreen` — was reachable from here only by somebody who
+  /// was *already* a watcher. So anybody who answered *"Skip for now"* to
+  /// onboarding's second question could never take up that role: no error, no
+  /// wrong screen, nothing to press.
+  ///
+  /// **Framed as two people, never as two roles**, which is the same rule
+  /// PLAN.md fixes for the onboarding questions these mirror: *"Are you the
+  /// elderly one?"* is a question nobody wants to answer, so the app asks about
+  /// **other people** and derives the role from the answer. These are those two
+  /// questions in their shortest form.
+  ///
+  /// This costs the watched person nothing in daily use — the chooser is behind
+  /// a secondary button they press once, if ever — which is why it was
+  /// preferred to a permanent second control on the screen `guidelines.md`
+  /// keeps to one action.
+  static const String addSomeoneToWatchMe = 'Someone to look after me';
+
+  static const String addSomeoneIWatch = 'Someone I look after';
 
 }

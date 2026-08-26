@@ -59,16 +59,14 @@ class InviteService {
       final result = await _functions.httpsCallable('createInvite').call();
       data = asMap(result.data);
     } on FirebaseFunctionsException catch (e) {
-      return InviteRefused(
-        e.code == 'unauthenticated'
-            ? InviteRefusal.notSignedIn
-            : InviteRefusal.couldNotReach,
-      );
+      return InviteRefused(inviteRefusalForCode(e.code));
     } on Object {
-      // A platform fault, a dead socket, a response that is not a map. Nothing
-      // was created, and "try again" is the honest next action — which is what
-      // `couldNotReach` means and why it is distinct from every refusal.
-      return const InviteRefused(InviteRefusal.couldNotReach);
+      // Not the network branch. A dead socket surfaces as `unavailable` or
+      // `deadline-exceeded` on the exception above; what lands here is a
+      // platform fault — a missing plugin, a channel error, a type this build
+      // did not expect. Nothing was created, and the only claim that is true of
+      // all of them is that it did not work.
+      return const InviteRefused(InviteRefusal.serverFault);
     }
 
     return inviteFrom(data);
@@ -88,7 +86,7 @@ class InviteService {
         final code = data['code'];
         final expiresAt = data['expiresAt'];
         if (code is! String || expiresAt is! String) {
-          return const InviteRefused(InviteRefusal.couldNotReach);
+          return const InviteRefused(InviteRefusal.serverFault);
         }
         final parsed = DateTime.tryParse(expiresAt);
         // **An offset-less timestamp is refused, not repaired.**
@@ -103,20 +101,55 @@ class InviteService {
         //
         // The Function sends ISO-8601 with a `Z` (`toISOString()`), so an
         // offset-less string is a malformed payload from a backend this build
-        // does not understand — which is what `couldNotReach` is for.
+        // does not understand — which is what `serverFault` is for. It was
+        // `couldNotReach` until Phase 5 closed, which told somebody who had just
+        // received a payload to go and check their internet connection.
         if (parsed == null || !parsed.isUtc) {
-          return const InviteRefused(InviteRefusal.couldNotReach);
+          return const InviteRefused(InviteRefusal.serverFault);
         }
         return InviteReady(code: code, expiresAt: parsed);
       case 'watched-profile-missing':
         return const InviteRefused(InviteRefusal.profileMissing);
       default:
-        // A status this build has no case for. Reported as unreachable rather
-        // than guessed at: every other sentence would be a claim about what
-        // happened, and this build does not know.
-        return const InviteRefused(InviteRefusal.couldNotReach);
+        // A status this build has no case for — a backend a version ahead of
+        // this APK. Not guessed at, and **not** reported as unreachable: the
+        // phone carried a request and read an answer, so the one sentence that
+        // names the internet is the one sentence that is certainly false.
+        return const InviteRefused(InviteRefusal.serverFault);
     }
   }
+
+  /// A `FirebaseFunctionsException` code, as the sentence a reader gets.
+  ///
+  /// **Lifted out of the `catch` so it can be tested at all.** The status
+  /// mapping below it has been a pure function since this class was written;
+  /// this half sat inside an exception handler no unit test can enter, and it
+  /// was wrong — every code that was not `unauthenticated` produced *"Could not
+  /// reach the internet"*, including `internal` (the transaction failed on the
+  /// far side), `not-found` (the region is wrong, ADR-0011's own trap) and
+  /// `permission-denied` (App Check, once it is enforced).
+  ///
+  /// Only the two codes that actually mean *the request did not get there* keep
+  /// [PairingRefusal.couldNotReach]. Everything else claims nothing about either
+  /// side. gRPC's `unavailable` covers a dead radio and a refused connection;
+  /// `deadline-exceeded` covers a request that went out and never came back —
+  /// unreachable *from this phone's point of view*, which is all the sentence
+  /// claims.
+  static PairingRefusal refusalForCode(String code) => switch (code) {
+        'unauthenticated' => PairingRefusal.notSignedIn,
+        'unavailable' || 'deadline-exceeded' => PairingRefusal.couldNotReach,
+        _ => PairingRefusal.serverFault,
+      };
+
+  /// [refusalForCode]'s twin for `createInvite`. Same three answers, same
+  /// reasoning; a separate enum because the two screens refuse for different
+  /// sets of reasons and one enum would let a caller handle a case that cannot
+  /// happen on its screen.
+  static InviteRefusal inviteRefusalForCode(String code) => switch (code) {
+        'unauthenticated' => InviteRefusal.notSignedIn,
+        'unavailable' || 'deadline-exceeded' => InviteRefusal.couldNotReach,
+        _ => InviteRefusal.serverFault,
+      };
 
   /// Turns a code somebody was given into a link, with this phone as the
   /// **watcher**.
@@ -139,13 +172,9 @@ class InviteService {
           .call<Object?>({'code': code});
       data = asMap(result.data);
     } on FirebaseFunctionsException catch (e) {
-      return PairingRefused(
-        e.code == 'unauthenticated'
-            ? PairingRefusal.notSignedIn
-            : PairingRefusal.couldNotReach,
-      );
+      return PairingRefused(refusalForCode(e.code));
     } on Object {
-      return const PairingRefused(PairingRefusal.couldNotReach);
+      return const PairingRefused(PairingRefusal.serverFault);
     }
 
     return pairingFrom(data);
@@ -162,7 +191,9 @@ class InviteService {
         final watchedName = data['watchedName'];
         final linkId = data['linkId'];
         if (linkId is! String || linkId.isEmpty) {
-          return const PairingRefused(PairingRefusal.couldNotReach);
+          // The pairing may well have happened; this build cannot say so,
+          // because the id it would record it under is not in the payload.
+          return const PairingRefused(PairingRefusal.serverFault);
         }
         return Paired(
           watchedName: watchedName is String ? watchedName : '',
@@ -184,7 +215,7 @@ class InviteService {
       case 'unusable-timezone':
         return const PairingRefused(PairingRefusal.unusableTimezone);
       default:
-        return const PairingRefused(PairingRefusal.couldNotReach);
+        return const PairingRefused(PairingRefusal.serverFault);
     }
   }
 

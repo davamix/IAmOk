@@ -273,6 +273,11 @@ class WatchedReconcileService {
         exact = await alarms.apply(
           toCancel: result.toCancel,
           desired: result.desired,
+          // The 21:00 wording, and nothing else. Read off the same reconcile
+          // that produced the reminders, so the notification and the Tap
+          // screen's own audience line cannot disagree about whether anybody
+          // is set up.
+          hasAudience: result.audience.isNotEmpty,
         );
 
         // Recorded only after the platform calls returned. A crash in between

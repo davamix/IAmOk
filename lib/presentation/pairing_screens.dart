@@ -261,6 +261,20 @@ class _CodeOnOffer extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
+    // **The same expiry sentence the screen shows, in the message that leaves
+    // the phone.** Read here rather than inside the share callback so the two
+    // cannot disagree: what the sender reads above the button is what the
+    // recipient receives. Null when device facts are not loaded, which is the
+    // state `_ExpiryLine` renders nothing in — the message then goes without
+    // it rather than not going.
+    final facts = ref.watch(deviceFactsProvider).value;
+    final expiry = facts == null
+        ? null
+        : OnboardingCopy.codeExpiry(
+            expiresAt: ready.expiresAt,
+            zone: facts.zone,
+            uses24Hour: facts.uses24Hour,
+          );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -272,7 +286,9 @@ class _CodeOnOffer extends ConsumerWidget {
         const SizedBox(height: 32),
         FilledButton.tonalIcon(
           onPressed: () => SharePlus.instance.share(
-            ShareParams(text: OnboardingCopy.shareMessage(ready.code)),
+            ShareParams(
+              text: OnboardingCopy.shareMessage(ready.code, expiry: expiry),
+            ),
           ),
           icon: const Icon(Icons.share),
           label: const Text(OnboardingCopy.shareCode),

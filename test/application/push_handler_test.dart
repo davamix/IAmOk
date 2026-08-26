@@ -199,6 +199,14 @@ void main() {
 }
 
 String _withoutComments(String source) => source
+    // **CRLF first, and this is not cosmetic.** Git for Windows defaults to
+    // `core.autocrlf=true`, so a fresh clone checks these files out with CRLF
+    // while the repo stores LF. Every lint below that spans two lines would
+    // then fail on a machine where nothing is wrong — a red suite produced by
+    // the checkout, on the tests whose whole job is to be trusted. Measured:
+    // one `git checkout lib/main.dart` on 2026-08-26 broke
+    // `push_handler_test`'s two-line listener lint and nothing else.
+    .replaceAll('\r\n', '\n')
     .replaceAll(RegExp(r'/\*.*?\*/', dotAll: true), '')
     .split('\n')
     .map((line) {

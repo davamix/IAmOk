@@ -8,8 +8,13 @@
 # `create` on `links/{id}` outright — a rules test asserts that, including for
 # the watched person themselves.
 #
-# `redeemInvite` is Phase 5. Phase 4 still has to prove a tap on one device
-# updates another, and that needs a link to exist. So this writes one the way the
+# `redeemInvite` shipped in Phase 5, so this is no longer the only way to make a
+# link — but it is still the only way to make the device rig's deliberate
+# SELF-LINK, which `redeemInviteFor` refuses by name (a link to yourself would
+# warn you about your own missed day and name you as your own watcher).
+# `functions/src/invites.ts` points back at this script for that reason. Keep it.
+#
+# It also remains the way to seed a link when a test needs one to exist. So this writes one the way the
 # Function will: the same fields, the same deterministic id, `activeFrom` as
 # today in the WATCHED person's zone.
 #

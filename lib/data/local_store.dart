@@ -462,6 +462,12 @@ class LocalStore {
     _keyOnboardingWatched,
     _keyOnboardingWatcher,
     _keyOnboardingCompleted,
+    // *"The last reconcile failed on at least one watched link"* is a statement
+    // about the **departing** account's links, so it goes with them. It is a
+    // bool and carries no PII, so leaving it was stale state rather than a leak
+    // — but §13's health panel reads it in Phase 7, and a red row inherited from
+    // the previous user is a claim about this one.
+    _keyLinkReconcileFailed,
   ];
 
   Future<String?> _setting(String key) async {

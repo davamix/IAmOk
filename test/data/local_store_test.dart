@@ -760,12 +760,24 @@ void main() {
   group('signing out', () {
     test('takes the uid, the answers and the per-link cache', () async {
       await store.setSelfUid('mum');
+      // The name says "per-link cache" and the assertions only reached `links`.
+      // `clearSelfUid`'s own docstring says why the rest matters: *"Leaving them
+      // would let the next account inherit standing warnings about a person it
+      // has never heard of — and, worse, inherit the alarms."* Dropping
+      // `warnings_shown` from that list left the suite green.
       await store.setOnboardingChoices(const OnboardingChoices(
         wantsToBeWatched: true,
         wantsToWatch: true,
         completed: true,
       ));
       await store.upsertLink(linkTo('ana'));
+      await store.saveWatcherCache(
+        'mum_ana',
+        WatcherCache(
+          lastConfirmedDay: day('2026-08-25'),
+          warningsShownFor: {day('2026-08-25'): WarningOutcome.warnOnline},
+        ),
+      );
 
       await store.clearSelfUid();
 
@@ -777,6 +789,12 @@ void main() {
             'answers, and HomeRoute unions rather than overrides',
       );
       expect(await store.allLinks(), isEmpty);
+      expect(
+        (await store.watcherCache('mum_ana')).warningsShownFor,
+        isEmpty,
+        reason: 'the next account would inherit a standing warning about '
+            'somebody it has never heard of',
+      );
     });
 
     test('KEEPS the device facts, which belong to the phone', () async {

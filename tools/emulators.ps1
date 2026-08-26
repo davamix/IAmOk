@@ -45,12 +45,26 @@
 # stale function — and one that looks like it is running. This builds first
 # rather than trusting whoever last ran `tsc`.
 #
-# **State survives a restart.** `--import` / `--export-on-exit` keep the signed-in
-# users, the links and the check-ins between runs. That matters more here than it
-# looks: a link is Function-written, so re-creating one by hand every session is
-# how people quietly start testing against production instead. The export
-# directory is git-ignored — an export of real check-in history in the repo is a
-# threat-model problem, see docs/security/secrets-policy.md.
+# **State survives a CLEAN EXIT.** `--import` / `--export-on-exit` keep the
+# signed-in users, the links and the check-ins between runs. That matters more
+# here than it looks: a link is Function-written, so re-creating one by hand every
+# session is how people quietly start testing against production instead. The
+# export directory is git-ignored — an export of real check-in history in the repo
+# is a threat-model problem, see docs/security/secrets-policy.md.
+#
+# **`--export-on-exit` runs ONLY on a clean Ctrl-C.** A kill, a crash, or a
+# `Stop-Process` discards everything since the last export **with no message at
+# all** — and the next run then prints "Importing saved state" over a stale
+# directory and looks entirely successful. That happened at the end of Phase 5:
+# the suite was killed, so the pairing created that day is not in `emulator-data/`
+# while the AVD's local store still references those uids. The import line below
+# now prints the export's DATE for exactly this reason; if it is older than the
+# device you are about to test with, re-pair rather than trying to reconcile them.
+#
+# Note the tension with `docs/phases/phase-5-brief.md`, which says to start the
+# suite **detached with output redirected** to avoid an EPIPE hang. Detached is
+# what makes Ctrl-C unavailable. If you start it detached, accept that the export
+# will not run, or stop it with a real Ctrl-C into its own console.
 #
 # The rules come from `firestore.rules`, the same file that gets deployed, so
 # what you develop against is what the project enforces. If those two diverge, a
@@ -118,13 +132,21 @@ if ($Device) {
     }
     Write-Host ''
     Write-Host "$Device now reaches this machine on 127.0.0.1 for ports $($ports -join ', ')" -ForegroundColor Yellow
-    Write-Host '  flutter run --dart-define=IAMOK_EMULATOR_HOST=127.0.0.1' -ForegroundColor Yellow
+    Write-Host '  flutter run --dart-define=IAMOK_EMULATOR_HOST=127.0.0.1 `' -ForegroundColor Yellow
+    Write-Host '              --dart-define=IAMOK_EMULATOR_USER=emulator-ana `' -ForegroundColor Yellow
+    Write-Host '              --dart-define=IAMOK_EMULATOR_NAME=Ana' -ForegroundColor Yellow
     Write-Host '  (re-run this script if the cable is unplugged - adb reverse does not survive it)' -ForegroundColor DarkGray
 }
 
 Write-Host ''
 Write-Host 'From the API 36 AVD:' -ForegroundColor DarkGray
-Write-Host '  flutter run --dart-define=IAMOK_EMULATOR_HOST=10.0.2.2' -ForegroundColor DarkGray
+Write-Host '  flutter run --dart-define=IAMOK_EMULATOR_HOST=10.0.2.2 `' -ForegroundColor DarkGray
+Write-Host '              --dart-define=IAMOK_EMULATOR_USER=emulator-mum `' -ForegroundColor DarkGray
+Write-Host '              --dart-define=IAMOK_EMULATOR_NAME=Mum' -ForegroundColor DarkGray
+Write-Host ''
+Write-Host 'TWO DEVICES NEED TWO SUBJECTS. Without IAMOK_EMULATOR_USER both sign in as' -ForegroundColor Yellow
+Write-Host 'the same person, and redeemInvite correctly refuses the self-link — which was' -ForegroundColor Yellow
+Write-Host "a blocker for Phase 5's exit criterion until it was parameterised." -ForegroundColor Yellow
 Write-Host 'Ctrl-C stops the suite and exports its state.' -ForegroundColor DarkGray
 Write-Host ''
 
@@ -139,7 +161,11 @@ $emulatorArgs = @(
 
 if (-not $Fresh -and (Test-Path $data)) {
     $emulatorArgs += @('--import', $data)
-    Write-Host "Importing saved state from $data" -ForegroundColor DarkGray
+    # The DATE, not just the path. A stale import looks identical to a fresh one
+    # otherwise, and a kill produces no export at all — see the header.
+    $exported = (Get-Item (Join-Path $data 'firebase-export-metadata.json') -ErrorAction SilentlyContinue).LastWriteTime
+    Write-Host ("Importing saved state from $data" +
+        $(if ($exported) { " (exported $exported)" } else { ' (no metadata — date unknown)' })) -ForegroundColor DarkGray
 } elseif ($Fresh) {
     Write-Host 'Starting empty (-Fresh)' -ForegroundColor DarkGray
 }

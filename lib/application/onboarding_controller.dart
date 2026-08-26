@@ -113,9 +113,44 @@ class OnboardingController extends Notifier<OnboardingState> {
   /// The uid is handed to [SignedInUid] so `appServicesProvider` rebuilds —
   /// which is what lets the rest of the flow act as the new account without the
   /// restart the debug harness could ask a developer for.
-  void signedIn(String uid) {
+  ///
+  /// ## The links are pulled here, and nothing else would
+  ///
+  /// `main()` runs `syncLinks()` with the **launch-time** uid. On a reinstall
+  /// that is `signedOutUid`, and `LinkRepository.syncInto` returns on its first
+  /// line. So without this, a user who signs in during onboarding has an empty
+  /// link table until the next resume or launch — and `linkRolesProvider`'s own
+  /// docstring claims the opposite (*"`main()` and every resume already run
+  /// `syncLinks()`, so the store is the fresh copy"*), which is false at exactly
+  /// the moment it matters.
+  ///
+  /// The sync runs **after** `signedInAs`, so it runs under the new identity.
+  ///
+  /// ## And a user who is already paired skips the questions entirely
+  ///
+  /// This is the reinstall case `HomeRoute` is built around: the uid survives, so
+  /// the links do. They answered both questions by action, and asking again
+  /// would be the app failing to recognise somebody it is already relaying for.
+  Future<void> signedIn(String uid) async {
     ref.read(signedInUidProvider.notifier).signedInAs(uid);
-    state = state.copyWith(step: OnboardingStep.watchedQuestion);
+
+    final services = ref.read(appServicesProvider);
+    await services.syncLinks();
+    await services.settleOnboardingIfPaired();
+    ref.invalidate(onboardingChoicesProvider);
+    ref.invalidate(linkRolesProvider);
+
+    final choices = await ref.read(onboardingChoicesProvider.future);
+    if (choices.completed) {
+      // Already paired — `settleOnboardingIfPaired` said so, and the router will
+      // now take them straight to their main screen. Nothing to ask.
+      state = state.copyWith(choices: choices);
+      return;
+    }
+    state = OnboardingState(
+      step: OnboardingStep.watchedQuestion,
+      choices: choices,
+    );
   }
 
   /// Screen 1 answered — [wants] is false when they skipped.
@@ -165,6 +200,63 @@ class OnboardingController extends Notifier<OnboardingState> {
     // screen this user lands on, and `linkRolesProvider` read the store before
     // it existed.
     ref.invalidate(linkRolesProvider);
+    await _armWatcherSideIfNobodyElseWill();
+  }
+
+  /// Reconciles the **watcher** side when the router is about to land on the Tap
+  /// screen — because nothing else will.
+  ///
+  /// ## The gap this closes
+  ///
+  /// `_reconcileWatcherSide` runs from `main()`'s post-frame callback, before
+  /// sign-in and before any link exists, and after that only on a resume or a
+  /// foreground push. `watcherStateProvider` — the other thing that reconciles
+  /// that side — only builds when the watcher **list** is on screen.
+  ///
+  /// So a user who finishes onboarding as **both** roles is routed to the Tap
+  /// screen, the list never mounts, and the link created seconds earlier gets
+  /// **no warning alarm** for the rest of the session. That is exactly the
+  /// failure `_reconcileWatcherSide`'s own docstring was written for — *"someone
+  /// who is both watched and watcher lands on the Tap screen by design, so their
+  /// watcher alarms would never be re-armed by opening the app at all"* —
+  /// arriving through the phase that introduced the routing.
+  ///
+  /// Bounded, because `activeFrom` is today so nothing is owed until tomorrow,
+  /// and any resume repairs it. On a dead man's switch, *"most people resume
+  /// before tomorrow morning"* is not the standard this project holds.
+  ///
+  /// ## Only for the Tap route, deliberately
+  ///
+  /// If the router lands on the **watcher list**, that screen's own provider
+  /// reconciles as it builds, with `watcherListShowing: true` → `redundant`.
+  /// Running this as well would be a second pass posting a notification about a
+  /// row the reader is looking at.
+  ///
+  /// `watcherListShowing: false` is correct here and a hard-coded `true` would
+  /// be the lost-warning shape measured on the POCO F3: `redundant` consumes the
+  /// day without posting anything, and nothing is showing it.
+  Future<void> _armWatcherSideIfNobodyElseWill() async {
+    // **Awaited, because an invalidated `FutureProvider` keeps its previous
+    // value while it reloads.** Reading the route straight after invalidating it
+    // returns `onboarding` — the value that was just superseded — so the guard
+    // below would return early every time and this repair would never run. The
+    // widget tree gets the new value by rebuilding; here it has to be waited
+    // for.
+    await ref.read(onboardingChoicesProvider.future);
+    await ref.read(linkRolesProvider.future);
+
+    if (ref.read(homeRouteProvider)?.screen != HomeScreen.tap) return;
+    final services = ref.read(appServicesProvider);
+    if (!services.signedIn) return;
+    try {
+      await services
+          .watcherReconcile(watcherListShowing: false)
+          .reconcile(selfUid: services.selfUid);
+    } on Object {
+      // Swallowed: this is a repair behind the screen the user just reached, and
+      // it must never be able to replace it with an error about a reconcile they
+      // did not ask for. The next resume runs it again.
+    }
   }
 
   /// Records a pairing that just happened, so the flow's own answers match the

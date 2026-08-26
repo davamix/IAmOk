@@ -201,7 +201,15 @@ export const createInvite = onCall(async (request) => {
     logger.info('createInvite: issued', { watchedUid, reused: result.reused });
     return { status: 'created', ...result };
   } catch (error) {
-    logger.error('createInvite: failed', { watchedUid, error });
+    // **The error's `code`, never the error.** A Firestore Admin error embeds
+    // the document path, and an `ALREADY_EXISTS` from `invites.doc(code)
+    // .create()` renders the colliding code — which is somebody **else's live
+    // invite**, since that is why it collided. The line three above promises no
+    // code is ever logged; this is what makes that true rather than nearly true.
+    logger.error('createInvite: failed', {
+      watchedUid,
+      code: (error as { code?: unknown }).code,
+    });
     throw new HttpsError('internal', 'Could not create a code.');
   }
 });
@@ -211,10 +219,35 @@ export const createInvite = onCall(async (request) => {
  *
  * The caller's uid is the watcher and is never taken from the request body; the
  * watched party comes out of the invite document, which no client may read (§8).
- * So the only thing this call reveals to a redeemer is what §7 already
- * denormalises onto the link they now hold — a display name — and never a uid.
+ *
+ * **On a refusal nothing but a status is returned.** On success the result
+ * carries `linkId`, which is `{watchedUid}_{watcherUid}` — so a redeemer does
+ * learn the watched person's uid, and has to: it is what makes
+ * `checkins/{watchedUid}/days/*` readable, which is the point of the link. §9's
+ * rule is that the client never learns a uid **out of an invite**, and that
+ * holds: no guess, no expired code and no consumed code reveals anything.
  */
-export const redeemInvite = onCall(async (request) => {
+export const redeemInvite = onCall(
+  {
+    // **The only rate limit in the system, and it is load-bearing.**
+    //
+    // `setGlobalOptions` gives every function `maxInstances: 10` and the 2nd-gen
+    // default `concurrency: 80` — so deployed as-is this callable would accept
+    // **800 concurrent** guesses. `OPEN-QUESTIONS.md` #11 accepts the guessing
+    // risk on an argument with no rate term in it (32^6 codes, single-use,
+    // 24-hour life), and at 800 in flight the expected time to a first hit falls
+    // *inside* one code's lifetime rather than outside it. The arithmetic was
+    // right about the keyspace and silent about the throughput.
+    //
+    // `concurrency: 1` with `maxInstances: 3` caps sustained attempts at roughly
+    // fifteen a second. That costs a family nothing — pairing is a once-per
+    // relationship call and a cold start on it is invisible — and it is what
+    // makes #11's acceptance true rather than nearly true. It is not a
+    // substitute for App Check enforcement; it is what holds until then.
+    concurrency: 1,
+    maxInstances: 3,
+  },
+  async (request) => {
   const watcherUid = callerUid(request.auth);
 
   // Shape-checked here as well as on the client, because functions bypass the
@@ -246,7 +279,14 @@ export const redeemInvite = onCall(async (request) => {
     });
     return outcome;
   } catch (error) {
-    logger.error('redeemInvite: failed', { watcherUid, error });
+    // The code, never the error — see `createInvite` above. The path in a
+    // Firestore error here is `invites/{code}`, which is the one string on this
+    // call that is a bearer credential.
+    logger.error('redeemInvite: failed', {
+      watcherUid,
+      code: (error as { code?: unknown }).code,
+    });
     throw new HttpsError('internal', 'Could not use that code.');
   }
-});
+  },
+);

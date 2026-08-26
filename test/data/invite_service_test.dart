@@ -65,6 +65,12 @@ void main() {
         {'status': 'created', 'expiresAt': '2026-08-27T09:00:00.000Z'},
         {'status': 'created', 'code': 'K7RTQX'},
         {'status': 'created', 'code': 'K7RTQX', 'expiresAt': 'not-a-date'},
+        // **An offset-less timestamp is refused, not repaired.** `tryParse`
+        // yields a LOCAL instant for this, so a `.toUtc()` would shift it by
+        // the device's offset rather than rescuing it — and the rendered
+        // expiry would then differ between two phones reading the same code.
+        // The Function always sends a `Z`, so this is a malformed payload.
+        {'status': 'created', 'code': 'K7RTQX', 'expiresAt': '2026-08-27T09:00:00'},
         {'status': 'created', 'code': 42, 'expiresAt': '2026-08-27T09:00:00Z'},
       ]) {
         expect(

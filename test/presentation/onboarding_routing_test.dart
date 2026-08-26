@@ -22,6 +22,23 @@ import 'package:i_am_ok/presentation/watcher_screen.dart';
 /// hangs). So the wire between the decision and the screen had no coverage at
 /// all, which is exactly the shape of gap this project keeps finding: the claim
 /// was true and nothing checked the thing it described.
+///
+/// ## One link in that wire is still uncovered, and this says so rather than
+/// implying otherwise
+///
+/// What follows covers `Home.screenFor` — the mapping — and the parameter it
+/// passes. It does **not** cover `Home.build`, which is
+/// `screenFor(ref.watch(homeRouteProvider))`: that one line could read the wrong
+/// provider, or pass `null` unconditionally, and every assertion here would
+/// still pass.
+///
+/// Closing it was attempted at the Phase 5 review and **abandoned deliberately**:
+/// pumping `Home` inside a real `ProviderContainer` hangs with no output, which
+/// is the same behaviour `app_lifecycle_test.dart` records for pumping
+/// `IAmOkApp` and gives as its reason for not doing so. Rather than leave a
+/// hanging test or a green one that proves nothing, the gap is named here and in
+/// `docs/phases/phase-5-summary.md`. It is one line, and it is the line a device
+/// run exercises every time.
 void main() {
   TimeZones.ensureInitialized();
   final madrid = TimeZones.location('Europe/Madrid');

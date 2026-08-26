@@ -70,6 +70,21 @@ class _WatcherScreenState extends ConsumerState<WatcherScreen>
     super.initState();
     WatcherScreen._showing++;
     WidgetsBinding.instance.addObserver(this);
+    // **Ask once, here too.** `ensureNotificationsAsked` was called from
+    // `TapScreen` and nowhere else, which covered everybody while the Tap screen
+    // was home. Phase 5's routing sends a watcher-only user straight here — and
+    // on API 33+ `POST_NOTIFICATIONS` is denied by default, so their very first
+    // screen was a red banner about a permission the app had never requested.
+    //
+    // That is the watcher: the person whose entire role is *receiving warnings*,
+    // and whom §13 rates High precisely because Android takes the permission
+    // back from apps nobody opens.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      unawaited(
+        ref.read(watcherStateProvider.notifier).ensureNotificationsAsked(),
+      );
+    });
   }
 
   @override
@@ -256,14 +271,25 @@ class EnterCodeButton extends ConsumerWidget {
         icon: const Icon(Icons.person_add_alt),
         // An unlabelled icon button is a control a screen-reader user cannot
         // identify at all.
-        tooltip: OnboardingCopy.addSomeone,
+        // **"I have a code", not "Add someone".** Both main screens carried a
+        // button labelled *Add someone*, and they do opposite things: the Tap
+        // screen's *produces* a code, this one *consumes* one. A watcher who
+        // installed the app first, has no code, and reads "You're not looking
+        // after anyone." pressed the only button on the screen and landed on a
+        // form demanding an artefact that does not exist yet — while the
+        // sentence that used to point them at the person who can make one is
+        // exactly what this phase deleted.
+        //
+        // `watcherAction` is already approved: it is onboarding screen 2's
+        // action for this identical action.
+        tooltip: OnboardingCopy.watcherAction,
       );
     }
     return FilledButton.tonalIcon(
       key: buttonKey,
       onPressed: () => unawaited(open()),
       icon: const Icon(Icons.person_add_alt),
-      label: const Text(OnboardingCopy.addSomeone),
+      label: const Text(OnboardingCopy.watcherAction),
       style: ButtonStyle(
         // `guidelines.md`: 48dp floor for secondary controls, no exceptions.
         minimumSize: WidgetStateProperty.all(const Size(0, 48)),

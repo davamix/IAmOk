@@ -9,7 +9,18 @@
 import { after, before, beforeEach, describe, it } from 'node:test';
 
 import { assertFails, assertSucceeds } from '@firebase/rules-unit-testing';
-import { deleteDoc, doc, getDoc, updateDoc, setDoc, Timestamp } from 'firebase/firestore';
+import {
+  collection,
+  deleteDoc,
+  doc,
+  getDoc,
+  getDocs,
+  query,
+  setDoc,
+  Timestamp,
+  updateDoc,
+  where,
+} from 'firebase/firestore';
 
 import {
   ANA,
@@ -115,5 +126,35 @@ describe('links — create and delete are Function-only', () => {
   it('denies deleting a link', async () => {
     await assertFails(deleteDoc(anaLink(dbAs(ANA))));
     await assertFails(deleteDoc(anaLink(dbAs(MUM))));
+  });
+
+  // **The first QUERY this app runs against `links/`.**
+  //
+  // Everything else reads a link by its deterministic id. Phase 5's
+  // `LinkRepository.watchWatchedBy` is a `where('watchedUid','==',uid)`
+  // snapshot listener, which the rule at `links/{linkId}` admits because the
+  // constraint is exactly what `isParty()` checks — but no test covered that
+  // shape, and both directions fail differently.
+  //
+  // If the rule were loosened, the denied case below is somebody enumerating a
+  // stranger's watcher list, which is the link graph the threat model rates
+  // High. If it were tightened, the allowed case is the pairing screen's
+  // listener erroring — and that stream's `onError` swallows, so the symptom is
+  // a confirmation that never arrives with nothing on any surface.
+  it('allows a query for links where you are the watched party', async () => {
+    await assertSucceeds(
+      getDocs(query(collection(dbAs(MUM), 'links'), where('watchedUid', '==', MUM))),
+    );
+  });
+
+  it("denies the same query for somebody else's uid", async () => {
+    await assertFails(
+      getDocs(query(collection(dbAs(ANA), 'links'), where('watchedUid', '==', MUM))),
+    );
+    await assertFails(
+      getDocs(
+        query(collection(dbAs(STRANGER), 'links'), where('watchedUid', '==', MUM)),
+      ),
+    );
   });
 });

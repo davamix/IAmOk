@@ -101,8 +101,35 @@ Redemption goes through the `redeemInvite` callable, which is the only place a c
 
 The residual risk is online guessing against that callable. At family scale with short expiry the
 odds are negligible, but the callable should rate-limit per caller and per code, and App Check
-raises the cost of automating it. **Worth revisiting in Phase 5 when the callable is actually
-written** — the number of *live* codes at any moment is what matters, not the size of the keyspace.
+raises the cost of automating it. ~~Worth revisiting in Phase 5 when the callable is actually
+written~~ — the number of *live* codes at any moment is what matters, not the size of the keyspace.
+
+> **Revisited in Phase 5, when the callable was written, and it shipped WITHOUT a per-caller
+> counter.** Recorded here as a position rather than left reading as though the revisit had not
+> happened.
+>
+> What was done: the expiry is **24 hours**, `invites/` stays unreadable *and* unwritable by every
+> client ([ADR-0011](../architecture/decisions/0011-creating-an-invite-is-a-function-too.md)), and
+> `redeemInvite` is deployed with **`concurrency: 1, maxInstances: 3`**. That last one is not
+> tuning — without it the 2nd-gen defaults give `maxInstances: 10 × concurrency: 80` = **800
+> concurrent guesses**, at which rate a first hit is expected *inside* one code's 24-hour life. The
+> cap is what makes the "odds are negligible" sentence above true; it is load-bearing and must not be
+> raised without redoing the sum.
+>
+> What was **not** done: a per-caller or per-code failure counter. It is a Firestore document per uid
+> on the pairing path, with contention and its own failure modes, for a threat the cap now bounds.
+>
+> Two things the original entry understated, both corrected in `OPEN-QUESTIONS.md` #11: a successful
+> redemption **does** return the watched person's uid (inside `linkId`, necessarily — it is what
+> makes their check-ins readable), and a guessed link grants **read and write on
+> `users/{watchedUid}/shared/away`**, so a stranger could suppress every watcher's warning for ~32
+> days, renewably. That produces silence, which is the failure direction this app cannot detect in
+> itself.
+>
+> **App Check enforcement is the designed control, and for these two callables it is a code change** —
+> `enforceAppCheck: true` in the `onCall` options, deployed from this repo — **not the console toggle
+> the App Check section describes.** Flipping the console switch alone would leave both callables
+> open while this document said the control was on.
 
 ### T4 — Pushing a forged notification to a watcher
 
@@ -272,7 +299,10 @@ added.
 
 ## Open, and owed a decision
 
-- **T3 residual** — rate limiting on `redeemInvite`. Phase 5.
+- **T3 residual** — a per-caller failure counter on `redeemInvite`. **Phase 5 shipped without one,
+  deliberately**, and bounded the rate with `concurrency: 1, maxInstances: 3` instead; see T3 above
+  and `OPEN-QUESTIONS.md` #11. Revisit with App Check enforcement, which for a 2nd-gen callable is a
+  code change rather than a console toggle.
 - **T9** — the account-deletion path and what happens to links and history. Before Phase 8.
 - **T9, on-device** — the retention bound for `warnings_shown`, which currently keeps every missed
   day for ever. Recorded above; owed before Phase 8's privacy policy describes it.

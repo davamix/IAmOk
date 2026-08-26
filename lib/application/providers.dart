@@ -138,8 +138,95 @@ class AppServices {
     }
   }
 
+  /// Marks onboarding complete when this account **already has links**.
+  ///
+  /// ## Why this exists rather than living in `HomeRoute.decide`
+  ///
+  /// Two different questions were being answered by one expression: *is
+  /// onboarding over* and *does this user have a role*. Unioning them meant
+  /// answering a question mid-flow ended the flow — the summary screen was
+  /// unreachable, measured on two phones — and a flow killed between question 1
+  /// and *Finish* never resumed.
+  ///
+  /// `HomeRoute.decide` now ends onboarding on `completed` alone. This is what
+  /// keeps the reinstall case working: §1 chose Google Sign-In because **the uid
+  /// survives a reinstall, so links never break**, so a wiped store can belong to
+  /// somebody already watching three people. For them the two questions were
+  /// answered by **action**, and asking again would be the app failing to
+  /// recognise somebody it is already relaying for.
+  ///
+  /// Called from `main()` after `syncLinks()`, and again after an in-app
+  /// sign-in — the two moments a link set can appear under a store that has
+  /// never seen it.
+  ///
+  /// **Idempotent, and it never un-completes.** It only ever sets the flag, only
+  /// when there is an accepted link, and it returns immediately once the flow is
+  /// complete — so it cannot interrupt somebody who is mid-flow *and* paired,
+  /// which is the ordinary state of anyone who just used the code screen.
+  ///
+  /// Never allowed to fail its caller, the same rule as [cacheDeviceFacts] and
+  /// [syncLinks]: this runs before the first frame, and the worst it can cost is
+  /// one extra pass through two questions.
+  Future<void> settleOnboardingIfPaired() async {
+    try {
+      final choices = await store.onboardingChoices();
+      if (choices.completed || !signedIn) return;
+
+      // `LocalStore`'s two names read the opposite way round to these — see
+      // `linkRolesProvider`, which spells the same trap out at its own call
+      // site.
+      final somebodyWatchesMe = await store.linksWatching(selfUid);
+      final iWatchSomebody = await store.linksWatchedBy(selfUid);
+      final paired = somebodyWatchesMe.any((link) => link.isAccepted) ||
+          iWatchSomebody.any((link) => link.isAccepted);
+      if (!paired) return;
+
+      await store.setOnboardingChoices(choices.copyWith(completed: true));
+    } on Object {
+      // Swallowed deliberately; see above.
+    }
+  }
+
   /// `users/{uid}` and its token subcollection (§7). UI isolate only.
   UserRepository get users => UserRepository();
+
+  /// Re-writes `users/{uid}` from what this device currently knows.
+  ///
+  /// ## Without this, three approved sentences name an action that cannot work
+  ///
+  /// `upsert` had exactly **one** caller — the sign-in screen — so nothing
+  /// re-wrote the profile afterwards, ever. That made three refusals dishonest,
+  /// and worse than a dead end, because a dead end at least stops:
+  ///
+  /// - `InviteRefusal.profileMissing` and `PairingRefusal.watcherProfileMissing`
+  ///   both say *"This phone could not finish getting ready. Try again."* and
+  ///   offer a **Try again** button that re-ran the identical failing call.
+  /// - `watchedProfileMissing` and `unusableTimezone` say *"Ask them to open
+  ///   I Am Ok on their phone, then try again."* — and opening the app did not
+  ///   re-write their profile or their timezone, so the family could carry out
+  ///   the instruction any number of times and nothing would change.
+  ///
+  /// Called on **resume**, which is also where `guidelines.md`'s *health is
+  /// state, not a gate* principle puts it: the timezone is a device fact that
+  /// changes while the app is backgrounded, and `redeemInvite` denormalises it
+  /// onto every link it creates.
+  ///
+  /// Never allowed to fail its caller, the same rule as [cacheDeviceFacts]: a
+  /// write that throws leaves the previous document, which is the correct
+  /// outcome, and an exception escaping into a resume would replace whatever
+  /// screen the reader opened.
+  Future<void> refreshProfile() async {
+    if (!signedIn) return;
+    try {
+      await users.upsert(
+        uid: selfUid,
+        displayName: auth.displayName ?? 'Someone',
+        timezone: await store.deviceTimezone() ?? 'Etc/UTC',
+      );
+    } on Object {
+      // Swallowed deliberately; see above.
+    }
+  }
 
   /// Pairing — the two callables (§6, §9). **UI isolate only.**
   ///
@@ -539,6 +626,29 @@ class WatcherStateNotifier extends AsyncNotifier<WatcherState> {
     state = value == null
         ? next
         : AsyncData(value.copyWith(userInitiated: false));
+  }
+
+  /// Asks for `POST_NOTIFICATIONS` once, on first run — **on this side too.**
+  ///
+  /// The twin of `WatchedStateNotifier.ensureNotificationsAsked`, and it did not
+  /// exist until Phase 5 routed on role. Before that the Tap screen was home and
+  /// asked for everybody; now a **watcher-only** user never sees it, and on API
+  /// 33+ the permission is denied by default — so their very first screen was
+  /// the red *"This phone will not warn you about anyone."* banner, about a
+  /// permission the app had never requested.
+  ///
+  /// This is the person whose entire role is receiving warnings. §13 rates their
+  /// losing the permission High precisely because Android takes it back from
+  /// apps nobody opens, and starting them out without it is that state on day
+  /// one.
+  ///
+  /// Only asks when the OS says notifications are currently off, so a granted
+  /// install never sees a prompt.
+  Future<void> ensureNotificationsAsked() async {
+    final services = ref.read(appServicesProvider);
+    if (await services.permissions.notificationsEnabled()) return;
+    await services.permissions.requestNotifications();
+    await refresh();
   }
 
   /// The warnings-off banner's action, then a full reconcile so the banner

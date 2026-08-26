@@ -247,6 +247,18 @@ abstract final class OnboardingCopy {
   static const String summaryNothing =
       'Nobody is set up yet. You can add someone at any time.';
 
+  /// This phone could not read back what was set up.
+  ///
+  /// **Its own sentence, because the alternative is silence.** Without it a
+  /// failed read renders as the empty state — *"Nobody is set up yet"* — which is
+  /// a claim about the account made by a device that just failed to find out.
+  /// Somebody who has in fact paired would be told they had not.
+  ///
+  /// It claims nothing either way and names the screen that can answer, which is
+  /// the same shape as the four warning messages: say what is actually known.
+  static const String summaryUnknown =
+      'This phone could not check what is set up. Your main screen will show it.';
+
   /// The one instruction the watched person needs, and the last thing they read.
   static const String summaryTapDaily = 'Tap once a day. That is all.';
 

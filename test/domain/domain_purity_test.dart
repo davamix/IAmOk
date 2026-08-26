@@ -44,6 +44,10 @@ void main() {
     // Returns a LOCAL DateTime — the same implicit-zone hazard as .toLocal(),
     // in a codebase whose whole thesis is that the zone is stated explicitly.
     'DateTime.parse(': 'parses to the device zone unless the string has an offset',
+    // The same hazard, and NOT a substring of the line above — so it walked
+    // straight through this guard until Phase 5 used it in `InviteService`.
+    'DateTime.tryParse(':
+        'parses to the device zone unless the string has an offset',
   };
 
   const banned = <String, String>{
@@ -213,6 +217,16 @@ void main() {
           'the charger does not keep showing "you already tapped today" on a '
           'day she has not. It schedules a REDRAW, not a decision, and it '
           'computes the wait from the injected Clock.',
+    },
+    'lib/data/invite_service.dart': {
+      'DateTime.tryParse(':
+          'parses the invite expiry off the wire, which is a value the BACKEND '
+          'decided rather than a clock this device read. The hazard the ban '
+          'exists for is the implicit zone, and it is closed here rather than '
+          'exempted: the result is REFUSED unless `isUtc`, because an '
+          'offset-less string parses to the device zone and would render a '
+          'different expiry on every phone. Nothing decides anything from it — '
+          'it is rendered.',
     },
   };
 

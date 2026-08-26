@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:share_plus/share_plus.dart';
@@ -8,6 +9,7 @@ import 'package:share_plus/share_plus.dart';
 import '../application/onboarding_controller.dart';
 import '../application/providers.dart';
 import '../copy/onboarding_copy.dart';
+import '../copy/tap_copy.dart';
 import '../domain/domain.dart';
 import 'onboarding_screen.dart';
 
@@ -65,10 +67,43 @@ class _ShareCodeScreenState extends ConsumerState<ShareCodeScreen> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      // **The baseline comes from the STORE, before the stream is attached.**
+      //
+      // It used to be seeded from the first snapshot, which is wrong in two
+      // ways. A redemption that beat the first snapshot — a slow first listen, a
+      // phone briefly offline, the other person typing fast — was swallowed into
+      // the baseline, and the screen then waited for ever on a pairing that had
+      // already happened. And the first snapshot is Firestore's answer, whereas
+      // the question this screen asks is *who was watching me when I opened
+      // it*, which the local store already knows and §3 makes the thing every
+      // other surface renders from.
+      await _seedBaseline();
+      if (!mounted) return;
       unawaited(_createCode());
       _listenForRedemption();
     });
+  }
+
+  Future<void> _seedBaseline() async {
+    final services = ref.read(appServicesProvider);
+    if (!services.signedIn) return;
+    try {
+      // `linksWatching` is `watched_uid = me` — the people watching *me*. The
+      // store's two names read the opposite way round to their meaning.
+      final links = await services.store.linksWatching(services.selfUid);
+      _knownWatchers = {
+        for (final link in links)
+          if (link.isAccepted) link.watcherUid,
+      };
+    } on Object {
+      // An empty baseline is the safe direction: it means the first watcher the
+      // stream reports is treated as new, so the reader is told about a pairing
+      // that may already have existed. Telling somebody about a real link is
+      // survivable; missing the one they are waiting for is what this screen is
+      // for.
+      _knownWatchers = <String>{};
+    }
   }
 
   @override
@@ -99,7 +134,7 @@ class _ShareCodeScreenState extends ConsumerState<ShareCodeScreen> {
           for (final link in links)
             if (link.isAccepted) link.watcherUid: link.watcherName,
         };
-        final baseline = _knownWatchers ??= accepted.keys.toSet();
+        final baseline = _knownWatchers ??= <String>{};
         final arrived = accepted.keys.where((uid) => !baseline.contains(uid));
         if (arrived.isEmpty) return;
 
@@ -107,7 +142,35 @@ class _ShareCodeScreenState extends ConsumerState<ShareCodeScreen> {
         // already there rather than racing the next reconcile for it.
         await services.syncLinks();
         if (!mounted) return;
-        setState(() => _newWatcherName = accepted[arrived.first] ?? '');
+
+        // **The baseline moves HERE, at the moment of confirmation.**
+        //
+        // `_addAnother` used to clear it to null instead, with a comment saying
+        // the new watcher "joins the baseline". It did not: clearing it deferred
+        // the baseline to the *next* emission, and the next emission is the one
+        // caused by the second redemption — which then computed a baseline that
+        // already contained the second watcher, found nobody new, and returned.
+        // The screen sat on *"Waiting for them to type it in."* for ever on a
+        // pairing that had succeeded, which is the one thing "Add someone else"
+        // exists to do.
+        _knownWatchers = accepted.keys.toSet();
+
+        final name = accepted[arrived.first];
+        setState(() => _newWatcherName = name);
+        // **Spoken, not only shown.** Nothing in Flutter re-reads a changed
+        // widget, so without this a blind watched person hears *"Waiting for
+        // them to type it in"* and then hears nothing, for ever — on the screen
+        // whose whole justification is that the person the app is *for* should
+        // not be left staring at an unchanged screen. Already-approved copy;
+        // `WatcherBody` is the pattern, proven on hardware 2026-08-25.
+        if (name != null && name.isNotEmpty) {
+          SemanticsService.sendAnnouncement(
+            View.of(context),
+            OnboardingCopy.nowWatching(name),
+            Directionality.of(context),
+          );
+        }
+
         // The answer to screen 1 now has evidence behind it. Recorded here
         // because this screen is also reachable from the Tap screen, where
         // somebody who once skipped the question has just changed their mind.
@@ -133,7 +196,13 @@ class _ShareCodeScreenState extends ConsumerState<ShareCodeScreen> {
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(24),
           child: switch ((paired, _outcome)) {
-            (final String name, _) => _Paired(
+            // A pairing with an empty name is NOT rendered as a confirmation:
+            // `nowWatching('')` reads *" will now know you're OK."*, which is
+            // the "offline since null" failure `guidelines.md` names by hand.
+            // The link is real and the store has it; the screen keeps waiting
+            // rather than saying something malformed, and the next reconcile
+            // shows the person on the Tap screen's audience line.
+            (final String name, _) when name.isNotEmpty => _Paired(
                 watcherName: name,
                 onAddAnother: _addAnother,
                 onDone: () => Navigator.of(context).pop(true),
@@ -143,7 +212,7 @@ class _ShareCodeScreenState extends ConsumerState<ShareCodeScreen> {
                 message: OnboardingCopy.inviteRefusal(refused.reason),
                 onRetry: () {
                   setState(() => _outcome = null);
-                  unawaited(_createCode());
+                  unawaited(_retryCreate(refused.reason));
                 },
               ),
             _ => const _Working(),
@@ -153,14 +222,32 @@ class _ShareCodeScreenState extends ConsumerState<ShareCodeScreen> {
     );
   }
 
+  /// **Try again**, and for `profileMissing` it retries the thing that actually
+  /// failed.
+  ///
+  /// The sentence is *"This phone could not finish getting ready. Try again."*
+  /// with a button under it — and re-running `createInvite` alone would fail
+  /// identically for ever, because nothing else re-writes `users/{uid}`. That is
+  /// an infinite loop dressed as an action, on a screen whose copy promises to
+  /// say what to do.
+  Future<void> _retryCreate(InviteRefusal reason) async {
+    if (reason == InviteRefusal.profileMissing) {
+      await ref.read(appServicesProvider).refreshProfile();
+      if (!mounted) return;
+    }
+    await _createCode();
+  }
+
   /// A second watcher needs a **second code** — an invite is single-use (§8).
+  ///
+  /// **The baseline is deliberately left alone.** It was updated at the moment
+  /// the last pairing was confirmed, so it already contains that watcher and the
+  /// next confirmation is about the next person. Clearing it here is what broke
+  /// the second pairing — see the listener.
   void _addAnother() {
     setState(() {
       _newWatcherName = null;
       _outcome = null;
-      // The freshly-paired watcher joins the baseline, so the next confirmation
-      // is about the next person rather than firing again for this one.
-      _knownWatchers = null;
     });
     unawaited(_createCode());
   }
@@ -340,6 +427,9 @@ class _EnterCodeScreenState extends ConsumerState<EnterCodeScreen> {
   String? _error;
   String? _pairedWith;
 
+  /// Why the previous attempt was refused, so a retry can repair what it can.
+  PairingRefusal? _lastRefusal;
+
   @override
   void dispose() {
     _field.dispose();
@@ -351,8 +441,16 @@ class _EnterCodeScreenState extends ConsumerState<EnterCodeScreen> {
       _busy = true;
       _error = null;
     });
-    final outcome =
-        await ref.read(appServicesProvider).invites.redeem(_field.text);
+    final services = ref.read(appServicesProvider);
+    // **If the last attempt failed because THIS phone had no profile, repair it
+    // before re-sending.** `users/{uid}` is written at sign-in and nowhere else,
+    // so without this the approved *"This phone could not finish getting ready.
+    // Try again."* sends somebody into a loop that cannot succeed.
+    if (_lastRefusal == PairingRefusal.watcherProfileMissing) {
+      await services.refreshProfile();
+      if (!mounted) return;
+    }
+    final outcome = await services.invites.redeem(_field.text);
     if (!mounted) return;
 
     switch (outcome) {
@@ -370,11 +468,34 @@ class _EnterCodeScreenState extends ConsumerState<EnterCodeScreen> {
           _busy = false;
           _pairedWith = watchedName;
         });
+        // The same reason the refusals are announced, and the same approved
+        // string the screen renders.
+        if (watchedName.isNotEmpty) {
+          SemanticsService.sendAnnouncement(
+            View.of(context),
+            OnboardingCopy.nowLookingAfter(watchedName),
+            Directionality.of(context),
+          );
+        }
       case PairingRefused(:final reason):
+        final message = OnboardingCopy.pairingRefusal(reason);
         setState(() {
           _busy = false;
-          _error = OnboardingCopy.pairingRefusal(reason);
+          _error = message;
+          _lastRefusal = reason;
         });
+        // **Spoken, not only shown.** The refusal appears as text above a button
+        // that still has focus, and nothing re-reads it — so a screen-reader
+        // user presses *"Use this code"* and hears nothing at all, with no way
+        // to tell whether it did anything. The whole justification for having
+        // nine distinguished refusals is that each names a different next
+        // action, and that is exactly what is lost.
+        if (!mounted) return;
+        SemanticsService.sendAnnouncement(
+          View.of(context),
+          message,
+          Directionality.of(context),
+        );
     }
   }
 
@@ -471,10 +592,10 @@ class _EnterCodeScreenState extends ConsumerState<EnterCodeScreen> {
 
 /// Upper-cases as the person types.
 ///
-/// Public because `pairing_screens_test.dart` asserts it directly: it is the
-/// only piece of this screen that transforms what somebody typed, and a
-/// formatter that mangled a cursor position would be a code nobody could finish
-/// entering.
+/// Public so it can be asserted directly in
+/// `test/presentation/pairing_screens_test.dart`: it is the only piece of this
+/// screen that transforms what somebody typed, and a formatter that mangled a
+/// cursor position would be a code nobody could finish entering.
 class UpperCaseFormatter extends TextInputFormatter {
   @override
   TextEditingValue formatEditUpdate(
@@ -489,10 +610,19 @@ class UpperCaseFormatter extends TextInputFormatter {
 class _Working extends StatelessWidget {
   const _Working();
 
+  /// A bare spinner says nothing at all to TalkBack, which is the whole
+  /// experience for the reader who depends on it — and this one is on the screen
+  /// a blind watched person opens to *get* a code. Every other spinner in this
+  /// app is labelled; this was the one that was not.
   @override
-  Widget build(BuildContext context) => const Padding(
-        padding: EdgeInsets.symmetric(vertical: 64),
-        child: Center(child: CircularProgressIndicator()),
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 64),
+        child: Center(
+          child: Semantics(
+            label: TapCopy.loadingLabel,
+            child: const CircularProgressIndicator(),
+          ),
+        ),
       );
 }
 

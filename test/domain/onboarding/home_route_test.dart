@@ -101,12 +101,107 @@ void main() {
     });
   });
 
-  group('links are evidence of a role, and outrank an empty store', () {
-    // The reinstall case §1 designed Google Sign-In for: the uid survives, so
-    // the links do, and LocalStore does not.
-    test('a reinstalled watcher skips onboarding and reaches the list', () {
+  /// **The flow ends on `completed`, and on nothing else.**
+  ///
+  /// These three states — an answer recorded with the flow not finished — had no
+  /// case at all, and all three routed to a main screen. Two ways in, both live:
+  /// answering question 1 used to eject the reader mid-flow (measured on two
+  /// phones, the summary was never seen), and killing the app between question 1
+  /// and *Finish* leaves exactly this on disk, because `_persist` writes each
+  /// answer immediately.
+  ///
+  /// The second needs no provider and no invalidation, so it is the version that
+  /// survives any future refactor of the caching.
+  group('an interrupted flow is still in the flow', () {
+    const answeredFirstOnly = OnboardingChoices(
+      wantsToBeWatched: true,
+      wantsToWatch: false,
+      completed: false,
+    );
+    const answeredSecondOnly = OnboardingChoices(
+      wantsToBeWatched: false,
+      wantsToWatch: true,
+      completed: false,
+    );
+    const answeredBothUnfinished = OnboardingChoices(
+      wantsToBeWatched: true,
+      wantsToWatch: true,
+      completed: false,
+    );
+
+    test('question 1 answered, not finished', () {
+      expect(route(choices: answeredFirstOnly).screen, HomeScreen.onboarding,
+          reason: 'ejecting here is what skipped the summary on two phones');
+    });
+
+    test('question 2 answered, not finished', () {
+      expect(route(choices: answeredSecondOnly).screen, HomeScreen.onboarding);
+    });
+
+    test('both answered, not finished — the summary is the next screen', () {
       expect(
-        route(choices: none, watcherLinks: true),
+        route(choices: answeredBothUnfinished).screen,
+        HomeScreen.onboarding,
+      );
+    });
+
+    // The device case: a pairing completed during the flow, then the app died
+    // before Finish. A link now exists AND the flow is unfinished.
+    test('paired during the flow, but not finished, still shows the summary',
+        () {
+      expect(
+        route(choices: answeredFirstOnly, watchedLinks: true).screen,
+        HomeScreen.onboarding,
+      );
+    });
+
+    test('the ONLY thing that ends the flow is completed', () {
+      for (final watched in [true, false]) {
+        for (final watcher in [true, false]) {
+          for (final choices in [
+            answeredFirstOnly,
+            answeredSecondOnly,
+            answeredBothUnfinished,
+            none,
+          ]) {
+            expect(
+              route(
+                choices: choices,
+                watchedLinks: watched,
+                watcherLinks: watcher,
+              ).screen,
+              HomeScreen.onboarding,
+              reason: 'unfinished flow, links $watched/$watcher, $choices',
+            );
+          }
+        }
+      }
+    });
+  });
+
+  /// **Links route, but they no longer END the flow.**
+  ///
+  /// A reinstall keeps the uid and therefore the links, and loses the store — so
+  /// those users must not be asked two questions they answered by action. That
+  /// is now settled by `AppServices.settleOnboardingIfPaired`, which sets
+  /// `completed` before the router is asked, rather than by this function
+  /// treating a link as an ending. Conflating the two is what made answering a
+  /// question end the flow.
+  ///
+  /// So these assert the half that is still this function's job: once the flow
+  /// is over, an accepted link is evidence of a role the stored answers may not
+  /// know about.
+  group('links are evidence of a role', () {
+    // Post-settle, which is the state the router actually sees for a reinstall.
+    const settled = OnboardingChoices(
+      wantsToBeWatched: false,
+      wantsToWatch: false,
+      completed: true,
+    );
+
+    test('a reinstalled watcher reaches the list', () {
+      expect(
+        route(choices: settled, watcherLinks: true),
         const HomeRoute(
           screen: HomeScreen.watcherList,
           watcherListReachable: false,
@@ -114,16 +209,16 @@ void main() {
       );
     });
 
-    test('a reinstalled watched person skips onboarding and lands on Tap', () {
+    test('a reinstalled watched person lands on Tap', () {
       expect(
-        route(choices: none, watchedLinks: true),
+        route(choices: settled, watchedLinks: true),
         const HomeRoute(screen: HomeScreen.tap, watcherListReachable: false),
       );
     });
 
     test('a reinstalled both-roles user gets Tap AND the list button', () {
       expect(
-        route(choices: none, watchedLinks: true, watcherLinks: true),
+        route(choices: settled, watchedLinks: true, watcherLinks: true),
         const HomeRoute(screen: HomeScreen.tap, watcherListReachable: true),
         reason: "main.dart's own warning: a both-roles user stranded on Tap "
             'never re-arms their watcher alarms by opening the app',
@@ -164,18 +259,30 @@ void main() {
       expect(route(choices: skippedBoth).screen, isNot(HomeScreen.onboarding));
     });
 
-    test('not completed but holding a link does not re-ask', () {
+    // The mutation that used to survive: replacing the answers with the links in
+    // the exit condition. It cannot survive now, because the links are not in
+    // the exit condition at all.
+    test('a link alone does NOT end the flow — settling does', () {
       expect(
         route(choices: none, watchedLinks: true).screen,
-        isNot(HomeScreen.onboarding),
+        HomeScreen.onboarding,
+        reason: 'AppServices.settleOnboardingIfPaired is what ends it, by '
+            'setting completed before the router is asked',
       );
     });
 
-    // The mutation that matters in the other direction: dropping `completed`
-    // from the guard would send a both-skipped user round the questions for
-    // ever, and dropping the link half strands the reinstall above.
-    test('not completed, no answers, no links is the ONLY re-ask', () {
-      expect(route(choices: none).screen, HomeScreen.onboarding);
+    test('and once settled, the same user is routed by their links', () {
+      expect(
+        route(
+          choices: const OnboardingChoices(
+            wantsToBeWatched: false,
+            wantsToWatch: false,
+            completed: true,
+          ),
+          watchedLinks: true,
+        ).screen,
+        HomeScreen.tap,
+      );
     });
   });
 

@@ -5,9 +5,13 @@
 # Two runs, because they need different emulators and must not see each other's
 # writes:
 #
-#   1. `functions/test/check_in_fan_out.test.js` — the fan-out against a REAL
-#      emulated Firestore with a recording sender in place of FCM. Firestore
-#      only, so no trigger fires and the run is quiet.
+#   1. `npm test`, which globs `functions/test/*.test.js` — so it picks up new
+#      suites automatically, and today that is BOTH `check_in_fan_out.test.js`
+#      (the fan-out against a REAL emulated Firestore with a recording sender in
+#      place of FCM) and `invites.test.js` (Phase 5's two callables' cores).
+#      Firestore only, so no trigger fires and the run is quiet.
+#      `--test-concurrency=1` serialises them, which matters because both clear
+#      `links/`.
 #   2. `functions/test/trigger_fires_once_per_day.mjs` — the §7 premise that a
 #      second tap on the same day is an UPDATE and fires nothing. Needs the
 #      functions emulator, and its only observable effect is a log line, so the

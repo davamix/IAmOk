@@ -82,14 +82,29 @@ dependencies:
   # Pinned to the exact version Phase 4 built and verified against, so the
   # combination is the known-good one rather than whatever resolves next.
   #
-  # 6.5.7 is the newest `firebase_auth` there is, so this is not a case of one
-  # package lagging behind an upgrade that exists — `firebase_core` 4.14.0 was
-  # released ahead of an auth that compiles against it. `cloud_functions` is held
-  # at ^6.3.6 for the same reason: 6.4.0 requires core ^4.14.0 and would drag the
-  # broken combination back in.
+  # **The upgrade EXISTS and was tried. It does not build.** This comment first
+  # said 6.5.7 was the newest `firebase_auth` there was; the Phase 5 review
+  # checked pub.dev and found the whole FlutterFire set shipped on 2026-08-24,
+  # including `firebase_auth` 6.6.0 against `firebase_core: ^4.14.0`. So the
+  # premise was false and the conclusion was still right — measured here on
+  # 2026-08-26 by moving the set to `firebase_core ^4.14.0` / `firebase_auth
+  # ^6.6.0` / `cloud_functions ^6.4.0` and building:
   #
-  # Lift both together, with a `firebase_auth` that names 4.14.0, and only with
-  # a real `flutter build apk --debug` behind it.
+  #   :firebase_auth:compileDebugKotlin FAILED
+  #   IdTokenChannelStreamHandler.kt:23:40 — type annotation class
+  #   'org.checkerframework...UnknownInitialization' of the inferred type is
+  #   inaccessible
+  #
+  # A *different* failure from 6.5.7's (`cannot find symbol customAuthDomain`),
+  # in the same plugin, and still a build that does not produce an APK. So the
+  # pin holds on evidence rather than on a guess about what exists.
+  #
+  # `cloud_functions` is held at ^6.3.6 because 6.4.0 requires core ^4.14.0 and
+  # would drag the broken combination back in.
+  #
+  # **Retry the whole set together at the next Flutter or FlutterFire bump**, and
+  # only with a real `flutter build apk --debug` behind it — `flutter analyze`
+  # and `flutter test` stay green through both of these failures.
   firebase_core: 4.13.0
   firebase_auth: ^6.5.7
 
@@ -139,9 +154,14 @@ dependencies:
   # §8 makes `invites/{code}` unreadable and unwritable by every client, so
   # minting a code and redeeming one both happen server-side or not at all.
   #
-  # **UI isolate only.** No background entry point calls a function — a nudge
-  # carries no authority (§3) and an isolate with seconds to live has nothing to
-  # ask. `test/domain/domain_purity_test.dart` holds that line.
+  # **No background entry point CALLS a function** — a nudge carries no authority
+  # (§3) and an isolate with seconds to live has nothing to ask.
+  # `test/domain/domain_purity_test.dart` holds that line.
+  #
+  # Not the same as "UI isolate only", which would be false of the package:
+  # `FirebaseBootstrap` is on the bare-isolate path, so this is imported in all
+  # three isolates and `useFunctionsEmulator` runs in each. Invoking is what none
+  # of them does.
   #
   # The region has to be named at the call site: `instanceFor(region:
   # 'europe-west1')`. The library default is `us-central1`, and a callable

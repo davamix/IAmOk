@@ -363,6 +363,15 @@ class _DebugHarnessScreenState extends ConsumerState<DebugHarnessScreen> {
               // sending to a phone that has signed into another account. See
               // [AppServices.signOut].
               await services.signOut();
+              // **The in-memory half of the same fact.** `signOut` clears
+              // `LocalStore`'s uid; without this `signedInUidProvider` keeps the
+              // old one, so `appServicesProvider.selfUid` stays stale and
+              // `signedIn` reads true while the store says otherwise — the
+              // store/RAM disagreement §4 exists to prevent, living in the
+              // composition root. While stale, a tap would write to
+              // `checkins/{oldUid}` and the router would keep showing a main
+              // screen to a signed-out user.
+              ref.read(signedInUidProvider.notifier).signedOut();
               // Deliberately not tearing the alarms down here. §3: nothing
               // patches state incrementally, so "there are no links now" is
               // expressed by reconciling against an empty desired set — which

@@ -504,6 +504,127 @@ describe('redeemInvite', () => {
       });
   });
 
+  // **The case a real family reaches, and the one the group above misses.**
+  //
+  // That group always seeds a NEW invite before re-pairing. But the old code is
+  // still in the message thread it was shared in, and the consumed invite is
+  // deliberately kept as the idempotence record — so re-typing it is the
+  // available action, not an exotic one.
+  describe('an old code after a revocation', () => {
+    it('does NOT report a live pairing for a revoked link', async () => {
+      await seedInvite('K7RTQX');
+      await redeemInviteFor(db, 'K7RTQX', ANA, NOW);
+      await db.doc(`links/${MUM}_${ANA}`).update({ status: 'revoked' });
+
+      const outcome = await redeemInviteFor(db, 'K7RTQX', ANA, NOW);
+
+      assert.notEqual(
+        outcome.status,
+        'linked',
+        'a revoked watcher told "You are now looking after Mum" is a false ' +
+          'claim: every read they make is still refused',
+      );
+      assert.equal(outcome.status, 'consumed');
+    });
+
+    it('and does not restore the link with a spent code', async () => {
+      await seedInvite('K7RTQX');
+      await redeemInviteFor(db, 'K7RTQX', ANA, NOW);
+      await db.doc(`links/${MUM}_${ANA}`).update({ status: 'revoked' });
+
+      await redeemInviteFor(db, 'K7RTQX', ANA, NOW);
+
+      const link = (await db.doc(`links/${MUM}_${ANA}`).get()).data();
+      assert.equal(link.status, 'revoked', 'single-use means single-use');
+    });
+
+    it('a fresh code still re-pairs them — the refusal is about the CODE', async () => {
+      await seedInvite('K7RTQX');
+      await redeemInviteFor(db, 'K7RTQX', ANA, NOW);
+      await db.doc(`links/${MUM}_${ANA}`).update({ status: 'revoked' });
+
+      await seedInvite('M4PQRS');
+      const outcome = await redeemInviteFor(db, 'M4PQRS', ANA, NOW);
+
+      assert.equal(outcome.status, 'linked');
+      assert.equal((await db.doc(`links/${MUM}_${ANA}`).get()).data().status,
+        'accepted');
+    });
+  });
+
+  describe('a refusal must not burn the code', () => {
+    // If a refactor ever marked the invite consumed before validating, a
+    // `watcher-profile-missing` would destroy the family's only code and every
+    // existing refusal test would stay green — they all assert on `links`.
+    it('a refused redemption leaves the invite usable', async () => {
+      await seedInvite('K7RTQX');
+      await db.doc(`users/${ANA}`).delete();
+      assert.equal(
+        (await redeemInviteFor(db, 'K7RTQX', ANA, NOW)).status,
+        'watcher-profile-missing',
+      );
+
+      await seedProfile(ANA, 'Ana', MADRID);
+      assert.equal((await redeemInviteFor(db, 'K7RTQX', ANA, NOW)).status,
+        'linked');
+    });
+
+    it('and leaves it unconsumed', async () => {
+      await seedInvite('K7RTQX');
+      await redeemInviteFor(db, 'K7RTQX', MUM, NOW); // self-link, refused
+      const invite = (await db.doc('invites/K7RTQX').get()).data();
+      assert.equal(invite.consumedBy, undefined);
+    });
+  });
+
+  describe('single-use under contention', () => {
+    // Single-use is the security claim the whole invite design rests on. The
+    // transaction reads `inviteRef` first, so it should serialise — but nothing
+    // proved it, and a future "fast path" read outside `runTransaction` would
+    // produce two links from one code with the suite green.
+    it('two watchers racing one code produce exactly ONE link', async () => {
+      await seedInvite('K7RTQX');
+
+      const outcomes = await Promise.all([
+        redeemInviteFor(db, 'K7RTQX', ANA, NOW),
+        redeemInviteFor(db, 'K7RTQX', BETO, NOW),
+      ]);
+
+      assert.deepEqual(
+        outcomes.map((o) => o.status).sort(),
+        ['consumed', 'linked'],
+      );
+      assert.equal((await db.collection('links').get()).size, 1);
+    });
+  });
+
+  describe('the collision retry', () => {
+    // `MAX_CODE_ATTEMPTS` and the injectable `randomBytes` exist for this, and
+    // nothing exercised it. The file header claims the retry is exercised.
+    it('mints a second code when the first one is taken', async () => {
+      await seedInvite('AAAAAA');
+
+      // Byte 0 maps to alphabet[0] = 'A', so the first draw collides.
+      let draw = 0;
+      const randomBytes = () =>
+        Buffer.from(draw++ === 0 ? [0, 0, 0, 0, 0, 0] : [1, 1, 1, 1, 1, 1]);
+
+      const result = await createInviteFor(db, ANA, NOW, randomBytes);
+
+      assert.equal(result.status, undefined, 'expected a created invite');
+      assert.notEqual(result.code, 'AAAAAA');
+      assert.equal(result.code, INVITE_ALPHABET[1].repeat(6));
+      assert.equal(draw, 2, 'exactly one retry');
+    });
+
+    it('gives up rather than looping for ever', async () => {
+      // Every draw collides with a seeded invite.
+      await seedInvite('AAAAAA');
+      const randomBytes = () => Buffer.from([0, 0, 0, 0, 0, 0]);
+      await assert.rejects(() => createInviteFor(db, ANA, NOW, randomBytes));
+    });
+  });
+
   describe('several watchers of one person', () => {
     it('each needs their own code, and each gets their own link', async () => {
       await seedInvite('K7RTQX');

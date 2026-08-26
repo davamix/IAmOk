@@ -894,8 +894,15 @@ survival — and it has not been met by a platform limit, only by one plugin's h
 documentation gap this table has had twice before rather than new decisions. `cloud_functions` is
 what calls §9's two callables, which §6 has always required; `share_plus` is the *"+ Android share
 sheet"* half of PLAN.md's locked pairing decision, and a code that cannot leave the phone serves only
-the both-phones-on-one-table case. **Both are UI-isolate only** — no background entry point calls a
-function or opens a share sheet, and `domain_purity_test.dart` holds that line.
+the both-phones-on-one-table case. **No background entry point calls a callable or opens a share sheet**, and
+`domain_purity_test.dart` holds that line by computing the transitive closure from both entry
+points.
+
+The precise version matters, because *"UI-isolate only"* is false of the **package**:
+`FirebaseBootstrap` is on the bare-isolate path — both entry points call it — so
+`cloud_functions` is imported in all three isolates and `useFunctionsEmulator` runs in each of
+them in an emulator build. What none of them does is *invoke* anything. That is the substantive
+claim and it is the one to keep.
 
 **`firebase_core` is pinned to an exact version rather than caret-ranged**, which is a build fix
 recorded in `pubspec.yaml`: adding `cloud_functions` re-resolved the graph to `firebase_core` 4.14.0,

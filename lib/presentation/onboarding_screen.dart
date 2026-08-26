@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../application/onboarding_controller.dart';
 import '../application/providers.dart';
 import '../copy/onboarding_copy.dart';
+import '../copy/tap_copy.dart';
 import '../domain/domain.dart';
 import 'pairing_screens.dart';
 
@@ -118,7 +119,7 @@ class _SignInState extends ConsumerState<_SignIn> {
     unawaited(services.push.register(uid: uid).catchError((Object _) => null));
 
     if (!mounted) return;
-    ref.read(onboardingControllerProvider.notifier).signedIn(uid);
+    await ref.read(onboardingControllerProvider.notifier).signedIn(uid);
   }
 
   @override
@@ -302,6 +303,7 @@ class _Summary extends ConsumerWidget {
       future: _names(ref),
       builder: (context, snapshot) {
         final names = snapshot.data;
+        final failed = snapshot.hasError;
         final lines = <String>[
           if (names != null && names.watchers.isNotEmpty)
             OnboardingCopy.summaryWatched(names.watchers),
@@ -312,21 +314,34 @@ class _Summary extends ConsumerWidget {
         ];
         final nothing = names != null && lines.isEmpty;
 
+        // **The tick and "You're all set" are gated on there being something to
+        // report**, and that is not presentation polish.
+        //
+        // Rendered unconditionally, a user who skipped both questions — or who
+        // opened a code screen nobody redeemed — finished onboarding reading a
+        // green tick and *"You're all set"* directly above *"Nobody is set up
+        // yet."* That is the first false all-clear this app makes, on the screen
+        // the whole phase exists to reach, and it undoes the care that went into
+        // reporting evidence rather than intent two lines below it.
+        final settled = lines.isNotEmpty;
+
         return _Page(
           children: [
             const Spacer(),
-            Icon(
-              Icons.check_circle,
-              size: 64,
-              color: theme.colorScheme.primary,
-            ),
-            const SizedBox(height: 24),
-            Text(
-              OnboardingCopy.summaryTitle,
-              style: theme.textTheme.headlineMedium,
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 24),
+            if (settled) ...[
+              Icon(
+                Icons.check_circle,
+                size: 64,
+                color: theme.colorScheme.primary,
+              ),
+              const SizedBox(height: 24),
+              Text(
+                OnboardingCopy.summaryTitle,
+                style: theme.textTheme.headlineMedium,
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 24),
+            ],
             for (final line in lines) ...[
               Text(
                 line,
@@ -340,6 +355,22 @@ class _Summary extends ConsumerWidget {
                 OnboardingCopy.summaryNothing,
                 style: theme.textTheme.bodyLarge,
                 textAlign: TextAlign.center,
+              ),
+            // **A screen that cannot tell says so.** Without this the pending
+            // and failed states are indistinguishable from "nothing is set up"
+            // — the `FutureBuilder` rendered a tick, a title and Finish and
+            // nothing else, permanently, if `_names` threw. Silence would be a
+            // silent failure, which is the one thing this app may not do.
+            if (failed)
+              Text(
+                OnboardingCopy.summaryUnknown,
+                style: theme.textTheme.bodyLarge,
+                textAlign: TextAlign.center,
+              ),
+            if (names == null && !failed)
+              Semantics(
+                label: TapCopy.loadingLabel,
+                child: const Center(child: CircularProgressIndicator()),
               ),
             // The one instruction the watched person needs, and the last thing
             // they read before the screen they will use every morning.

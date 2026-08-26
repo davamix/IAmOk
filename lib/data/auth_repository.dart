@@ -44,10 +44,15 @@ class AuthRepository {
   /// run at all.
   ///
   /// ```
-  /// flutter run --dart-define=IAMOK_EMULATOR_HOST=10.0.2.2 \
-  ///             --dart-define=IAMOK_EMULATOR_USER=emulator-mum \
+  /// flutter run --dart-define=IAMOK_EMULATOR_HOST=10.0.2.2 `
+  ///             --dart-define=IAMOK_EMULATOR_USER=emulator-mum `
   ///             --dart-define=IAMOK_EMULATOR_NAME=Mum
   /// ```
+  ///
+  /// The continuation is a **backtick**: this project's shell is PowerShell, and
+  /// a backslash pasted into it is a literal argument, which turns the next two
+  /// lines into separate commands — silently giving you a build with the
+  /// **default** identity, i.e. the exact blocker described above.
   ///
   /// **Compile-time, like `IAMOK_EMULATOR_HOST` and for the stronger of its two
   /// reasons.** `String.fromEnvironment` is a const, so [_emulatorCredential] —

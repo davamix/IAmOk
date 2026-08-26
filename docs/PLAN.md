@@ -290,10 +290,12 @@ allowances mean effectively €0 at this scale, but the card must be on the acco
 
 ## Phase 5 — Onboarding and pairing
 
-> **BUILT, and the exit criterion is MET on two devices.** Start from
-> [phases/phase-5-summary.md](phases/phase-5-summary.md). **Not signed off** — every new
-> user-visible string is owed the owner's approval, including **two changes to already-approved
-> copy**, and the five reviewers have not yet run.
+> **BUILT, the exit criterion is MET on two devices, and all five reviewers have run with their
+> findings applied.** Start from [phases/phase-5-summary.md](phases/phase-5-summary.md). **Not
+> signed off** — every new user-visible string is owed the owner's approval, including **two changes
+> to already-approved copy**, and **six review findings are open on purpose**, two of them owner
+> decisions: the cross-role dead end, and the 21:00 reminder's promise to a family that may not
+> exist.
 >
 > Built against the emulator suite as the brief instructed, so **nothing here says anything about a
 > deployed `redeemInvite`**; the 2nd-gen deploy is still blocked on four missing APIs and remains

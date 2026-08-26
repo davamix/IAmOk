@@ -1,11 +1,12 @@
 # Phase 5 — Onboarding and pairing · summary
 
-**Date:** 2026-08-26 · **1 141 Dart tests**, **67 Functions tests**, `flutter analyze` clean, debug
-APK builds, secrets guard clean.
+**Date:** 2026-08-26 · **1 161 Dart tests**, **75 Functions tests**, **75 rules tests**,
+`flutter analyze` clean, debug APK builds, secrets guard clean.
 
-**Status: built, and the exit criterion is MET on two devices.** **Not signed off** — the five
-reviewers have not run, and **every new user-visible string is owed the owner's approval**, including
-**two changes to already-approved copy**.
+**Status: built, the exit criterion is MET on two devices, and all five reviewers have run with
+their findings applied.** **Not signed off** — **every new user-visible string is owed the owner's
+approval**, including **two changes to already-approved copy**, and six findings were deliberately
+left for the owner or a later phase rather than decided here.
 
 > **Two phones paired from a cold install using only a shared code**, 2026-08-26 11:12–11:28. The AVD
 > was *Mum*, the POCO F3 was *Ana*; both were uninstalled first; the code was read off one screen and
@@ -34,7 +35,7 @@ was not.
 | **`createInvite`** | A **fourth** Function ([ADR-0011](../architecture/decisions/0011-creating-an-invite-is-a-function-too.md)). Generates a §7 code, `create`s it so a collision is the write failing rather than a read-then-write race, 24-hour expiry, `watchedUid` from `request.auth`. Reuses a live code rather than replacing it, and sweeps the caller's own expired unconsumed invites. |
 | **`redeemInvite`** | One transaction: validate → `links/{watched}_{watcher}` with `activeFrom` in the **watched person's** zone and all three names denormalised → mark consumed. |
 | **`InviteService`** | Data. Two callables, no Firestore reference — §8 makes `invites/` unwritable as well as unreadable. |
-| **`HomeRoute`** | Domain. Which main screen, from the two answers **unioned with the links**. |
+| **`HomeRoute`** | Domain. Two questions kept apart: **is the flow over** (`completed` alone) and **which main screen** (the two answers unioned with the accepted links). Conflating them is what let a mid-flow answer end the flow. |
 | **`InviteCode`** | Domain. §7's alphabet, parsing and normalisation. |
 | **Sign-in, 3 onboarding screens, 2 pairing screens** | Presentation, with all copy in `OnboardingCopy`. |
 | **The route back** | *"Add someone"* on the Tap screen and the watcher list. |
@@ -53,12 +54,16 @@ not an exception. A status enum crossing the wire makes the client's mapping *to
 is what `OPEN-QUESTIONS.md` #5 records elsewhere in this app, where an **English substring** decides
 which sentence a family reads.
 
-**Links outrank the stored answers, and the two are unioned rather than one overriding.** §1 chose
-Google Sign-In because *the uid survives a reinstall, so links never break* — which means a cold
-install can begin with an empty store and a user who already watches three people. Routing on the
-stored answers alone strands a reinstalled watcher on the Tap screen, where the list that re-arms
-their warning alarms is reachable only by a notification tap. That is the failure `main.dart` had
-warned about for three phases, arriving through the fix for it.
+**Which main screen is the union of the answers and the links; whether the flow is OVER is
+`completed` alone.** §1 chose Google Sign-In because *the uid survives a reinstall, so links never
+break* — which means a cold install can begin with an empty store and a user who already watches
+three people. Routing on the stored answers alone strands a reinstalled watcher on the Tap screen,
+where the list that re-arms their warning alarms is reachable only by a notification tap: the failure
+`main.dart` had warned about for three phases, arriving through the fix for it.
+
+Those are **two questions**, and answering both with one expression is what let a mid-flow answer end
+the flow — twice, by two different doors. `AppServices.settleOnboardingIfPaired` now answers the
+first *from* the links, once, before the router is asked.
 
 **A skip is an answer.** `completed` is a third flag rather than something derived, so somebody who
 wants neither role is not asked the same two questions every morning.
@@ -106,8 +111,14 @@ main screens. Screen 3 is a deliverable of this phase and no user ever saw it.
 `_persist` invalidated the provider `homeRouteProvider` watches, so answering a question
 affirmatively made the route recompute, find a role, and leave onboarding. Every piece was correct in
 isolation. The defect existed only as *a screen a person never reaches* — which a suite of unit tests
-is structurally unable to notice. The router is now told once, by `finish()`, and the regression group
-asserts the route **while the flow is running**.
+is structurally unable to notice.
+
+> **The same-day fix was not enough, and the review round said so.** Telling the router only from
+> `finish()` made the defect **latent rather than absent**: the route was then held off by a *cache*,
+> and testing found a second door into it that needs no provider at all — killing the app between
+> question 1 and *Finish* leaves the same state on disk, because `_persist` writes each answer
+> immediately. `HomeRoute.decide` now ends onboarding on **`completed` alone**. See *The review
+> round*, finding 2.
 
 ### 3. A dependency change broke only the Android build
 
@@ -141,6 +152,176 @@ crash. They ran under Node with explicit UTF-8, which is what the previous harne
 
 ---
 
+## The review round — all five reviewers, 2026-08-26
+
+They found **the usual thing, in quantity**: almost nothing came from a test failing, and the
+sharpest findings were claims that had stopped being true. Two reviewers independently found the
+same defect twice over.
+
+### Fixed — the ones that were false claims or broken deliverables
+
+**1. A revoked watcher re-typing their old code was told the pairing was live.** Found by security
+and testing independently. `redeemInviteFor` checked that the link document **exists** and not that
+it is `accepted` — and the consumed invite is deliberately kept, and the code is still in the
+message thread it was shared in. So Ana, revoked, re-types her code and reads *"You are now looking
+after Mum."* while every read she makes is still refused. Nothing was restored. Now falls through to
+`consumed` — *"That code has already been used. Ask for a new one."* — which is true and names the
+action that works. Three tests, including that a spent code cannot restore the link.
+
+**2. The flow could be ejected mid-way, by two different doors.** The summary-screen defect the
+device run found was patched by not invalidating the router's provider mid-flow — which left it
+**latent rather than absent**, held off by a cache. Testing found the second door: `_persist` writes
+each answer immediately, so killing the app between question 1 and *Finish* leaves
+`(wantsToBeWatched: true, completed: false)` on disk, and `HomeRoute.decide` routed that to the Tap
+screen with no provider involved at all. Question 2 then never gets asked and `completed` stays
+false for ever.
+
+`HomeRoute.decide` now ends onboarding on **`completed` alone**. The reinstall case it used to
+handle by treating a link as an ending moved to `AppServices.settleOnboardingIfPaired`, which
+answers *is the flow over* **from** the links, once, before the router is asked. Two questions that
+were being answered by one expression, now kept apart — and the truth table gained the three states
+that had no case.
+
+**3. "Add someone else" could never confirm the second pairing.** Found by three reviewers.
+`_addAnother` set the baseline to `null` with a comment saying the new watcher "joins the baseline";
+it did not — it deferred the baseline to the *next* emission, which is the one caused by the second
+redemption. The screen sat on *"Waiting for them to type it in."* for ever on a pairing that had
+succeeded. The baseline now moves at the moment of confirmation.
+
+**4. The share screen's baseline came from the first Firestore snapshot**, so a redemption that beat
+it — a slow first listen, a phone briefly offline — was swallowed and never confirmed. It is now
+seeded from `LocalStore` before the stream is attached, which is also the answer §3 wants: the store
+is what every other surface renders from.
+
+**5. The summary said "You're all set" over "Nobody is set up yet."** The tick and the title rendered
+unconditionally, so somebody who skipped both questions finished onboarding reading a green success
+tick above a line saying nothing was set up. Both are now gated on there being something to report,
+and the screen gained the loading and error states it never had — without them a failed read was
+indistinguishable from "nothing is set up", which is a claim about the account made by a device that
+just failed to find out.
+
+**6. A both-roles user got no warning alarm for the rest of the session.** After `finish()` routes
+them to the Tap screen the watcher list never mounts, and nothing else reconciles that side. This is
+the failure `main.dart`'s own three-phase-old comment warns about, arriving through the phase that
+introduced the routing. `finish()` now runs the watcher repair when the settled route is `tap`, and
+only then — the list reconciles itself.
+
+**7. Links were never synced after an in-app sign-in.** `main()` syncs with the *launch-time* uid,
+which on a reinstall is the signed-out sentinel — so `linkRolesProvider`'s docstring claim that *"the
+store is the fresh copy"* was false at exactly the moment `HomeRoute`'s reinstall reasoning is about.
+
+**8. Every callable from a physical handset went to `10.0.2.2`** — fixed during the device run, and
+now **mechanical**: `android_manifest_test.dart` counts the emulator wiring calls against the
+`automaticHostMapping: false` opt-outs, so a fourth service cannot be added without one. Verified by
+removing the flag and watching it fail.
+
+**9. The confirmation and every refusal were silent to a screen reader.** Nothing re-reads a changed
+widget, so a blind watched person heard *"Waiting for them to type it in"* and then nothing, for
+ever — on the screen whose whole justification is that the person the app is *for* should not be
+left staring at an unchanged screen. Both are announced now, with already-approved strings. The bare
+spinner is labelled too.
+
+**10. A watcher-only user's first screen was a red banner** about a permission the app had never
+requested. `ensureNotificationsAsked` lived on the Tap screen and nowhere else, which covered
+everybody until Phase 5 routed on role.
+
+**11. "Add someone" meant two opposite things.** On the Tap screen it *produces* a code; on the
+watcher list it *consumes* one. A watcher with no code pressed the only button on the screen and
+landed on a form demanding an artefact that did not exist yet — while the sentence that used to
+point them at the person who can make one is exactly what this phase deleted. The watcher list's
+button is now **"I have a code"**, which is already-approved copy from onboarding screen 2.
+
+**12. Three refusals named an action that could not repair anything.** `users/{uid}` was written at
+sign-in and never again, so *"This phone could not finish getting ready. Try again."* re-ran an
+identical failing call, and *"Ask them to open I Am Ok"* changed nothing on the other phone. There is
+now `AppServices.refreshProfile`, called on resume and on the retry paths.
+
+**13. The invite sweep would not have run in production.** Fire-and-forget work is dropped when
+Cloud Run freezes the container after the response — and the emulator, where nothing throttles, is
+the only place the test could pass. It is the design's *only* garbage collection. Now awaited.
+
+**14. `redeemInvite` would have deployed accepting ~800 concurrent guesses.** `OPEN-QUESTIONS.md`
+#11 accepts the brute-force risk on an argument with **no rate term in it**; at the 2nd-gen defaults
+the expected time to a first hit falls inside a single code's 24-hour life. Now
+`concurrency: 1, maxInstances: 3`.
+
+**Also fixed:** the two `logger.error` calls could carry a live invite code three lines under a
+comment saying they never do; the collision retry retried on *any* error, so a transient timeout on a
+write that landed would mint a second live code; `link_reconcile_failed` survived a sign-out;
+`DateTime.tryParse` walked through the purity guard and the comment defending it was backwards; the
+copy floors matched **single-quoted strings only**, so every string containing an apostrophe — this
+phase's most common shape — was invisible to them; `SignedInUid.signedOut()` had no caller while its
+docstring said it was wired; and a docstring named a test file that did not exist, which now does.
+
+**Corrected documents:** `OPEN-QUESTIONS.md` #11 understated the blast radius twice over (a
+successful redemption **does** return the watched person's uid, necessarily; and a guessed link
+grants read **and write** on the away document, so a stranger could silence every watcher for ~32
+days); `threat-model.md` T3 said the rate limit was owed *in this phase* and was never updated;
+`deploy-notes.md`'s header said nothing was deployed, five days after the rules went live — the same
+failure that file already catalogues, in its own header; and §15's *"UI isolate only"* was false of
+the `cloud_functions` package, which `FirebaseBootstrap` puts in all three isolates.
+
+**`firebase_auth` 6.6.0 exists and was tried.** The pubspec comment claimed 6.5.7 was the newest
+there was; infrastructure checked pub.dev and found the whole FlutterFire set shipped on 2026-08-24.
+Moving to `firebase_core ^4.14.0` / `firebase_auth ^6.6.0` / `cloud_functions ^6.4.0` **still fails
+the Android build**, with a different error (`compileDebugKotlin`, an inaccessible checkerframework
+annotation). The pin holds on evidence now rather than on a guess.
+
+---
+
+## Deliberately NOT fixed, and why
+
+**1. The cross-role dead end.** A Tap-screen user who is not already a watcher has no route to
+`EnterCodeScreen`, and a watcher-only user has none to `ShareCodeScreen`. So somebody who skipped one
+question can never take up that role. **This is the owner's call**, because the only fixes add a
+second action to the *watched person's* screen — and `guidelines.md`'s first principle is one screen,
+one action, with `WatchedAudience` recording at length how firmly this project refuses extra surfaces
+there. The options are a chooser behind *"Add someone"*, making the watcher list always reachable, or
+accepting it until Phase 7's UI pass.
+
+**2. The 21:00 reminder.** `screens.md` still says *"Owed before Phase 5"*: that reminder says *"so
+your family knows you're well"* while the screen may simultaneously say nobody is set up, and the
+proposed resolution was *"an explicit acceptance once onboarding guarantees pairing before reminders
+arm"*. **Onboarding does not guarantee that** — it offers *Skip for now* on the screen that would
+produce it. So the item is not closed, it is now *easier* to reach, and it needs either an
+empty-audience variant of that body or a written acceptance. Owner's decision either way.
+
+**3. `couldNotReach` is said when the server was reached and answered.** A `HttpsError('internal')`
+from a failed transaction, and any status this build has no case for, both map to *"Could not reach
+the internet. Check your connection and try again."* — a claim about the **device** that is false,
+and a next action that cannot work. This is ADR-0004's *refused is not unreachable* reappearing in a
+new place. Fixing it properly needs a fourth refusal and **new copy**, so it is owed the owner rather
+than invented here.
+
+**4. `Home.build` is still uncovered.** `Home.screenFor` is asserted as a pure mapping, but the one
+line that reads the provider is not. Pumping `Home` inside a real container **hangs with no output**
+— the same behaviour `app_lifecycle_test.dart` records for pumping `IAmOkApp`, and its stated reason
+for not doing so. Attempted and abandoned rather than left as a hanging test or a green one that
+proves nothing; recorded in the test file itself.
+
+**5. The release manifest measurement is owed.** `deploy-notes.md` makes it a standing command
+whenever a plugin is added, *"including when you expect no change"*. Two were added. The debug merge
+suggests the permission set is unchanged but that **`share_plus` contributes a new content provider**
+— which the documented `Select-String INTERNET` check would miss anyway, because it greps for a
+permission. Needs `flutter build apk --release` and a recorded result.
+
+**6. `@types/node` is four majors ahead of the deployed runtime.** 26.2.0 is in the TypeScript
+program against Node 22 on Cloud Functions, and `deploy-notes.md` says the opposite (*"`@types/node`
+is not installed"*). Phase 5 added this project's first Node builtin import (`node:crypto`), so it is
+newly load-bearing: a Node 23+ API would type-check clean, run clean in the emulator, and fail after
+deploy.
+
+**Smaller, all recorded rather than fixed:** a watcher-only user's launch runs two overlapping
+watcher reconciles; an error in either routing input renders as a permanent spinner with no retry;
+`deviceFactsProvider` is in the right layer but the wrong file; `createInviteFor` is not atomic so
+two racing calls can leave two live codes; an invite cannot be withdrawn once shared to the wrong
+person; the code block's colour pair is not in the contrast test; the system back button exits from
+onboarding rather than stepping back; `AddSomeoneButton` and the Away control will be adjacent
+look-alikes once Phase 6 enables Away; and nothing exercises the `onCall` wrappers below a device
+run.
+
+---
+
 ## Owed to the owner
 
 **1. Copy approval — every new string.** They are all in `ui-ux/screens.md` under *Sign-in*, *The
@@ -165,6 +346,10 @@ want running one at a time.
 
 ## Still owed, and carried
 
+- **Six things the review round left open on purpose** — see *Deliberately NOT fixed* above. The two
+  that need an owner decision are the **cross-role dead end** and the **21:00 reminder's promise to a
+  family that may not exist**; a third, `couldNotReach` being said when the server answered, needs
+  new copy.
 - **Everything on Phase 4's standing list** — the first Functions deploy (still blocked on four
   missing 2nd-gen APIs, and the owner's call), App Check's console half, the live-radio measurement,
   and what ADR-0008's option 1 costs.
@@ -204,13 +389,19 @@ longer knows — **re-pair rather than trying to reconcile it.**
 > `docs/OPEN-QUESTIONS.md` lists what is deliberately unsettled — check its *Blocking-when* table
 > rather than re-deriving any of it.
 >
-> **Where Phase 5 left things.** Built, and its exit criterion is **met on two devices**: two phones
-> paired from a cold install using only a shared code, and each landed on the correct main screen.
-> 1 141 Dart tests, 67 Functions tests, `flutter analyze` clean, debug APK builds, secrets guard
-> clean, 42 mutations across two harnesses all behaving as expected with passing no-op controls.
-> **Phase 5 has not been signed off** — the five reviewers have not run and every new user-visible
-> string is owed approval, including two changes to already-approved copy. That is the owner's call
-> and does not block starting here.
+> **Where Phase 5 left things.** Built, its exit criterion **met on two devices** — two phones paired
+> from a cold install using only a shared code, each landing on the correct main screen — and **all
+> five reviewers run with their findings applied**. 1 161 Dart tests, 75 Functions tests, 75 rules
+> tests, `flutter analyze` clean, debug APK builds, secrets guard clean.
+>
+> **Phase 5 has not been signed off.** Every new user-visible string is owed approval, including two
+> changes to already-approved copy, and six review findings were left open on purpose — two of them
+> owner decisions. All are in the summary under *Deliberately NOT fixed*. None blocks starting here.
+>
+> **The review round is worth reading before you write anything**, because it is the clearest
+> catalogue this project has of how its own defects look: fourteen fixes, and almost none of them
+> came from a test failing. Two reviewers found the same defect independently; one finding was a
+> patch from earlier the same day that had made a defect *latent* rather than absent.
 >
 > **Build against the emulator suite**, exactly as Phase 5 did. A 2nd-gen deploy would still fail —
 > four prerequisite APIs are missing — and it is the owner's call.

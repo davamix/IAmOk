@@ -1,6 +1,15 @@
 # Deploy notes
 
-**Date:** 2026-08-15 · **Status:** Nothing is deployed yet. First deploy is **Phase 4**.
+**Date:** 2026-08-15 · **Status, re-verified 2026-08-26:** **`firestore.rules` IS deployed** —
+released 2026-08-20, ruleset `87c8784d-42b8-45c8-8bcc-76d295656157`, confirmed by reading the live
+ruleset back and diffing it against the repo file (byte-identical). **No Functions are deployed**;
+`firebase functions:list` returns *No functions found*.
+
+> **This line said "Nothing is deployed yet" until 2026-08-26**, five days after the rules went live.
+> That is the same failure this file already catalogues below — *"the checklist someone would read
+> immediately before the first deploy, saying the opposite of the truth"* — recurring in the file's
+> own header. `phase-4-handover.md` had it right the whole time, which is the point: the project's
+> record was correct in the wrong file.
 
 What is provisioned, and how it was verified, is in
 [firebase-setup-prompt.md](firebase-setup-prompt.md) — including two Windows CLI traps that cost
@@ -69,15 +78,22 @@ Everything ships from this repo. **Nothing is edited in the Firebase console** �
 rules or config is silently overwritten by the next deploy, and the drift is invisible until
 something breaks at a bad moment.
 
-| Artifact | Command | Phase |
+| Artifact | Command | State |
 |---|---|---|
-| Firestore rules | `firebase deploy --only firestore:rules --project i-am-ok-c74ca` | 4 |
-| Firestore indexes | `firebase deploy --only firestore:indexes --project i-am-ok-c74ca` | 4, if any query needs one |
-| Functions | `firebase deploy --only functions --project i-am-ok-c74ca` | 4 |
-| A single Function | `firebase deploy --only functions:onCheckInCreated --project i-am-ok-c74ca` | 4 |
+| Firestore rules | `firebase deploy --only firestore:rules --project i-am-ok-c74ca` | **Deployed** 2026-08-20 |
+| Firestore indexes | `firebase deploy --only firestore:indexes --project i-am-ok-c74ca` | Not needed yet — every query so far is single-field equality, which Firestore indexes automatically |
+| Functions | `firebase deploy --only functions --project i-am-ok-c74ca` | **None deployed.** Three exist: `onCheckInCreated`, `createInvite`, `redeemInvite` |
+| A single Function | `firebase deploy --only functions:redeemInvite --project i-am-ok-c74ca` | — |
 
 Deploy rules **before** the client code that depends on them. A client shipped against rules that
 are not live yet fails in a way that looks like a client bug.
+
+**And deploy Functions before any client build that is not pointed at the emulator.** From Phase 5
+the pairing flow — the *first screen a new user reaches* — is two callables. A client shipped ahead
+of them gets a 404, which `InviteService` maps to `couldNotReach`, which tells every new user
+*"Could not reach the internet. Check your connection and try again."* for ever. Same class of
+failure as the rules rule above, arriving through a different service, and nothing in this runbook
+named it until Phase 5.
 
 ## Emulators — running, 2026-08-21
 
@@ -166,7 +182,37 @@ interface of a home network is not something to arrange by accident.
 
 `adb reverse` rather than a LAN bind: it opens no port to the network, it dies with the cable, and
 everything else in this project already drives the POCO over USB. It does **not** survive a
-reconnect — re-run the script if the device is unplugged.
+reconnect — re-run the script if the device is unplugged. It also dies with an adb **server**
+restart, not only a cable unplug.
+
+> **Every FlutterFire API that takes an emulator host rewrites `127.0.0.1` → `10.0.2.2` on Android
+> unless passed `automaticHostMapping: false`.** Auth, Firestore and Functions all do it and all
+> default it **on**; assume the next one does too.
+>
+> This is the moment it bites, which is why it is here as well as in `CLAUDE.md`. On the AVD the
+> rewrite is a kindness. On a physical handset over `adb reverse` it is silent and wrong, and the
+> symptom is **half the app working**: Phase 5 signed in, wrote `users/{uid}` and rendered the
+> pairing screen, then every callable went to an address that means nothing on that phone and
+> `redeemInvite` hung until it timed out with the Functions emulator logging nothing at all. It read
+> as a backend fault for most of a session.
+>
+> `test/android_manifest_test.dart` now counts the wiring calls against the opt-outs, so a fourth
+> service cannot be added without one.
+
+**Two devices need two identities.** The Auth emulator is given a synthetic subject at compile time
+(`IAMOK_EMULATOR_USER`), and it defaults to one value — so two phones built without it sign in as
+**the same person**, and `redeemInvite` correctly refuses the self-link. That was a blocker for
+Phase 5's exit criterion until it was parameterised:
+
+```powershell
+flutter run --dart-define=IAMOK_EMULATOR_HOST=10.0.2.2 `
+            --dart-define=IAMOK_EMULATOR_USER=emulator-mum `
+            --dart-define=IAMOK_EMULATOR_NAME=Mum
+```
+
+The email is derived from the subject and must stay derived: the Auth emulator links a new provider
+identity onto an existing account that shares an email address, which would collapse two subjects
+back to one uid.
 
 ### The local Functions emulator CAN send real FCM, with no credentials set up
 
@@ -293,6 +339,19 @@ All Phase 4, all from [firebase-setup-prompt.md](firebase-setup-prompt.md):
   > cannot produce a valid verdict, so release attestation does not work until the app reaches at
   > least an internal test track. Enforcement is therefore a Phase 8-or-later decision for a reason
   > that has nothing to do with metrics, and should not be scheduled earlier than it can work.
+  >
+  > **For the two Phase 5 CALLABLES, enforcement is a code change and not the console toggle above.**
+  > A 2nd-gen callable enforces App Check through `enforceAppCheck: true` in its `onCall` options,
+  > deployed from this repo — the console switch does not reach it. Neither `createInvite` nor
+  > `redeemInvite` sets it today, which is correct while no client is verified sending tokens.
+  >
+  > It matters because `OPEN-QUESTIONS.md` #11 and ADR-0011 both name App Check enforcement as *the*
+  > designed control against `redeemInvite` guessing. Flipping the console switch and believing that
+  > covered it would leave both callables wide open **while the register said the control was on** —
+  > a control believed live and not live, which is worse than one known absent.
+  >
+  > Order, when it happens: verify the client is sending tokens → set the flag in
+  > `functions/src/index.ts` → `firebase deploy --only functions` → then the console.
 - **Delete protection and point-in-time recovery are both OFF.** Read from
   `firestore:databases:get` on 2026-08-15: `DELETE_PROTECTION_DISABLED`,
   `POINT_IN_TIME_RECOVERY_DISABLED`, version retention 3600s. Cheap hardening on a database

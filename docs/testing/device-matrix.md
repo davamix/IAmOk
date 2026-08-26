@@ -1181,8 +1181,17 @@ family. That is the failure `onUpgrade`'s idempotence comment is about.
 
 ### Pairing on two phones — 2026-08-26 11:12–11:28, and it found two defects
 
-**Rig.** AVD `Medium_Phone_API_36.0` as **Mum, the watched person** (`10.0.2.2`); POCO F3 as **Ana,
-the watcher** (`127.0.0.1` over `adb reverse`). Emulator suite started detached with output
+**There were TWO runs, and the write-up below reads as one until you notice the codes.** Run 1
+(11:12–11:19) used code **`JJX 5VZ`** and is where both defects were found. Run 2 (11:25–11:28) was
+a fresh cold install on both phones after the fixes, used code **`LWCUCQ`**, and is the one the
+checklist rows above are ticked from. The timeline table further down is run 1 up to 11:19 and run 2
+from 11:25; the two codes are not a contradiction, but nothing said so until the Phase 5 review read
+the page against itself.
+
+**Rig.** AVD `Medium_Phone_API_36.0` — **Android 16 / API 36**, stock — as **Mum, the watched
+person** (`10.0.2.2`); POCO F3 — **Android 13 / HyperOS 1.0**, stock power settings — as **Ana, the
+watcher** (`127.0.0.1` over `adb reverse`). Power settings are irrelevant to pairing and are recorded
+because the per-device row format requires them. Emulator suite started detached with output
 redirected to a file, per the `EPIPE` trap. Both devices **uninstalled first**, so both flows began
 at sign-in.
 
@@ -1241,6 +1250,7 @@ running**, which is what the per-step tests could not see.
 | 11:15 | Ana skips question 1, types **`jjx5vz` in lower case** — the field upper-cases as she types. |
 | 11:19 | `redeemInvite` → `status: linked`, `alreadyLinked: false`, 432 ms. |
 | 11:19 | **Mum's phone, untouched, changes by itself** from *"Waiting for them to type it in."* to *"Ana will now know you're OK."* |
+| — | *Both defects fixed here. Everything below is **run 2**: both phones uninstalled again, fresh sign-ins, code `LWCUCQ`.* |
 | 11:25 | Both summaries: Ana *"You will be told if Mum misses a day."* (singular verb); Mum *"Ana will know you are OK when you tap each day."* + *"Tap once a day. That is all."* |
 | 11:27 | Mum lands on the Tap screen; permission prompt; granted; **taps**. |
 | 11:28 | Ana's list: *"Mum · Everything OK · Your phone last saw a check-in on Wednesday 26 August."* |

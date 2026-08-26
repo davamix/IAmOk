@@ -16,9 +16,14 @@ import 'firebase_bootstrap.dart';
 /// something the client was expected to do and could not. ADR-0011 records the
 /// resolution: `createInvite` is a Function, exactly as §8 always said.
 ///
-/// **UI isolate only.** No background entry point calls a function — a nudge
-/// carries no authority (§3), and an isolate with seconds to live has nothing to
-/// ask.
+/// **No background entry point calls a callable** — a nudge carries no authority
+/// (§3), and an isolate with seconds to live has nothing to ask. This class is
+/// reached only from the UI isolate, which `domain_purity_test.dart` enforces by
+/// computing the closure from both background entry points.
+///
+/// The `cloud_functions` *package* is a different question and is in all three
+/// isolates, because `FirebaseBootstrap` imports it to wire the emulator. See
+/// §15.
 class InviteService {
   InviteService({FirebaseFunctions? functions}) : _injected = functions;
 
@@ -86,15 +91,23 @@ class InviteService {
           return const InviteRefused(InviteRefusal.couldNotReach);
         }
         final parsed = DateTime.tryParse(expiresAt);
-        if (parsed == null) {
+        // **An offset-less timestamp is refused, not repaired.**
+        //
+        // This used to say the `toUtc()` below was *"belt and braces against a
+        // future sender that omits the `Z`"*. It is the opposite:
+        // `DateTime.tryParse('2026-08-27T09:00:00')` with no offset yields a
+        // **local** instant, and `toUtc()` then shifts it by the device's offset
+        // — so the rescue would render the expiry two hours out in Madrid rather
+        // than fixing anything, and the result would depend on which phone read
+        // it.
+        //
+        // The Function sends ISO-8601 with a `Z` (`toISOString()`), so an
+        // offset-less string is a malformed payload from a backend this build
+        // does not understand — which is what `couldNotReach` is for.
+        if (parsed == null || !parsed.isUtc) {
           return const InviteRefused(InviteRefusal.couldNotReach);
         }
-        // **UTC, always.** The Function sends ISO-8601 with a `Z`, so this
-        // parses to an absolute instant rather than to the device's zone; the
-        // `toUtc()` is belt and braces against a future sender that omits it,
-        // because a local-zone instant here would render an expiry hours out on
-        // a screen whose whole job is to say when the code stops working.
-        return InviteReady(code: code, expiresAt: parsed.toUtc());
+        return InviteReady(code: code, expiresAt: parsed);
       case 'watched-profile-missing':
         return const InviteRefused(InviteRefusal.profileMissing);
       default:

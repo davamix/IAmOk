@@ -262,6 +262,107 @@ void main() {
     });
   });
 
+  /// **What keeps a reinstall from being asked two questions it answered by
+  /// action**, now that `HomeRoute.decide` ends onboarding on `completed` alone.
+  ///
+  /// §1 chose Google Sign-In because the uid survives a reinstall, so the links
+  /// do and the store does not. Splitting *is the flow over* from *does this
+  /// user have a role* is what stopped answering a question ending the flow;
+  /// this is the piece that reconnects them, once, before the router is asked.
+  group('settleOnboardingIfPaired', () {
+    Link link({required String watched, required String watcher}) => Link(
+          watchedUid: watched,
+          watcherUid: watcher,
+          status: LinkStatus.accepted,
+          watchedName: 'Mum',
+          watcherName: 'Ana',
+          watchedTimezone: 'Europe/Madrid',
+          activeFrom: DayKey(2026, 8, 1),
+          createdAt: DateTime.utc(2026, 8, 1),
+        );
+
+    AppServices services() => container.read(appServicesProvider);
+
+    test('a reinstalled watched person is settled', () async {
+      await store.upsertLink(link(watched: 'mum', watcher: 'ana'));
+      await services().settleOnboardingIfPaired();
+      expect((await store.onboardingChoices()).completed, isTrue);
+    });
+
+    test('a reinstalled watcher is settled', () async {
+      await store.upsertLink(link(watched: 'granddad', watcher: 'mum'));
+      await services().settleOnboardingIfPaired();
+      expect((await store.onboardingChoices()).completed, isTrue);
+    });
+
+    test('a cold install with no links is NOT settled', () async {
+      await services().settleOnboardingIfPaired();
+      expect(
+        (await store.onboardingChoices()).completed,
+        isFalse,
+        reason: 'settling here would skip onboarding for a brand-new user',
+      );
+    });
+
+    test('a REVOKED link does not settle anything', () async {
+      await store.upsertLink(
+        link(watched: 'mum', watcher: 'ana')
+            .copyWith(status: LinkStatus.revoked),
+      );
+      await services().settleOnboardingIfPaired();
+      expect((await store.onboardingChoices()).completed, isFalse);
+    });
+
+    test('signed out settles nothing', () async {
+      final signedOut = containerFor(LocalStore.signedOutUid);
+      addTearDown(signedOut.dispose);
+      await store.upsertLink(link(watched: 'mum', watcher: 'ana'));
+      await signedOut.read(appServicesProvider).settleOnboardingIfPaired();
+      expect((await store.onboardingChoices()).completed, isFalse);
+    });
+
+    // It must not interrupt somebody mid-flow who has just paired — which is
+    // the ordinary state of anyone who has used the code screen.
+    test('it never un-completes, and never clears an answer', () async {
+      await store.setOnboardingChoices(const OnboardingChoices(
+        wantsToBeWatched: true,
+        wantsToWatch: false,
+        completed: true,
+      ));
+      await services().settleOnboardingIfPaired();
+      expect(
+        await store.onboardingChoices(),
+        const OnboardingChoices(
+          wantsToBeWatched: true,
+          wantsToWatch: false,
+          completed: true,
+        ),
+      );
+    });
+
+    test('is idempotent', () async {
+      await store.upsertLink(link(watched: 'mum', watcher: 'ana'));
+      await services().settleOnboardingIfPaired();
+      await services().settleOnboardingIfPaired();
+      expect((await store.onboardingChoices()).completed, isTrue);
+    });
+
+    test('and the settled user is then routed by their links', () async {
+      await store.upsertLink(link(watched: 'granddad', watcher: 'mum'));
+      await services().settleOnboardingIfPaired();
+
+      expect(
+        HomeRoute.decide(
+          signedIn: true,
+          choices: await store.onboardingChoices(),
+          hasAcceptedWatchedLinks: false,
+          hasAcceptedWatcherLinks: true,
+        ).screen,
+        HomeScreen.watcherList,
+      );
+    });
+  });
+
   group('answering', () {
     test('the first question makes this user watched', () async {
       await container.read(onboardingChoicesProvider.future);

@@ -239,4 +239,43 @@ void main() {
     expect(File('docs/security/threat-model.md').existsSync(), isTrue);
     expect(File('docs/infrastructure/deploy-notes.md').existsSync(), isTrue);
   });
+
+  /// **Every emulator wiring call passes `automaticHostMapping: false`.**
+  ///
+  /// A lint, not a proof — the same shape as the guards in
+  /// `domain_purity_test.dart`, and it exists to stop the *specific* regression
+  /// that already happened.
+  ///
+  /// Measured on the POCO F3 on 2026-08-26: `FirebaseBootstrap` passed the flag
+  /// to Auth and Firestore and not to `useFunctionsEmulator`, which defaults it
+  /// to `true` exactly as the other two do. Over `adb reverse` the phone signed
+  /// in, wrote `users/{uid}` and rendered the pairing screen — then every
+  /// callable went to `10.0.2.2`, which means nothing on a physical handset, so
+  /// `redeemInvite` hung until it timed out and the Functions emulator logged
+  /// nothing at all. **Half the app working is what made it read as a backend
+  /// fault** rather than as a host that was never reached.
+  ///
+  /// Three plugins, three for three. This is the `CLAUDE.md` line made
+  /// mechanical, so the fourth cannot be missed by remembering.
+  test('every emulator wiring call passes automaticHostMapping: false', () {
+    // Comments stripped first: the reasoning above the calls quotes the flag
+    // several times, and matching those would make the count pass for the wrong
+    // reason. The same move `copy_floors_test.dart` makes, for the same reason.
+    final code = File('lib/data/firebase_bootstrap.dart')
+        .readAsStringSync()
+        .split('\n')
+        .where((line) => !line.trimLeft().startsWith('//'))
+        .join('\n');
+    final calls = RegExp(r'use\w+Emulator\(').allMatches(code).length;
+    final flags = 'automaticHostMapping: false'.allMatches(code).length;
+
+    expect(calls, greaterThan(0), reason: 'the regex stopped matching anything');
+    expect(
+      flags,
+      calls,
+      reason: 'every FlutterFire API that takes an emulator host rewrites it on '
+          'Android unless told not to — $calls wiring calls, $flags opt-outs',
+    );
+  });
+
 }

@@ -136,6 +136,13 @@ Future<void> main() async {
   // outcome and the reason `syncInto` returns a bool rather than throwing.
   await services.syncLinks();
 
+  // **After the links, and before anything routes.** A reinstall keeps the uid
+  // and therefore the links, and loses the store — so this is the moment a link
+  // set appears under a store that has never seen it. Settling it here is what
+  // stops a reinstalled watcher being asked two questions they answered by
+  // action, now that `HomeRoute.decide` ends onboarding on `completed` alone.
+  await services.settleOnboardingIfPaired();
+
   runApp(
     ProviderScope(
       // `launchServicesProvider`, not `appServicesProvider`: the latter is
@@ -354,6 +361,13 @@ class _IAmOkAppState extends ConsumerState<IAmOkApp>
   Future<void> _onResumed() async {
     final services = ref.read(appServicesProvider);
     await services.cacheDeviceFacts();
+    // **After the device facts, so the zone it writes is the fresh one.**
+    // `users/{uid}` was written at sign-in and never again, which made three of
+    // the pairing refusals name a next action that could not work — see
+    // [AppServices.refreshProfile]. It is also where the timezone
+    // `redeemInvite` denormalises onto every new link comes from, and that
+    // changes while the app is backgrounded.
+    unawaited(services.refreshProfile());
     // Same ordering as launch, and for the same reason: a link revoked while
     // this app was backgrounded has to be gone before the reconcile below
     // decides what to arm.

@@ -99,25 +99,23 @@ class OnboardingChoices {
 /// `docs/testing/strategy.md`'s rule is that a predicate over booleans is logic
 /// and belongs where it can be asserted without a device.
 ///
-/// ## Links outrank the stored answers, and that is the load-bearing part
+/// ## Two questions, kept apart
 ///
-/// §1 chose Google Sign-In precisely because **the uid survives a reinstall and
-/// a phone replacement, so links never break**. A cold install therefore starts
-/// with an empty `LocalStore` — no recorded answers — and a user who may already
-/// be watching three people. Routing on the stored answers alone would put a
-/// reinstalled watcher on the Tap screen, where the list is unreachable except
-/// by a notification tap, which is the exact failure `main.dart` warns about
-/// arriving through the fix for it.
+/// **Is onboarding over?** — `choices.completed`, and nothing else. The flow
+/// owns its own ending; see [decide].
 ///
-/// So the two sources are **unioned, never overridden**: an accepted link is
-/// evidence of a role, and a recorded answer is an intention that has not
-/// produced a link yet. Someone who creates an invite nobody has redeemed is
-/// watched by nobody and still belongs on the Tap screen — that is what
-/// `TapCopy.nobodyYet` exists to say.
+/// **Which main screen?** — the stored answers **unioned** with the accepted
+/// links. §1 chose Google Sign-In precisely because **the uid survives a
+/// reinstall and a phone replacement, so links never break**, so a fresh store
+/// can belong to a user who is already watching three people. Routing on the
+/// stored answers alone would put a reinstalled watcher on the Tap screen, where
+/// the list is unreachable except by a notification tap — the exact failure
+/// `main.dart` warns about, arriving through the fix for it.
 ///
-/// **Only accepted links count.** A revoked one is not a role: it is a role that
-/// ended, and `WatchedAudience` records at length why this app does not render
-/// *"someone stopped watching you"* in any form.
+/// Conflating the two is what made answering a question eject the reader from
+/// the flow. They are separated now, and `AppServices.settleOnboardingIfPaired`
+/// is what connects them: it answers the first question *from* the links, once,
+/// before the router is asked.
 class HomeRoute {
   const HomeRoute({required this.screen, required this.watcherListReachable});
 
@@ -155,20 +153,52 @@ class HomeRoute {
       );
     }
 
-    final isWatched = choices.wantsToBeWatched || hasAcceptedWatchedLinks;
-    final isWatcher = choices.wantsToWatch || hasAcceptedWatcherLinks;
-
-    // **Links are what let a reinstall skip the questions**, and the condition
-    // is deliberately about links rather than about `completed` alone. A user
-    // whose store was wiped but whose link graph survived has already answered
-    // both questions by acting on them; asking again would be the app failing to
-    // recognise somebody it is already relaying for.
-    if (!choices.completed && !isWatched && !isWatcher) {
+    // **`completed` is the ONLY thing that ends onboarding**, and that is a
+    // correction rather than the original design.
+    //
+    // This guard used to read `!completed && !isWatched && !isWatcher`, with
+    // `isWatched`/`isWatcher` unioning the answers — so **answering a question
+    // ejected the reader from the flow**. Two ways in, both live:
+    //
+    // - Answer question 1 affirmatively and the route recomputes with a role,
+    //   finds one, and lands on the Tap screen. Question 2 is never asked and
+    //   the summary is never seen. Measured on two phones.
+    // - Kill the app mid-flow — a call, a battery, HyperOS trimming the process
+    //   — and relaunch. `_persist` writes each answer immediately, so the store
+    //   holds `(wantsToBeWatched: true, completed: false)` and the same thing
+    //   happens with no provider involved at all. `completed` then stays false
+    //   for ever and the two questions are never finished.
+    //
+    // The first was patched by not invalidating the router's provider mid-flow,
+    // which made the defect latent rather than absent: it was then held off by
+    // a *cache*, and any future provider that rebuilt `appServicesProvider`
+    // would have reopened it. This is the version that cannot come back.
+    //
+    // **The reinstall case is settled elsewhere, on purpose.**
+    // `AppServices.settleOnboardingIfPaired` marks the flow complete when this
+    // account already has links — the questions were answered by action — so
+    // that case never reaches this function needing special treatment. Putting
+    // it here is what coupled *ending the flow* to *having a role*, and those
+    // are two different questions.
+    if (!choices.completed) {
       return const HomeRoute(
         screen: HomeScreen.onboarding,
         watcherListReachable: false,
       );
     }
+
+    // **From here down the links are evidence of a role, and nothing else.**
+    // They no longer decide whether onboarding is over — only which main screen
+    // an onboarded user belongs on. A recorded answer is an intention that may
+    // not have produced a link yet; an accepted link is a role the stored
+    // answers may not know about, after a reinstall or a pairing made from a
+    // main screen.
+    //
+    // **Only accepted links count.** A revoked one is not a role: it is a role
+    // that ended, and `WatchedAudience` records at length why this app renders
+    // no such thing.
+    final isWatched = choices.wantsToBeWatched || hasAcceptedWatchedLinks;
+    final isWatcher = choices.wantsToWatch || hasAcceptedWatcherLinks;
 
     // **Tap + Away takes priority, and the button is the compensation.** PLAN.md
     // settles this: the person who taps daily should never have to navigate to

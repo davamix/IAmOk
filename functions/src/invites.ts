@@ -252,11 +252,25 @@ export async function createInviteFor(
     }
   }
 
-  // Best-effort, and deliberately not awaited into the result: a sweep that
-  // fails must not fail the pairing it was incidental to.
-  for (const id of stale) {
-    void invites.doc(id).delete().catch(() => undefined);
-  }
+  // **Awaited, because on Cloud Run an unawaited promise may simply never
+  // run.** This was `void … .catch()`, on the reasoning that a sweep which fails
+  // must not fail the pairing it was incidental to. That property is preserved
+  // by the per-document `.catch` below; what the `void` actually bought was a
+  // sweep that works **only in the emulator**. 2nd-gen functions are throttled
+  // the moment the response is written, so work started and not awaited is
+  // dropped — and the local Node process, where nothing throttles, is exactly
+  // where `invites.test.js` proves it works. A test that can only pass.
+  //
+  // It matters because this is the design's **only** garbage collection: §9 has
+  // no scheduled function deliberately, so if this silently no-ops, expired
+  // invites accumulate for ever and the `watchedUid ==` read above — which is
+  // on the pairing path — grows without bound.
+  //
+  // `allSettled`, so one failed delete cannot reject the batch, and the set is
+  // one person's own invites so the added latency is bounded by construction.
+  await Promise.allSettled(
+    stale.map((id) => invites.doc(id).delete().catch(() => undefined)),
+  );
 
   if (live !== null) {
     return {
@@ -279,7 +293,14 @@ export async function createInviteFor(
       });
       return { code, expiresAt: expiresAt.toDate().toISOString(), reused: false };
     } catch (error) {
-      if (attempt === MAX_CODE_ATTEMPTS - 1) throw error;
+      // **Only a collision is retried.** This caught everything, so a transient
+      // `DEADLINE_EXCEEDED` on a write that had in fact landed would mint a
+      // *second* live code for the same person — doubling their guessing surface
+      // and leaving an orphan nothing sweeps until it expires. Firestore's
+      // `ALREADY_EXISTS` is gRPC code 6, which is the one case this loop exists
+      // for; anything else is rethrown immediately.
+      const code = (error as { code?: unknown }).code;
+      if (code !== 6 || attempt === MAX_CODE_ATTEMPTS - 1) throw error;
     }
   }
   // Unreachable: the loop either returns or rethrows on its last attempt.
@@ -347,7 +368,25 @@ export async function redeemInviteFor(
 
     // Ahead of expiry on purpose — see the docstring. A completed pairing
     // reporting "that code has expired" would be false about the pairing.
-    if (alreadyMine && linkSnap.exists) {
+    //
+    // **`accepted`, not merely `exists`** — and the difference is a false claim
+    // to a family. The invite is deliberately kept after it is consumed, and the
+    // code stays in the message thread it was shared in. So a watcher who has
+    // been **revoked** can re-type their old code: `alreadyMine` is true, the
+    // link document still exists, and without this clause the callable answers
+    // `linked`, the screen renders a green tick and *"You are now looking after
+    // Mum."*, and nothing has been restored. Every read that watcher makes is
+    // still refused by the rules, so the app would be claiming a relationship
+    // the backend denies — silence dressed as success, which is the direction
+    // this app must never fail in.
+    //
+    // Falling through is correct rather than convenient: two lines below,
+    // `consumedBy` is set, so the answer becomes `consumed` — *"That code has
+    // already been used. Ask for a new one."* — which is true, and names the
+    // action that actually works. It must **not** fall further into the re-link
+    // path, or a revoked watcher could restore themselves with a spent code.
+    const linkAccepted = (linkSnap.data() ?? {})['status'] === 'accepted';
+    if (alreadyMine && linkSnap.exists && linkAccepted) {
       const existing = linkSnap.data() ?? {};
       const activeFrom = existing['activeFrom'];
       const watchedName = existing['watchedName'];

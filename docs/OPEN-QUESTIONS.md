@@ -166,23 +166,52 @@ the ledger) re-posts warnings a family has already read and acted on.
 
 Added at the end of Phase 5, when pairing became real.
 
-**The arithmetic, so the acceptance is a position rather than a shrug.** A code is 6 characters from
-a 32-character alphabet — 32^6 ≈ **1.07 billion**. Codes are single-use, live for **24 hours**, and at
-family scale a handful exist at any moment. Guessing one is not a realistic threat with the numbers as
-they are.
+**The arithmetic, and the rate it depends on.** A code is 6 characters from a 32-character
+alphabet — 32^6 ≈ **1.07 billion**. Codes are single-use and live for **24 hours**, and at family
+scale a handful exist at any moment.
 
-**What a hit would cost is not small, which is why this is written down.** A successful guess makes
-the attacker a **watcher of a stranger** — the check-in history and display name of an identifiable
-elderly person living alone, which `security/threat-model.md` calls the more sensitive half of this
-data. The callable never returns a uid, so the blast radius stops there, and either party can revoke.
+That was the whole of this entry until the Phase 5 review, and it has **no rate term in it** — which
+is the half that decides whether the conclusion holds. `setGlobalOptions` gives every function
+`maxInstances: 10`, and the 2nd-gen default is `concurrency: 80`, so deployed as written
+`redeemInvite` would have accepted **800 concurrent** guesses. At that throughput the expected time
+to a first hit falls *inside* one code's lifetime rather than outside it, and the acceptance below
+would have been resting on a number that was never true.
+
+`redeemInvite` now carries `concurrency: 1, maxInstances: 3` — roughly fifteen attempts a second,
+which costs a family nothing on a once-per-relationship call and is what makes the arithmetic above
+mean what it says. **That cap is now load-bearing: do not raise it without redoing this sum.**
+
+**What a hit costs, stated properly.** An earlier version of this entry said *"the callable never
+returns a uid, so the blast radius stops there"*. Both halves were wrong.
+
+- On success `redeemInvite` returns `linkId` = `{watchedUid}_{watcherUid}`, so the attacker **does**
+  get the watched person's uid — necessarily, since it is what makes their check-ins readable. §9's
+  actual rule is that no client learns a uid *out of an invite*, and that holds: every refusal
+  returns a bare status.
+- The blast radius does not stop at check-ins. `firestore.rules` grants an accepted link **read on
+  `users/{watchedUid}/shared/away`** — *this specific home is empty between these two dates*, which
+  the threat model rates High by inference — and **write** on it too. So a guessed link lets a
+  stranger set a ~32-day away period, which suppresses the missed-day warning for **every** watcher,
+  renewably. That produces silence rather than a false alarm, which is the direction this app cannot
+  detect in itself.
+
+**What limits it.** The new watcher appears **by name** on the watched person's Tap screen
+(ADR-0005), and either party can revoke. Both are real, and neither is automatic — the away half in
+particular has no surface at all until Phase 6 builds one.
+
+**A cheap counter was considered and not built.** It is a Firestore document per uid on the pairing
+path, with contention and its own failure modes, for a threat the concurrency cap now bounds.
 
 **The designed control is App Check enforcement**, which row 5 records as structurally gated on the
-app reaching an internal test track. A per-caller failure counter was considered and not built: it is
-a Firestore document per uid on the pairing path, with contention and its own failure modes, for a
-threat the numbers already bound.
+app reaching an internal test track. **For a 2nd-gen callable that is a code change, not the console
+toggle row 5 describes**: enforcement is `enforceAppCheck: true` in the `onCall` options, deployed
+from this repo. Neither callable sets it today, which is correct — enforcement must not precede a
+verified client — but "fold it into that work" is not zero effort, and flipping the console switch
+alone would leave both callables open while the register said the control was on.
 
-**Blocker when:** before App Check is enforced — fold it into that work rather than building a second
-mechanism — or immediately, if abuse is ever observed. `redeemInvite` logs the outcome and the
+**Blocker when:** before App Check is enforced — and note that for these two callables that means a
+code change plus a Functions deploy, not only the console — or immediately, if abuse is ever
+observed. `redeemInvite` logs the outcome and the
 caller's uid on every call, so the evidence exists to notice.
 
 ---

@@ -1,7 +1,7 @@
 /**
  * Cloud Functions for I Am Ok — ARCHITECTURE.md §9.
  *
- * Four are required and one is optional; three of them are here.
+ * Four are required and one is optional; all four are here.
  *
  * ## Two rules that hold for every function added here
  *
@@ -38,9 +38,13 @@ import { initializeApp } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
 import { getMessaging } from 'firebase-admin/messaging';
 import { logger, setGlobalOptions } from 'firebase-functions/v2';
-import { onDocumentCreated } from 'firebase-functions/v2/firestore';
+import {
+  onDocumentCreated,
+  onDocumentWritten,
+} from 'firebase-functions/v2/firestore';
 import { HttpsError, onCall } from 'firebase-functions/v2/https';
 
+import { awayFactFrom, fanOutAwayChange } from './away_fan_out';
 import type { PushSender } from './check_in_fan_out';
 import { checkInFactFrom, fanOutCheckIn, isDayKey } from './check_in_fan_out';
 import {
@@ -148,6 +152,81 @@ export const onCheckInCreated = onDocumentCreated(
       // Only a Firestore fault reaches here now. Counts and ids only — **never
       // a token**, which is enough to send a push to somebody's phone.
       logger.error('onCheckInCreated: fan-out failed', { watchedUid, date, error });
+    }
+  },
+);
+
+/**
+ * An away period was set, extended, truncated or cancelled; nudge every party.
+ *
+ * ## `onDocumentWritten`, not `onDocumentCreated`, and the difference is the
+ * whole feature
+ *
+ * `onCheckInCreated` deliberately fires only on **create**, because the document
+ * id is the day and a second tap is an update it must not re-announce. Away is
+ * the opposite: the document id is fixed at `shared/away`, so **every**
+ * meaningful change to it is an update or a delete. Extending a holiday,
+ * truncating it, and cancelling it outright would all be invisible to a
+ * create-only trigger — and the cancellation is the one that matters most,
+ * because until every device hears about it their family stays silent.
+ *
+ * §12: *"cancellation is symmetric with activation. Anyone can cancel; the same
+ * document is written; the same fan-out and the same reconcile() run. There is
+ * no separate cancel path."* One trigger on `written` is what makes that true
+ * rather than nearly true.
+ *
+ * ## Not retried, and losing it entirely is survivable
+ *
+ * v2 triggers do not retry unless asked, and this one must not ask — for the
+ * reason `onCheckInCreated` gives, and for a stronger one of its own. **This
+ * nudge carries no authority at all.** Expiry is arithmetic against `through`,
+ * computed independently on every device (§12), so nothing here is load-bearing
+ * for correctness: dropping every message this function sends costs latency and
+ * changes no answer. That is the property §12 chose over an "away finished"
+ * message, whose loss silenced a watcher for ever.
+ *
+ * ## Everything it can fail at, it swallows
+ *
+ * A throw here is invisible — no screen, no user — and a failure to *push* must
+ * never look like a failure to *set away*. The document is already written and
+ * durable before this runs, and it is the thing every device decides from.
+ */
+export const onAwayChanged = onDocumentWritten(
+  'users/{uid}/shared/away',
+  async (event) => {
+    const watchedUid = event.params.uid;
+
+    // `event.data.after` is absent on a delete, which is a real and ordinary
+    // case here: §12 deletes rather than truncates when somebody cancels on the
+    // day the period starts, because truncating would write `through = from - 1`
+    // and break `through >= from`.
+    const after = event.data?.after;
+    const fact = awayFactFrom(
+      watchedUid,
+      after?.exists === true ? after.data() : undefined,
+    );
+
+    try {
+      const result = await fanOutAwayChange(
+        { db: getFirestore(), sender },
+        fact,
+      );
+      // One line either way, always carrying the counts — the same shape and
+      // the same reason as the check-in fan-out: "nobody was nudged" has two
+      // completely different causes and one line that cannot tell them apart
+      // sends whoever is debugging to the wrong half of the system.
+      //
+      // No `setByName` and no dates. §12 rates an away period as *this specific
+      // home is empty between these dates*; uids and counts are what a log needs
+      // and are already the link graph, which `threat-model.md` records.
+      const line = { watchedUid, cleared: fact.cleared, ...result };
+      if (result.transportError === undefined) {
+        logger.info('onAwayChanged: fanned out', line);
+      } else {
+        logger.warn('onAwayChanged: fanned out, transport failed', line);
+      }
+    } catch (error) {
+      logger.error('onAwayChanged: fan-out failed', { watchedUid, error });
     }
   },
 );

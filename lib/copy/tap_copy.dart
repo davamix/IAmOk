@@ -41,8 +41,39 @@ abstract final class TapCopy {
 
   /// While an away period is active (§12). Tapping is still **allowed** —
   /// harmless, reassuring, and it writes a normal check-in.
+  ///
+  /// **She set it herself, or nobody can be named.** [awayBy] is the variant for
+  /// the case that made this a decision: a watcher can mark her away from her
+  /// own phone, and this line is how the watched person finds out at all.
+  ///
+  /// This one is also the fallback when the document carries no usable name —
+  /// ADR-0003's *Absence* case — and it is the right fallback precisely because
+  /// it names nobody rather than naming somebody it cannot show acted.
   static String away(String lastDay) =>
       "You're away until $lastDay. Your family isn't expecting a check-in.";
+
+  /// The same state, when **somebody else** set it.
+  ///
+  /// **Owner decision, 2026-08-27.** `screens.md` has required since Phase 3
+  /// that every surface displaying an away period names who set it, while
+  /// [away] named nobody — and the two contradicted. The rule adopted is *name
+  /// who set it when it wasn't you*, which is how a person actually speaks and
+  /// which keeps [away] exactly as approved for the case she did it herself.
+  ///
+  /// It is the surface §17's mitigation depends on. That risk — *one watcher
+  /// silences the whole family by setting away* — is accepted by design, and
+  /// the control is `setByName` on every surface plus anyone being able to
+  /// cancel. This screen is read by the one person best placed to notice *"I am
+  /// not away"*, so a line here that named nobody would leave the mitigation
+  /// resting on surfaces she never sees.
+  ///
+  /// *"marked … away"* rather than a new phrasing, because it is already this
+  /// project's approved vocabulary for the act — `screens.md` ships *"Ana
+  /// marked Mum away until Sat 22 Aug."* — and one verb for one action is worth
+  /// more here than a sentence tuned in isolation.
+  static String awayBy(String setByName, String lastDay) =>
+      '$setByName marked you away until $lastDay. '
+      "Your family isn't expecting a check-in.";
 
   /// The Away control. Secondary, and not adjacent to the tap target.
   static const String awayAction = "I'm away";

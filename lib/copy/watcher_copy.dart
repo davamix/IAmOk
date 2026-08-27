@@ -253,6 +253,56 @@ abstract final class WatcherCopy {
 
   // ---------------------------------------------------------- spoken labels
 
+  /// The away row — *"Away until Sat 22 Aug — set by Ana"*.
+  ///
+  /// **In the app, never as a notification** (§12's effects table). It is
+  /// status, not news: the news was the `onAwayChanged` nudge, and repeating it
+  /// every time the list opens is the kind of daily reassurance
+  /// `guidelines.md`'s *quiet confirm, loud miss* rule exists to keep out.
+  ///
+  /// It names who set it, which is the rule `screens.md` states for **every**
+  /// surface that displays an away period and the mitigation §17 records for
+  /// *one watcher silences the whole family*. `setByName` is denormalised onto
+  /// the away document precisely so this line is renderable **offline** — links
+  /// are `(watched, watcher)` pairs, so a watcher has no path from a peer
+  /// watcher's uid to their name, and §7 deliberately keeps watchers out of
+  /// other users' documents (ADR-0003).
+  ///
+  /// **The name is a label and is not authenticated.** Nothing here may imply
+  /// otherwise; the uid underneath is what makes a forgery recoverable.
+  static String awayUntil(String date) => 'Away until $date';
+
+  /// The same row when the document carries no usable name.
+  ///
+  /// ADR-0003's *Absence* case — an older build or an admin write. It names
+  /// nobody rather than *"set by ??"*, which would advertise the gap without
+  /// telling the reader anything, and the away period itself is still shown
+  /// because dropping it would warn a family about days somebody really did
+  /// mark away.
+  ///
+  /// A **subtraction** from the attributed line, which is the same move
+  /// `nobodyYet` and this class's own `nobody` made in Phase 5: one clause
+  /// removed, nothing reworded, so the two states cannot describe the same
+  /// thing differently.
+  static String awayUntilBy(String date, String setByName) =>
+      '${awayUntil(date)} — set by $setByName';
+
+  /// The row's away action.
+  ///
+  /// Says what pressing it **does**, and names the person — the row is one of
+  /// several and a bare *"Mark away"* would be ambiguous about whom to a
+  /// screen-reader user swiping through the list. The rule `screens.md`
+  /// recorded when `WatcherCopy.openLabel` stopped reusing a screen title.
+  static String markAwayAction(String watchedName) => 'Mark $watchedName away';
+
+  /// The same control while a period is already in force.
+  ///
+  /// **Cancellation is symmetric with activation** (§12): anyone can cancel,
+  /// the same document is written, and there is no separate cancel path. One
+  /// control with two labels is what that looks like on a screen.
+  static String endAwayAction(String watchedName) =>
+      'End $watchedName\'s away period';
+
   /// A row's TalkBack label.
   ///
   /// Names the person **and** their state, because a screen reader user gets

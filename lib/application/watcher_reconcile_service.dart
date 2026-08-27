@@ -15,10 +15,17 @@ import '../platform/warning_alarm_scheduler.dart';
 ///
 /// Ordered as the decision is: a revoked link says nothing can be checked, a
 /// refused read is a claim about **us**, a standing warning is a claim about
-/// **her**, and *"Everything OK"* is what is left. See
-/// [WatchedPersonState.rowKind] for why this is a named value rather than a
-/// chain of `if`s in the widget.
-enum WatchedRowKind { revoked, accessLost, warning, ok }
+/// **her**, an away period says nothing is expected of her today, and
+/// *"Everything OK"* is what is left. See [WatchedPersonState.rowKind] for why
+/// this is a named value rather than a chain of `if`s in the widget.
+///
+/// **[away] sits below [warning] deliberately.** The two look mutually
+/// exclusive — §10 step 5 is silent while an away period covers `D` — and they
+/// are not: `warnUnverifiableAway` is a warning *about* an away period this
+/// device could not re-verify, and it must render as the warning it is rather
+/// than as a calm "Away until Saturday" that claims a certainty the read did not
+/// establish.
+enum WatchedRowKind { revoked, accessLost, warning, away, ok }
 
 /// One watched person, as the watcher's screen renders them.
 class WatchedPersonState {
@@ -55,6 +62,35 @@ class WatchedPersonState {
   /// Whether the app currently cannot read this person's check-ins
   /// (ADR-0004). Drives the row that the *lost access* notification opens onto.
   bool get hasLostAccess => cache.hasLostAccess;
+
+  /// **Today, in the watched person's zone** — the day an away row is about.
+  ///
+  /// Derived rather than carried: `WatcherReconciler` states that `daysToDecide`
+  /// always ends at `D`, so [WarningDecision.day] is always the most recently
+  /// **completed** watched-local day, and the day after it is her today by
+  /// definition. Adding a second source for it would be two answers to a
+  /// question this one already settles — and they would disagree exactly at a
+  /// watched-local midnight, which is where every day-boundary defect in this
+  /// project has been.
+  ///
+  /// It is her zone and not the watcher's, deliberately. §11: `D` is always a
+  /// date in the watched person's timezone, and an away period's `from` and
+  /// `through` are labels in that same zone. A watcher in London reading a row
+  /// about somebody in Sydney must see the away period the way *she* lives it.
+  DayKey get watchedToday => decision.day.next;
+
+  /// Whether an away period covers her today.
+  ///
+  /// The **row's** question, and it is not the warning decision's. The decision
+  /// is about `D` — yesterday — so an away period starting today does not touch
+  /// it, and a row keyed on `D` would read *"Everything OK"* on the first day of
+  /// a holiday with a last-seen date that is about to stop moving for a
+  /// fortnight, and nothing anywhere saying why.
+  ///
+  /// `covers` is the **clamped** predicate: a document claiming ten years reads
+  /// as away for sixty days and then stops, rather than silencing a family for a
+  /// decade (`AwayPeriod.clampedToSanityBound`).
+  bool get isAwayToday => cache.away?.period.covers(watchedToday) ?? false;
 
   /// A standing warning for the day this reconcile is **about**, or null.
   ///
@@ -268,9 +304,20 @@ class WatchedPersonState {
       case LinkStatus.accepted:
         if (hasLostAccess) return WatchedRowKind.accessLost;
         final standing = standingWarning;
-        return standing != null && standing != WarningOutcome.silent
-            ? WatchedRowKind.warning
-            : WatchedRowKind.ok;
+        if (standing != null && standing != WarningOutcome.silent) {
+          return WatchedRowKind.warning;
+        }
+        // Phase 6. `screens.md` has committed since Phase 3 to a branch here
+        // and named the position: **above "Everything OK"**, which is where a
+        // verified away period fell until now — a row reading *"Everything OK"*
+        // and a last-seen date that will not move for a fortnight, with nothing
+        // saying why.
+        //
+        // `covers` is the CLAMPED predicate, so a ten-year document renders as
+        // away for sixty days and then stops. `AwayPeriod.clampedToSanityBound`
+        // carries the reasoning; the short version is that a bound at the exact
+        // cap would un-honour periods the server legitimately accepted.
+        return isAwayToday ? WatchedRowKind.away : WatchedRowKind.ok;
     }
   }
 }

@@ -8,11 +8,13 @@ import 'package:timezone/timezone.dart' as tz;
 import '../application/onboarding_controller.dart';
 import '../application/providers.dart';
 import '../application/watched_reconcile_service.dart';
+import '../copy/away_copy.dart';
 import '../copy/notification_copy.dart';
 import '../copy/onboarding_copy.dart';
 import '../copy/tap_copy.dart';
 import '../copy/watcher_copy.dart';
 import '../domain/domain.dart';
+import 'away_picker.dart';
 import 'debug_harness.dart';
 import 'pairing_screens.dart';
 import 'watcher_screen.dart';
@@ -286,6 +288,37 @@ class TapBody extends ConsumerWidget {
   }
 }
 
+/// Which of the two away sentences this reader gets.
+///
+/// **Owner decision, 2026-08-27**: name who set it *when it wasn't you*. She set
+/// it herself, or the document carries no usable name (ADR-0003's *Absence*
+/// case) — the already-approved [TapCopy.away], which names nobody because there
+/// is nobody to name. Somebody else set it — [TapCopy.awayBy], which is the
+/// surface §17's mitigation for *one watcher silences the whole family* actually
+/// depends on.
+///
+/// A pure function of the state and `@visibleForTesting`, the same shape as
+/// `Home.screenFor` and `AddSomeoneButton.pairingScreenFor`: the branch that
+/// decides which claim a person reads is the part that can be wrong, and
+/// asserting it needs no composition root.
+@visibleForTesting
+String awayLineFor(WatchedState state) {
+  final away = state.away;
+  // Non-null by construction at the one call site, which renders this only
+  // under `state.isAway`. Stated rather than assumed so the function is total.
+  if (away == null) return '';
+  final lastDay = AwayCopy.dayAndDate(away.period.through);
+  final setByName = state.awaySetByName;
+  return setByName == null
+      ? TapCopy.away(lastDay)
+      : TapCopy.awayBy(setByName, lastDay);
+}
+
+String _awayLine(WatchedState state) => awayLineFor(state);
+
+/// The away line's key.
+const Key awayLineKey = Key('tap-away-line');
+
 class _BottomBand extends StatelessWidget {
   const _BottomBand({required this.state, required this.tappedAt});
 
@@ -326,6 +359,21 @@ class _BottomBand extends StatelessWidget {
                       ?.copyWith(color: theme.colorScheme.error),
                 ),
               ),
+            // **Above the tap confirmation, and that is the ordering.** It is
+            // the frame for everything else on the screen: it says why nothing
+            // is reminding her today, and the audience line below still says
+            // who would be told if she taps anyway — which §12 allows and
+            // calls harmless and reassuring.
+            if (state.isAway)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Text(
+                  _awayLine(state),
+                  key: awayLineKey,
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.headlineSmall,
+                ),
+              ),
             if (tappedAt != null)
               Text(
                 TapCopy.alreadyTapped(tappedAt!),
@@ -347,11 +395,19 @@ class _BottomBand extends StatelessWidget {
 
             // Away is present, secondary, and **not adjacent** to the tap
             // target — a full text block sits between them, so a mis-tap on the
-            // primary action cannot mark someone away. Inert until Phase 6; here
-            // so the layout it must live in is settled while the screen is
-            // simple.
+            // primary action cannot mark someone away.
+            //
+            // **The rule below it is the Phase 6 requirement**, not decoration.
+            // This screen now has two secondary controls of equal weight, and
+            // `guidelines.md`'s mis-tap reasoning is about distance from the
+            // *tap target*, which says nothing about a nearer neighbour of the
+            // same weight. `screens.md`: give Away visible separation in the
+            // same change that enables it, because shipping the look-alike pair
+            // and fixing it later cannot be undone for whoever already used it.
             const SizedBox(height: 20),
-            const _AwayAction(),
+            const Divider(indent: 32, endIndent: 32, height: 1),
+            const SizedBox(height: 20),
+            _AwayAction(state: state),
           ],
         ),
       ),
@@ -774,19 +830,138 @@ class _NotificationsOffBanner extends ConsumerWidget {
 }
 
 /// Present, secondary, and inert until Phase 6.
-class _AwayAction extends StatelessWidget {
-  const _AwayAction();
+/// The Away control, and what it says when a write does not simply land.
+///
+/// ## Visible separation, in the same change that enables it
+///
+/// `screens.md` records this as a requirement rather than a preference: this
+/// screen now carries **two secondary controls of equal weight**, *Add someone*
+/// and *I'm away*, and `guidelines.md`'s mis-tap reasoning is about distance
+/// from the **tap target** — which is still satisfied — and says nothing about a
+/// nearer neighbour of the same weight. So there is a rule between them, not
+/// merely more whitespace: a divider is a signal a reader takes at a glance,
+/// where a gap is one they have to measure.
+///
+/// **In the same change that enables it**, because shipping the look-alike pair
+/// and separating them later is the one ordering that cannot be undone for
+/// whoever has already used it — a mis-tap that marked somebody away is silence,
+/// which is the failure this app cannot detect in itself.
+///
+/// ## One control, two labels
+///
+/// *"I'm away"* and, while a period is in force, *"I'm not away"* —
+/// `screens.md`, and both strings have been approved since Phase 2. §12:
+/// *"cancellation is symmetric with activation. Anyone can cancel; the same
+/// document is written; the same fan-out and the same reconcile() run. There is
+/// no separate cancel path."*
+///
+/// **No confirmation step on the cancel**, and that is a decision. The failure
+/// direction of a mis-tap here is **loud**: reminders and warnings come back,
+/// which is this app's default-safe state, and setting away again is two taps.
+/// A confirmation would be a third surface on the screen `WatchedAudience`
+/// records this project refusing extra surfaces on. The mis-tap the separation
+/// above exists for is the other direction — pressing *away* by accident — and
+/// that one this screen states in words the moment it happens.
+class _AwayAction extends ConsumerStatefulWidget {
+  const _AwayAction({required this.state});
+
+  final WatchedState state;
 
   @override
-  Widget build(BuildContext context) => TextButton(
-        onPressed: null,
-        style: TextButton.styleFrom(
-          minimumSize: const Size(88, 48),
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-        ),
-        child: const Text(TapCopy.awayAction),
-      );
+  ConsumerState<_AwayAction> createState() => _AwayActionState();
 }
+
+class _AwayActionState extends ConsumerState<_AwayAction> {
+  /// True while a write is in flight. The control is disabled meanwhile, so one
+  /// press cannot become two away documents attributed to the same person.
+  bool _busy = false;
+
+  /// What the last write had to say, or null when it simply landed.
+  ///
+  /// Held here rather than on `WatchedState` because it is a fact about **one
+  /// action**, not about the person: putting it on the state would mean every
+  /// later reconcile had to remember to clear it, and a stale refusal on the
+  /// screen an 80-year-old reads every morning is worse than none.
+  String? _message;
+
+  Future<void> _run(Future<AwayOutcome> Function() action) async {
+    setState(() {
+      _busy = true;
+      _message = null;
+    });
+    final outcome = await action();
+    if (!mounted) return;
+    setState(() {
+      _busy = false;
+      _message = switch (outcome) {
+        AwaySet() => AwayCopy.saved,
+        AwayQueued() => AwayCopy.queued,
+        AwayRefused(:final refusal) => AwayCopy.refusal(refusal),
+      };
+    });
+  }
+
+  Future<void> _setAway() async {
+    final lastDay = await Navigator.of(context).push<DayKey>(
+      MaterialPageRoute(
+        builder: (_) => AwayPickerScreen(
+          today: widget.state.today,
+          initialLastDay: widget.state.away?.period.through,
+        ),
+      ),
+    );
+    // Dismissed. A choice, not a failure, so nothing is said and nothing is
+    // written.
+    if (lastDay == null) return;
+    if (!mounted) return;
+    await _run(() => ref.read(watchedStateProvider.notifier).setAway(lastDay));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final away = widget.state.isAway;
+    final message = _message;
+
+    return Column(
+      children: [
+        TextButton(
+          key: awayActionKey,
+          onPressed: _busy
+              ? null
+              : () => away
+                  ? _run(ref.read(watchedStateProvider.notifier).endAway)
+                  : _setAway(),
+          style: TextButton.styleFrom(
+            minimumSize: const Size(88, 48),
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+          ),
+          child: Text(away ? TapCopy.notAwayAction : TapCopy.awayAction),
+        ),
+        if (message != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Text(
+              message,
+              key: awayMessageKey,
+              textAlign: TextAlign.center,
+              // **Not error-coloured.** Only one of the four things this can say
+              // is a refusal the reader caused, and `AwayCopy.queued` is not a
+              // failure at all — it is §8's offline property working. Painting
+              // them all red would make the successful case look broken, which
+              // is the wordless second claim `PairingRefusalSurface` was
+              // extracted to stop.
+              style: theme.textTheme.titleMedium,
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+/// The Away control's key, and the message beneath it.
+const Key awayActionKey = Key('tap-away-action');
+const Key awayMessageKey = Key('tap-away-message');
 
 class _Failure extends ConsumerWidget {
   const _Failure({required this.error});

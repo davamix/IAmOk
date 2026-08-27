@@ -7,11 +7,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../application/providers.dart';
 import '../application/watcher_reconcile_service.dart';
+import '../copy/away_copy.dart';
 import '../copy/notification_copy.dart';
 import '../copy/onboarding_copy.dart';
 import '../copy/watcher_copy.dart';
 import '../domain/domain.dart';
 import '../platform/notification_router.dart';
+import 'away_picker.dart';
 import 'pairing_screens.dart';
 
 /// The watcher's list — one row per watched person.
@@ -135,14 +137,14 @@ class _WatcherScreenState extends ConsumerState<WatcherScreen>
         // The initial load failed — the store could not be opened, or the first
         // reconcile threw. Says what happened and names a next human, and offers
         // the action, exactly as the Tap screen does.
-        error: (_, _) => _Failed(
-          onRetry: () => ref.invalidate(watcherStateProvider),
-        ),
+        error: (_, _) =>
+            _Failed(onRetry: () => ref.invalidate(watcherStateProvider)),
         data: (watcher) => WatcherBody(
           state: watcher,
           onRefresh: ref.read(watcherStateProvider.notifier).refresh,
-          onTurnOnWarnings:
-              ref.read(watcherStateProvider.notifier).requestNotifications,
+          onTurnOnWarnings: ref
+              .read(watcherStateProvider.notifier)
+              .requestNotifications,
         ),
       ),
     );
@@ -156,29 +158,27 @@ class _Failed extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(WatcherCopy.couldNotCheck, textAlign: TextAlign.center),
-              const SizedBox(height: 16),
-              FilledButton(
-                onPressed: onRetry,
-                // Explicit, like every other button in the app. The theme's
-                // `MaterialTapTargetSize.padded` already gives it a 48dp touch
-                // area, so this was never a floor breach — but it was the only
-                // control relying on that default, and a floor that holds by
-                // accident is one nobody notices losing.
-                style: FilledButton.styleFrom(
-                  minimumSize: const Size(88, 48),
-                ),
-                child: const Text(WatcherCopy.retry),
-              ),
-            ],
+    child: Padding(
+      padding: const EdgeInsets.all(24),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(WatcherCopy.couldNotCheck, textAlign: TextAlign.center),
+          const SizedBox(height: 16),
+          FilledButton(
+            onPressed: onRetry,
+            // Explicit, like every other button in the app. The theme's
+            // `MaterialTapTargetSize.padded` already gives it a 48dp touch
+            // area, so this was never a floor breach — but it was the only
+            // control relying on that default, and a floor that holds by
+            // accident is one nobody notices losing.
+            style: FilledButton.styleFrom(minimumSize: const Size(88, 48)),
+            child: const Text(WatcherCopy.retry),
           ),
-        ),
-      );
+        ],
+      ),
+    ),
+  );
 }
 
 class _Empty extends StatelessWidget {
@@ -188,46 +188,46 @@ class _Empty extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => RefreshIndicator(
-        // **Pull-to-refresh works here too.** The empty state returned early,
-        // before the `RefreshIndicator` existed, so the one screen where a
-        // reader most wants to try again — "I was just added, is it working
-        // yet?" — was the one screen that could not. Backgrounding and
-        // resuming reconciles, but nobody guesses that.
-        onRefresh: () async => onRefresh?.call(),
-        child: ListView(
-          // Always scrollable, so the gesture is available with no content.
-          physics: const AlwaysScrollableScrollPhysics(),
-          children: [
-            SizedBox(
-              height: MediaQuery.sizeOf(context).height * 0.6,
-              child: Center(
-                child: Padding(
-                  padding: const EdgeInsets.all(24),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        WatcherCopy.nobody,
-                        textAlign: TextAlign.center,
-                        // Ordinary secondary text, never a warning colour.
-                        // Styling an empty state as an alarm makes it a status
-                        // message about other people's behaviour, which is the
-                        // thing this app deliberately does not do.
-                        style: Theme.of(context).textTheme.bodyLarge,
-                      ),
-                      const SizedBox(height: 16),
-                      // What makes the line above honest — see `WatcherCopy
-                      // .nobody`, which dropped "ask a family member" the moment
-                      // there was something to press.
-                      const EnterCodeButton(),
-                    ],
+    // **Pull-to-refresh works here too.** The empty state returned early,
+    // before the `RefreshIndicator` existed, so the one screen where a
+    // reader most wants to try again — "I was just added, is it working
+    // yet?" — was the one screen that could not. Backgrounding and
+    // resuming reconciles, but nobody guesses that.
+    onRefresh: () async => onRefresh?.call(),
+    child: ListView(
+      // Always scrollable, so the gesture is available with no content.
+      physics: const AlwaysScrollableScrollPhysics(),
+      children: [
+        SizedBox(
+          height: MediaQuery.sizeOf(context).height * 0.6,
+          child: Center(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    WatcherCopy.nobody,
+                    textAlign: TextAlign.center,
+                    // Ordinary secondary text, never a warning colour.
+                    // Styling an empty state as an alarm makes it a status
+                    // message about other people's behaviour, which is the
+                    // thing this app deliberately does not do.
+                    style: Theme.of(context).textTheme.bodyLarge,
                   ),
-                ),
+                  const SizedBox(height: 16),
+                  // What makes the line above honest — see `WatcherCopy
+                  // .nobody`, which dropped "ask a family member" the moment
+                  // there was something to press.
+                  const EnterCodeButton(),
+                ],
               ),
             ),
-          ],
+          ),
         ),
-      );
+      ],
+    ),
+  );
 }
 
 /// Opens the code screen so this watcher can start looking after somebody else.
@@ -254,9 +254,9 @@ class EnterCodeButton extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     Future<void> open() async {
-      await Navigator.of(context).push<bool>(
-        MaterialPageRoute(builder: (_) => const EnterCodeScreen()),
-      );
+      await Navigator.of(
+        context,
+      ).push<bool>(MaterialPageRoute(builder: (_) => const EnterCodeScreen()));
       // **Reconcile on the way back, whatever came out of that screen.** A new
       // link needs its warning alarm armed, and §3's rule is that nothing
       // patches state incrementally — so this re-reads rather than inserting a
@@ -402,8 +402,9 @@ class _WatcherBodyState extends State<WatcherBody> {
     final owed = <String>[];
     final settled = <String>[];
     for (final person in widget.state.people) {
-      final index =
-          previous.people.indexWhere((p) => p.link.id == person.link.id);
+      final index = previous.people.indexWhere(
+        (p) => p.link.id == person.link.id,
+      );
       // A link that was not in the previous pass — newly paired, or previously
       // in `unreconciled` — has no "before" to have changed from. Reading its
       // arrival as a change would announce a row the reader has never heard.
@@ -428,12 +429,14 @@ class _WatcherBodyState extends State<WatcherBody> {
         // Tuesday 10:14."*, a fact about this device's own effort rather than a
         // claim about her, and it is not what changed. `spoken` is right for the
         // row label, where the reader is swiping through everything on purpose.
-        owed.add(_statusFor(
-          person,
-          watcherZone: widget.state.watcherZone,
-          today: widget.state.today,
-          uses24Hour: widget.state.uses24Hour,
-        ).lines.join(' '));
+        owed.add(
+          _statusFor(
+            person,
+            watcherZone: widget.state.watcherZone,
+            today: widget.state.today,
+            uses24Hour: widget.state.uses24Hour,
+          ).lines.join(' '),
+        );
       }
     }
     final spoken = [...owed, ...settled];
@@ -550,55 +553,57 @@ class _WatcherBodyState extends State<WatcherBody> {
           Expanded(child: _Empty(onRefresh: widget.onRefresh))
         else
           Expanded(
-          child: RefreshIndicator(
-            onRefresh: () async => widget.onRefresh?.call(),
-            child: ListView.separated(
-              // Always scrollable, so pull-to-refresh works with one short row.
-              physics: const AlwaysScrollableScrollPhysics(),
-              // **Builds well past the fold, so a tapped notification can
-              // actually reach its row.** `Scrollable.ensureVisible` needs the
-              // target to exist, and the default cache extent leaves a row a
-              // couple of positions down unbuilt — so the highlight silently
-              // did nothing in precisely the case it was added for.
-              //
-              // The cost is laying out a few extra short rows; this list is one
-              // family, not a feed. Phase 7 owns the multi-person layout and
-              // should replace this with fixed extents or a positioned list if
-              // the number ever justifies it.
-              scrollCacheExtent: const ScrollCacheExtent.pixels(1200),
-              padding: const EdgeInsets.symmetric(vertical: 8),
-              // Reconciled rows first, then the links this pass could not
-              // reconcile at all. They are **in** the list rather than omitted:
-              // an omitted link is invisible, and with one link that made the
-              // screen claim the reader was looking after nobody.
-              itemCount:
-                  widget.state.people.length + widget.state.unreconciled.length,
-              separatorBuilder: (_, _) => const Divider(height: 1),
-              itemBuilder: (context, i) {
-                if (i >= widget.state.people.length) {
-                  return _FailedRow(
-                    link: widget.state.unreconciled[i -
-                        widget.state.people.length],
-                    onRetry: widget.onRefresh,
+            child: RefreshIndicator(
+              onRefresh: () async => widget.onRefresh?.call(),
+              child: ListView.separated(
+                // Always scrollable, so pull-to-refresh works with one short row.
+                physics: const AlwaysScrollableScrollPhysics(),
+                // **Builds well past the fold, so a tapped notification can
+                // actually reach its row.** `Scrollable.ensureVisible` needs the
+                // target to exist, and the default cache extent leaves a row a
+                // couple of positions down unbuilt — so the highlight silently
+                // did nothing in precisely the case it was added for.
+                //
+                // The cost is laying out a few extra short rows; this list is one
+                // family, not a feed. Phase 7 owns the multi-person layout and
+                // should replace this with fixed extents or a positioned list if
+                // the number ever justifies it.
+                scrollCacheExtent: const ScrollCacheExtent.pixels(1200),
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                // Reconciled rows first, then the links this pass could not
+                // reconcile at all. They are **in** the list rather than omitted:
+                // an omitted link is invisible, and with one link that made the
+                // screen claim the reader was looking after nobody.
+                itemCount:
+                    widget.state.people.length +
+                    widget.state.unreconciled.length,
+                separatorBuilder: (_, _) => const Divider(height: 1),
+                itemBuilder: (context, i) {
+                  if (i >= widget.state.people.length) {
+                    return _FailedRow(
+                      link: widget
+                          .state
+                          .unreconciled[i - widget.state.people.length],
+                      onRetry: widget.onRefresh,
+                    );
+                  }
+                  final person = widget.state.people[i];
+                  final highlighted = person.link.id == _highlighted;
+                  return _PersonRow(
+                    // Only the highlighted row carries the key — a GlobalKey must
+                    // be unique in the tree, and it is what `ensureVisible` and
+                    // the announcement both resolve through.
+                    key: highlighted ? _highlightedRow : null,
+                    person: person,
+                    watcherZone: widget.state.watcherZone,
+                    today: widget.state.today,
+                    uses24Hour: widget.state.uses24Hour,
+                    highlighted: highlighted,
                   );
-                }
-                final person = widget.state.people[i];
-                final highlighted = person.link.id == _highlighted;
-                return _PersonRow(
-                  // Only the highlighted row carries the key — a GlobalKey must
-                  // be unique in the tree, and it is what `ensureVisible` and
-                  // the announcement both resolve through.
-                  key: highlighted ? _highlightedRow : null,
-                  person: person,
-                  watcherZone: widget.state.watcherZone,
-                  today: widget.state.today,
-                  uses24Hour: widget.state.uses24Hour,
-                  highlighted: highlighted,
-                );
-              },
+                },
+              ),
             ),
           ),
-        ),
       ],
     );
   }
@@ -636,8 +641,9 @@ class _WarningsOffBanner extends StatelessWidget {
           Text(
             WatcherCopy.warningsOff,
             textAlign: TextAlign.center,
-            style: theme.textTheme.titleMedium
-                ?.copyWith(color: theme.colorScheme.onErrorContainer),
+            style: theme.textTheme.titleMedium?.copyWith(
+              color: theme.colorScheme.onErrorContainer,
+            ),
           ),
           TextButton(
             onPressed: onTurnOn == null ? null : () => onTurnOn!(),
@@ -707,8 +713,9 @@ class _FailedRow extends StatelessWidget {
                   padding: const EdgeInsets.only(top: 2),
                   child: Text(
                     line,
-                    style: theme.textTheme.bodyMedium
-                        ?.copyWith(color: theme.colorScheme.error),
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: theme.colorScheme.error,
+                    ),
                   ),
                 ),
               ),
@@ -735,6 +742,140 @@ class _FailedRow extends StatelessWidget {
             child: const Text(WatcherCopy.retry),
           ),
         ),
+      ],
+    );
+  }
+}
+
+/// The row's away action — the **other side** of "away set from either side".
+///
+/// §12: *"anyone in the group can set, extend or cancel it. No approval."* This
+/// is the surface that makes the watcher's half reachable by a person rather
+/// than only by an API call, which `OPEN-QUESTIONS.md` #11 names in as many
+/// words.
+///
+/// **One control, two labels**, matching the Tap screen's: mark away, or end an
+/// away period that is in force. Cancellation is symmetric with activation
+/// (§12) — the same document, the same fan-out, no separate path.
+///
+/// Both labels **name the person**, because this row is one of several and a
+/// bare *"Mark away"* is ambiguous about whom to a screen-reader user swiping
+/// down the list. The row itself is `ExcludeSemantics`-wrapped into one
+/// utterance, so this button is deliberately outside that: it is a separate
+/// stop with its own label, which is what makes it reachable at all.
+class _AwayRowAction extends ConsumerStatefulWidget {
+  const _AwayRowAction({required this.person});
+
+  final WatchedPersonState person;
+
+  @override
+  ConsumerState<_AwayRowAction> createState() => _AwayRowActionState();
+}
+
+class _AwayRowActionState extends ConsumerState<_AwayRowAction> {
+  bool _busy = false;
+  String? _message;
+
+  Future<void> _run(Future<AwayOutcome> Function() action) async {
+    setState(() {
+      _busy = true;
+      _message = null;
+    });
+    final outcome = await action();
+    if (!mounted) return;
+    setState(() {
+      _busy = false;
+      _message = switch (outcome) {
+        AwaySet() => AwayCopy.saved,
+        AwayQueued() => AwayCopy.queued,
+        AwayRefused(:final refusal) => AwayCopy.refusal(refusal),
+      };
+    });
+  }
+
+  Future<void> _setAway() async {
+    final person = widget.person;
+    final lastDay = await Navigator.of(context).push<DayKey>(
+      MaterialPageRoute(
+        builder: (_) => AwayPickerScreen(
+          // **Her today, not the reader's.** §11: an away period's days are
+          // labels in the watched person's zone, and a watcher in London
+          // marking somebody in Sydney away must bound the picker by the day
+          // *she* is living, or the first and last days are off by one.
+          today: person.watchedToday,
+          initialLastDay: person.cache.away?.period.through,
+        ),
+      ),
+    );
+    if (lastDay == null) return;
+    if (!mounted) return;
+    await _run(
+      () => ref
+          .read(watcherStateProvider.notifier)
+          .setAway(
+            watchedUid: person.link.watchedUid,
+            lastDay: lastDay,
+            watchedToday: person.watchedToday,
+            existing: person.cache.away?.period,
+          ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final person = widget.person;
+    final away = person.cache.away?.period;
+    final isAway = person.isAwayToday;
+    final message = _message;
+
+    // A revoked link can neither read nor write this document — §8 gates the
+    // away write on `isSelf(uid) || hasAcceptedLink(uid)` — so offering the
+    // control would be offering an action that is refused by design. The row
+    // above already says the link has ended.
+    if (person.rowKind == WatchedRowKind.revoked) {
+      return const SizedBox.shrink();
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        TextButton(
+          key: Key('watcher-away-${person.link.id}'),
+          onPressed: _busy || (isAway && away == null)
+              ? null
+              : () => isAway
+                    ? _run(
+                        () => ref
+                            .read(watcherStateProvider.notifier)
+                            .endAway(
+                              watchedUid: person.link.watchedUid,
+                              existing: away!,
+                              watchedToday: person.watchedToday,
+                            ),
+                      )
+                    : _setAway(),
+          style: TextButton.styleFrom(
+            minimumSize: const Size(88, 48),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          ),
+          child: Text(
+            isAway
+                ? WatcherCopy.endAwayAction(person.name)
+                : WatcherCopy.markAwayAction(person.name),
+          ),
+        ),
+        if (message != null)
+          Padding(
+            padding: const EdgeInsets.only(left: 12, bottom: 4),
+            child: Text(
+              message,
+              key: Key('watcher-away-message-${person.link.id}'),
+              // Not error-coloured: only one of the four things this says is a
+              // refusal, and `AwayCopy.queued` is not a failure at all.
+              style: theme.textTheme.bodyMedium,
+            ),
+          ),
       ],
     );
   }
@@ -780,48 +921,58 @@ class _PersonRow extends StatelessWidget {
     return Container(
       color: highlighted ? theme.colorScheme.surfaceContainerHighest : null,
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      child: Semantics(
-        label: WatcherCopy.rowLabel(person.name, status.spoken),
-        child: ExcludeSemantics(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(person.name, style: theme.textTheme.titleLarge),
-              const SizedBox(height: 4),
-              // The claim itself. Colour is never the only signal — every
-              // status carries its own words — so this only reinforces them.
-              ...status.lines.map(
-                (line) => Padding(
-                  padding: const EdgeInsets.only(top: 2),
-                  child: Text(
-                    line,
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: status.isBad ? theme.colorScheme.error : null,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Semantics(
+            label: WatcherCopy.rowLabel(person.name, status.spoken),
+            child: ExcludeSemantics(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(person.name, style: theme.textTheme.titleLarge),
+                  const SizedBox(height: 4),
+                  // The claim itself. Colour is never the only signal — every
+                  // status carries its own words — so this only reinforces them.
+                  ...status.lines.map(
+                    (line) => Padding(
+                      padding: const EdgeInsets.only(top: 2),
+                      child: Text(
+                        line,
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: status.isBad ? theme.colorScheme.error : null,
+                        ),
+                      ),
                     ),
                   ),
-                ),
+                  // **Never coloured, on any row.**
+                  //
+                  // Painting the whole row `error` swept this line up with the
+                  // warning and collapsed the very distinction it was added to
+                  // make: *"No check-in from Mum yesterday"* is a claim about
+                  // **her**, and *"This phone last checked Tuesday 10:14"* is a
+                  // fact about **this device's own effort**. In red beneath a
+                  // warning it reads as part of the alarm — as though the last
+                  // check were itself the bad news — and a reader at 3am has no way
+                  // to separate them.
+                  if (status.footer != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 2),
+                      child: Text(
+                        status.footer!,
+                        style: theme.textTheme.bodyMedium,
+                      ),
+                    ),
+                ],
               ),
-              // **Never coloured, on any row.**
-              //
-              // Painting the whole row `error` swept this line up with the
-              // warning and collapsed the very distinction it was added to
-              // make: *"No check-in from Mum yesterday"* is a claim about
-              // **her**, and *"This phone last checked Tuesday 10:14"* is a
-              // fact about **this device's own effort**. In red beneath a
-              // warning it reads as part of the alarm — as though the last
-              // check were itself the bad news — and a reader at 3am has no way
-              // to separate them.
-              if (status.footer != null)
-                Padding(
-                  padding: const EdgeInsets.only(top: 2),
-                  child: Text(
-                    status.footer!,
-                    style: theme.textTheme.bodyMedium,
-                  ),
-                ),
-            ],
+            ),
           ),
-        ),
+          // **Outside the row's single utterance, deliberately.** The row is
+          // one stop for a screen reader; a control folded into it would be
+          // unreachable, and `guidelines.md` requires every interactive
+          // element to be labelled and reachable.
+          _AwayRowAction(person: person),
+        ],
       ),
     );
   }
@@ -836,11 +987,11 @@ class _PersonRow extends StatelessWidget {
   /// same instant. One source, cached by `ClockService` on launch and on resume,
   /// is what both surfaces now read.
   _RowStatus _status() => _statusFor(
-        person,
-        watcherZone: watcherZone,
-        today: today,
-        uses24Hour: uses24Hour,
-      );
+    person,
+    watcherZone: watcherZone,
+    today: today,
+    uses24Hour: uses24Hour,
+  );
 }
 
 /// The row's rendered claim, as a value, so **the row and the announcement are
@@ -861,110 +1012,142 @@ _RowStatus _statusFor(
 }) {
   final cache = person.cache;
 
-    // **The precedence is [WatchedPersonState.rowKind]'s, not this widget's.**
-    // It is §10's step order — revoked, then lost access, then a standing
-    // warning, then "Everything OK" — and it was written out here AND inside
-    // `checkedInSince`, with nothing keeping the two in step. `screens.md`
-    // already commits Phase 6 to adding a branch above "Everything OK"; if that
-    // branch landed above the warning case, the announcement and the row would
-    // have disagreed silently, for the one reader who cannot see the row to
-    // check. Switching on the shared value makes that impossible and makes a
-    // new state a compile error here rather than a fall-through.
-    switch (person.rowKind) {
-      // A revoked link outranks everything, including lost access.
-      //
-      // **It fell through every branch below and rendered "Everything OK".** For
-      // a link that is armed with no alarms, will never warn, and cannot read
-      // anything, that is the flattest false all-clear this screen can produce.
-      //
-      // Above the access row rather than below it, because a revoked link makes
-      // every later read refused by definition — so the access branch would fire
-      // too, and send the reader off to sign in again and repair a permission
-      // fault that does not exist. The link ended; there is nothing to fix.
-      case WatchedRowKind.revoked:
-        return _RowStatus(
-          // **No "this phone last checked" line here**, alone among the row
-          // states. That line exists to distinguish *working* from *stopped* for
-          // a force-stopped watcher whose rows all still read "Everything OK".
-          // On a revoked link nothing is working by design and the first
-          // sentence has already said so — what the line would add is the
-          // suggestion that this phone checks on her periodically and last
-          // managed it on Tuesday. Worse, a revoked link refuses every read
-          // forever, so `lastReconcileAt` never advances and it would say the
-          // same Tuesday in week twelve.
-          lines: [
-            WatcherCopy.linkEnded(person.name),
-            WatcherCopy.accessLostConsequence(person.name),
-          ],
-          // Not an error. A settled state, not bad news about her — "quiet
-          // confirm, loud miss" keeps alarm styling for a miss. The words carry
-          // it, which they have to in any case: colour is never the only signal.
-          isBad: false,
-        );
+  // **The precedence is [WatchedPersonState.rowKind]'s, not this widget's.**
+  // It is §10's step order — revoked, then lost access, then a standing
+  // warning, then "Everything OK" — and it was written out here AND inside
+  // `checkedInSince`, with nothing keeping the two in step. `screens.md`
+  // already commits Phase 6 to adding a branch above "Everything OK"; if that
+  // branch landed above the warning case, the announcement and the row would
+  // have disagreed silently, for the one reader who cannot see the row to
+  // check. Switching on the shared value makes that impossible and makes a
+  // new state a compile error here rather than a fall-through.
+  switch (person.rowKind) {
+    // A revoked link outranks everything, including lost access.
+    //
+    // **It fell through every branch below and rendered "Everything OK".** For
+    // a link that is armed with no alarms, will never warn, and cannot read
+    // anything, that is the flattest false all-clear this screen can produce.
+    //
+    // Above the access row rather than below it, because a revoked link makes
+    // every later read refused by definition — so the access branch would fire
+    // too, and send the reader off to sign in again and repair a permission
+    // fault that does not exist. The link ended; there is nothing to fix.
+    case WatchedRowKind.revoked:
+      return _RowStatus(
+        // **No "this phone last checked" line here**, alone among the row
+        // states. That line exists to distinguish *working* from *stopped* for
+        // a force-stopped watcher whose rows all still read "Everything OK".
+        // On a revoked link nothing is working by design and the first
+        // sentence has already said so — what the line would add is the
+        // suggestion that this phone checks on her periodically and last
+        // managed it on Tuesday. Worse, a revoked link refuses every read
+        // forever, so `lastReconcileAt` never advances and it would say the
+        // same Tuesday in week twelve.
+        lines: [
+          WatcherCopy.linkEnded(person.name),
+          WatcherCopy.accessLostConsequence(person.name),
+        ],
+        // Not an error. A settled state, not bad news about her — "quiet
+        // confirm, loud miss" keeps alarm styling for a miss. The words carry
+        // it, which they have to in any case: colour is never the only signal.
+        isBad: false,
+      );
 
-      // Lost access next. It is a fault in THIS app rather than a claim about
-      // her, and it is the state the notification routes here to explain — so
-      // it outranks the rest of the row for the same reason ADR-0004 puts
-      // refusal above the away branch.
-      case WatchedRowKind.accessLost:
-        return _RowStatus(
-          lines: [
-            WatcherCopy.accessLostLabel(person.name),
-            WatcherCopy.accessLostConsequence(person.name),
-            WatcherCopy.accessLostRemedy(cache.accessLostCause),
-          ],
-          footer: _lastChecked(cache, watcherZone, today, uses24Hour),
-          isBad: true,
-        );
+    // Lost access next. It is a fault in THIS app rather than a claim about
+    // her, and it is the state the notification routes here to explain — so
+    // it outranks the rest of the row for the same reason ADR-0004 puts
+    // refusal above the away branch.
+    case WatchedRowKind.accessLost:
+      return _RowStatus(
+        lines: [
+          WatcherCopy.accessLostLabel(person.name),
+          WatcherCopy.accessLostConsequence(person.name),
+          WatcherCopy.accessLostRemedy(cache.accessLostCause),
+        ],
+        footer: _lastChecked(cache, watcherZone, today, uses24Hour),
+        isBad: true,
+      );
 
-      case WatchedRowKind.warning:
-        return _RowStatus(
-          lines: [
-            NotificationCopy.warningBody(
-              // Non-null by construction: `rowKind` answers `warning` only when
-              // `standingWarning` is a real outcome.
-              outcome: person.standingWarning!,
-              watchedName: person.name,
-              day: person.decision.day,
-              away: person.decision.away,
-              unverifiedSince: person.decision.unverifiedSince,
-              lastConfirmedDay: cache.lastConfirmedDay,
-              watcherZone: watcherZone,
-              today: today,
-              uses24Hour: uses24Hour,
-            ),
-          ],
-          footer: _lastChecked(cache, watcherZone, today, uses24Hour),
-          isBad: true,
-        );
+    case WatchedRowKind.warning:
+      return _RowStatus(
+        lines: [
+          NotificationCopy.warningBody(
+            // Non-null by construction: `rowKind` answers `warning` only when
+            // `standingWarning` is a real outcome.
+            outcome: person.standingWarning!,
+            watchedName: person.name,
+            day: person.decision.day,
+            away: person.decision.away,
+            unverifiedSince: person.decision.unverifiedSince,
+            lastConfirmedDay: cache.lastConfirmedDay,
+            watcherZone: watcherZone,
+            today: today,
+            uses24Hour: uses24Hour,
+          ),
+        ],
+        footer: _lastChecked(cache, watcherZone, today, uses24Hour),
+        isBad: true,
+      );
 
-      case WatchedRowKind.ok:
-        return _RowStatus(
-          lines: [
-            WatcherCopy.everythingOk,
-            cache.lastConfirmedDay == null
-                ? WatcherCopy.neverSeen
-                : WatcherCopy.lastSeen(
-                    NotificationCopy.dayLabel(cache.lastConfirmedDay!)),
-          ],
-          // **In `footer`, like every other branch.** It rendered identically
-          // while it sat in `lines`, because this row is `isBad: false` and
-          // nothing tints an unemphasised row — so the "never error-coloured, on
-          // any row" rule held here **by coincidence rather than by structure**.
-          //
-          // `screens.md` already commits Phase 6 to adding an away branch "above
-          // Everything OK", and whoever writes it will copy its nearest
-          // neighbour. Copied from a branch that puts this line in `lines`, with
-          // `isBad: true`, it paints *"This phone last checked Tuesday 10:14."*
-          // red — collapsing the exact distinction the footer was extracted to
-          // protect: the warning is a claim about **her**, this is a fact about
-          // **this device's own effort**.
-          //
-          // `spoken` is `[...lines, ?footer].join(' ')`, so the utterance is
-          // byte-identical either way.
-          footer: _lastChecked(cache, watcherZone, today, uses24Hour),
-          isBad: false,
-        );
+    // Phase 6, and `screens.md` named this position back in Phase 3: **above
+    // "Everything OK"**, which is where a verified away period used to fall.
+    //
+    // It lands together with the attribution that makes it honest. An
+    // unattributed *"Away until Sat 22 Aug"* is exactly the away state
+    // `screens.md` forbids — every surface showing an away period names who
+    // set it, because that is §17's recorded mitigation for *one watcher
+    // silences the whole family*, and a state change nobody can attribute is
+    // a state change nobody trusts.
+    case WatchedRowKind.away:
+      final away = cache.away;
+      final setByName = away?.setByName;
+      return _RowStatus(
+        lines: [
+          // Non-null by construction: `rowKind` answers `away` only when the
+          // cache holds a period that covers her today.
+          setByName == null
+              ? WatcherCopy.awayUntil(AwayCopy.shortDate(away!.period.through))
+              : WatcherCopy.awayUntilBy(
+                  AwayCopy.shortDate(away!.period.through),
+                  setByName,
+                ),
+        ],
+        footer: _lastChecked(cache, watcherZone, today, uses24Hour),
+        // **Not bad news.** Nobody is expected to tap, so nothing is wrong —
+        // "quiet confirm, loud miss" keeps alarm styling for a miss, and
+        // colour is never the only signal in either direction. The same
+        // decision the revoked row makes for the same reason.
+        isBad: false,
+      );
+
+    case WatchedRowKind.ok:
+      return _RowStatus(
+        lines: [
+          WatcherCopy.everythingOk,
+          cache.lastConfirmedDay == null
+              ? WatcherCopy.neverSeen
+              : WatcherCopy.lastSeen(
+                  NotificationCopy.dayLabel(cache.lastConfirmedDay!),
+                ),
+        ],
+        // **In `footer`, like every other branch.** It rendered identically
+        // while it sat in `lines`, because this row is `isBad: false` and
+        // nothing tints an unemphasised row — so the "never error-coloured, on
+        // any row" rule held here **by coincidence rather than by structure**.
+        //
+        // `screens.md` already commits Phase 6 to adding an away branch "above
+        // Everything OK", and whoever writes it will copy its nearest
+        // neighbour. Copied from a branch that puts this line in `lines`, with
+        // `isBad: true`, it paints *"This phone last checked Tuesday 10:14."*
+        // red — collapsing the exact distinction the footer was extracted to
+        // protect: the warning is a claim about **her**, this is a fact about
+        // **this device's own effort**.
+        //
+        // `spoken` is `[...lines, ?footer].join(' ')`, so the utterance is
+        // byte-identical either way.
+        footer: _lastChecked(cache, watcherZone, today, uses24Hour),
+        isBad: false,
+      );
   }
 }
 
@@ -980,19 +1163,19 @@ String _lastChecked(
   tz.Location watcherZone,
   DayKey today,
   bool uses24Hour,
-) =>
-    cache.lastReconcileAt == null
-        ? WatcherCopy.neverChecked
-        : WatcherCopy.lastChecked(
-            NotificationCopy.momentLabel(
-                cache.lastReconcileAt!, watcherZone, today, uses24Hour));
+) => cache.lastReconcileAt == null
+    ? WatcherCopy.neverChecked
+    : WatcherCopy.lastChecked(
+        NotificationCopy.momentLabel(
+          cache.lastReconcileAt!,
+          watcherZone,
+          today,
+          uses24Hour,
+        ),
+      );
 
 class _RowStatus {
-  const _RowStatus({
-    required this.lines,
-    required this.isBad,
-    this.footer,
-  });
+  const _RowStatus({required this.lines, required this.isBad, this.footer});
 
   /// The claim — what is true about this person, or about the app's access to
   /// them. Emphasised when [isBad].

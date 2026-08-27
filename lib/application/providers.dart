@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../data/auth_repository.dart';
+import '../data/away_repository.dart';
 import '../data/check_in_repository.dart';
 import '../data/check_in_reader.dart';
 import '../data/debug_backend_override.dart';
@@ -107,8 +108,21 @@ class AppServices {
     // signed-out phone is still a tap: the screen must still say
     // "You already tapped today", because the person did.
     checkIns: signedIn ? CheckInRepository() : null,
+    // Null when nobody is signed in, for the same reason and with the same
+    // consequence: there is no `users/{uid}/shared/away` to read. The CACHED
+    // period is still honoured — expiry is arithmetic and needs no server
+    // (§12) — so a phone that signs out mid-holiday does not start nagging.
+    away: signedIn ? AwayRepository() : null,
     selfUid: selfUid,
   );
+
+  /// The away document, read and written directly under the rules (§8, §12).
+  ///
+  /// A **direct client write** rather than a callable, on purpose: it queues
+  /// offline like any other Firestore write, which is what lets a watcher set
+  /// away on a plane. Exposed separately from [watchedReconcile] because the
+  /// *watcher* writes it too, for somebody else's uid.
+  AwayRepository get awayDocument => AwayRepository();
 
   /// Links, from Firestore into `LocalStore` (§6). UI isolate only.
   ///
@@ -630,6 +644,81 @@ class WatcherStateNotifier extends AsyncNotifier<WatcherState> {
 
   /// Asks for `POST_NOTIFICATIONS` once, on first run — **on this side too.**
   ///
+  /// Marks [watchedUid] away, or extends an existing period, then reconciles.
+  ///
+  /// **A watcher writing somebody else's away document is the design, not a
+  /// loophole** (§12). *"Anyone in the group can set, extend or cancel it. No
+  /// approval."* — a watcher setting away is asserting *"I know she's fine, and
+  /// I'm accountable for that"*, which is exactly what happens when somebody is
+  /// in hospital and least able to answer a prompt. The rules permit it on an
+  /// accepted link, and `setBy` is what makes it accountable afterwards.
+  ///
+  /// **Nothing is written to the cache here.** The reconcile that follows reads
+  /// the document back, and only a read that *succeeded* replaces `away`
+  /// (ADR-0001 decision 1). Optimistically caching the period would be the one
+  /// shortcut this side cannot take: a write that was refused would leave this
+  /// watcher silenced about somebody for up to a month, with no notification and
+  /// no error — which is the direction §12 calls the one failure this app cannot
+  /// detect in itself.
+  Future<AwayOutcome> setAway({
+    required String watchedUid,
+    required DayKey lastDay,
+    required DayKey watchedToday,
+    AwayPeriod? existing,
+  }) async {
+    final services = ref.read(appServicesProvider);
+    final period = AwayPeriod.tryCreate(from: watchedToday, through: lastDay);
+    if (period == null) {
+      return const AwayOutcome.refused(AwayRefusal.rejectedPeriod);
+    }
+
+    final outcome = await services.awayDocument.write(
+      watchedUid: watchedUid,
+      // **The caller's uid, never the watched person's.** ADR-0003 rule 1, and
+      // the rules enforce `setBy == request.auth.uid` — so writing anything else
+      // here is not a misattribution, it is a rejected write.
+      setBy: services.selfUid,
+      setByName: services.auth.displayName ?? 'Someone',
+      period: period,
+      today: watchedToday,
+      existing: existing,
+    );
+
+    await refresh();
+    return outcome;
+  }
+
+  /// Ends an away period this watcher can see — **truncating, not deleting**.
+  ///
+  /// ADR-0001 decision 5, and the same arithmetic as the watched side's twin:
+  /// `AwayPeriod.cancelOn` decides between truncate and delete, and only the
+  /// one case where truncating would violate `through >= from` deletes.
+  ///
+  /// Re-attributed to whoever wrote last, per §12's last-write-wins: a
+  /// truncation keeping the original `setByName` would tell the family that the
+  /// person who set the holiday also cut it short.
+  Future<AwayOutcome> endAway({
+    required String watchedUid,
+    required AwayPeriod existing,
+    required DayKey watchedToday,
+  }) async {
+    final services = ref.read(appServicesProvider);
+    final truncated = existing.cancelOn(watchedToday);
+    final outcome = truncated == null
+        ? await services.awayDocument.cancel(watchedUid: watchedUid)
+        : await services.awayDocument.write(
+            watchedUid: watchedUid,
+            setBy: services.selfUid,
+            setByName: services.auth.displayName ?? 'Someone',
+            period: truncated,
+            today: watchedToday,
+            existing: existing,
+          );
+
+    await refresh();
+    return outcome;
+  }
+
   /// The twin of `WatchedStateNotifier.ensureNotificationsAsked`, and it did not
   /// exist until Phase 5 routed on role. Before that the Tap screen was home and
   /// asked for everybody; now a **watcher-only** user never sees it, and on API
@@ -765,6 +854,90 @@ class WatchedStateNotifier extends AsyncNotifier<WatchedState> {
           ? state
           : AsyncData(previous.copyWith(tapFailed: true));
     }
+  }
+
+  /// Sets or extends this person's own away period, then reconciles.
+  ///
+  /// **Reconciles rather than patching the state in place** (§3). The reconcile
+  /// re-reads the document from Firestore, so what the screen ends up showing is
+  /// what the server actually holds — including the case where the write was
+  /// refused, where the screen correctly goes back to *not away* rather than
+  /// showing a period nobody else can see.
+  ///
+  /// The outcome is handed back for the screen to render, and is **not** put on
+  /// the state: it is a fact about one action, not about the person, and the
+  /// next reconcile would have to remember to clear it. Same shape as `tap()`'s
+  /// deliberate exception: only the initial load may take the screen away.
+  Future<AwayOutcome> setAway(DayKey lastDay) async {
+    final services = ref.read(appServicesProvider);
+    final current = state.value;
+    if (current == null) {
+      return const AwayOutcome.refused(AwayRefusal.serverFault);
+    }
+
+    final period = AwayPeriod.tryCreate(from: current.today, through: lastDay);
+    if (period == null) {
+      // `through` before `from` — the picker cannot produce it, and a period
+      // that ends before it starts must surface as a refusal rather than as an
+      // exception. `AwayPeriod` makes it unrepresentable; this is the boundary
+      // where that guarantee is taken up.
+      return const AwayOutcome.refused(AwayRefusal.rejectedPeriod);
+    }
+
+    final outcome = await services.awayDocument.write(
+      watchedUid: services.selfUid,
+      setBy: services.selfUid,
+      // The Google profile name, the same value `users/{uid}` carries and the
+      // same fallback `upsertProfile` uses. It is a display LABEL and not an
+      // identity (ADR-0003) — `setBy` beside it is what is enforced.
+      setByName: services.auth.displayName ?? 'Someone',
+      period: period,
+      today: current.today,
+      existing: current.away?.period,
+    );
+
+    await refresh();
+    return outcome;
+  }
+
+  /// Ends the away period — **truncating, not deleting** (ADR-0001 decision 5).
+  ///
+  /// `through` is pulled back to the last genuinely-away day, so the days
+  /// already spent away stay covered. Deleting mid-period would retroactively
+  /// un-cover them, and the next device to refresh its cache would warn about a
+  /// day the person really was away — a false claim to a family, which is the
+  /// worst thing this app can do.
+  ///
+  /// `AwayPeriod.cancelOn` returns null for the one case where truncating is
+  /// impossible — cancelling on the day the period **starts**, where
+  /// `through = from - 1` would violate `through >= from` — and only then is
+  /// the document deleted. The arithmetic is the domain's; this only carries out
+  /// the answer.
+  Future<AwayOutcome> endAway() async {
+    final services = ref.read(appServicesProvider);
+    final current = state.value;
+    final away = current?.away;
+    if (current == null || away == null) {
+      return const AwayOutcome.refused(AwayRefusal.serverFault);
+    }
+
+    final truncated = away.period.cancelOn(current.today);
+    final outcome = truncated == null
+        ? await services.awayDocument.cancel(watchedUid: services.selfUid)
+        : await services.awayDocument.write(
+            watchedUid: services.selfUid,
+            // Re-attributed to whoever wrote last — §12 is last-write-wins, and
+            // a truncation that kept the original `setByName` would tell the
+            // family the person who set the holiday also cut it short.
+            setBy: services.selfUid,
+            setByName: services.auth.displayName ?? 'Someone',
+            period: truncated,
+            today: current.today,
+            existing: away.period,
+          );
+
+    await refresh();
+    return outcome;
   }
 
   /// Asks for `POST_NOTIFICATIONS` once, on first run.

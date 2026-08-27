@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:i_am_ok/application/watched_reconcile_service.dart';
@@ -182,11 +183,24 @@ void main() {
         find.byKey(WatcherListButton.buttonKey),
       );
       // `openLabel`, not `title`. The title is approved as a heading; read out
-      // as a control's name it announces a place rather than an action, and
-      // this tooltip is a screen-reader user's whole identification of the only
-      // route to the other half of the app.
+      // as a control's name it announces a place rather than an action.
       expect(button.tooltip, WatcherCopy.openLabel);
       expect(button.tooltip, isNotEmpty);
+
+      // **And it reaches the semantics tree**, which asserting the widget
+      // property alone does not show. Measured: a `tooltip` populates
+      // `SemanticsProperties.tooltip` — Android's `setTooltipText` — and leaves
+      // `label` empty, so `find.bySemanticsLabel` finds nothing for it. That is
+      // a weaker guarantee than a `contentDescription` and the docstring on
+      // `WatcherCopy.openLabel` now says so rather than claiming otherwise.
+      final handle = tester.ensureSemantics();
+      final node = tester.getSemantics(
+        find.byKey(WatcherListButton.buttonKey),
+      );
+      expect(node.tooltip, WatcherCopy.openLabel);
+      expect(node.getSemanticsData().hasAction(SemanticsAction.tap), isTrue,
+          reason: 'a labelled node with no tap action is not a control');
+      handle.dispose();
     });
 
     testWidgets('does not displace the tap target', (tester) async {
@@ -337,6 +351,75 @@ void main() {
       expect(await open(AddSomeoneButton.watcherChoiceKey), isFalse);
     });
 
+    // **The largest system font scale, on a small screen.** `guidelines.md`'s
+    // floor, and the reason it bites here specifically: a default
+    // `showModalBottomSheet` caps its child at 9/16 of the screen height, and a
+    // `Column` that overflows is **clipped in release** — no stripe, no error,
+    // nothing to see.
+    //
+    // What that costs is specific. The row at the bottom is *"Someone I look
+    // after"*, so the option that gets cut is the one this sheet exists to
+    // provide, for exactly the users most likely to be running a large font.
+    // The cross-role dead end would come back for the population this app is
+    // for.
+    //
+    // Measured before and after the fix, at scale 2.0 on 320x480:
+    // without `SingleChildScrollView` the sheet raises a `FlutterError`
+    // (RenderFlex overflowed) and the second row's bottom lands at 802 against
+    // a 480 viewport; with it, no exception and the row scrolls into reach.
+    //
+    // **The scale is set on the platform dispatcher, not in a `MediaQuery`
+    // inside `home`.** The first version of this test wrapped the button's
+    // subtree — and a modal sheet is built by a *route*, above that widget, so
+    // the scale never reached it. Every measurement was identical at every
+    // scale and the test passed against the unfixed code: a test manufacturing
+    // its own green.
+    testWidgets('both options survive the largest font on a small screen',
+        (tester) async {
+      tester.view.physicalSize =
+          const Size(320, 480) * tester.view.devicePixelRatio;
+      addTearDown(tester.view.reset);
+      tester.platformDispatcher.textScaleFactorTestValue = 2;
+      addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+
+      await tester.pumpWidget(MaterialApp(
+        theme: AppTheme.light,
+        home: Builder(
+          builder: (context) => Scaffold(
+            body: TextButton(
+              onPressed: () => AddSomeoneButton.chooseRole(context),
+              child: const Text('open'),
+            ),
+          ),
+        ),
+      ));
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+
+      expect(tester.takeException(), isNull,
+          reason: 'an overflow here is an option clipped away in release');
+
+      // Present, reachable, and still above the touch floor. `findsOneWidget`
+      // alone would pass for a row rendered outside the viewport.
+      for (final key in [
+        AddSomeoneButton.watchedChoiceKey,
+        AddSomeoneButton.watcherChoiceKey,
+      ]) {
+        expect(find.byKey(key), findsOneWidget, reason: '$key');
+        await tester.ensureVisible(find.byKey(key));
+        await tester.pumpAndSettle();
+        expect(tester.getSize(find.byKey(key)).height,
+            greaterThanOrEqualTo(48),
+            reason: '$key is below the touch floor at this scale');
+      }
+
+      // And the one that would have been cut still answers.
+      await tester.tap(find.byKey(AddSomeoneButton.watcherChoiceKey));
+      await tester.pumpAndSettle();
+      expect(find.byKey(AddSomeoneButton.watcherChoiceKey), findsNothing,
+          reason: 'the sheet should have closed on the choice');
+    });
+
     testWidgets('dismissing it chooses nothing, and nothing is said',
         (tester) async {
       bool? answer;
@@ -389,14 +472,60 @@ void main() {
   /// that, and did. What it stops is the specific regression that would be
   /// invisible to the whole suite.
   group('the routing wire, as source', () {
+    /// Comments stripped, and CRLF normalised, before matching.
+    ///
+    /// **Both were missing and both are holes.** Without stripping, commenting
+    /// the line out and returning a constant leaves the lint green — and
+    /// commenting a line out is the most natural way to make exactly that
+    /// mutation. Without normalising, the lint fails on a fresh clone on
+    /// Windows, where `core.autocrlf=true` disagrees with what the repo stores.
+    ///
+    /// This is what the two precedents the group cites already do
+    /// (`push_handler_test.dart`, `domain_purity_test.dart`); this lint cited
+    /// them and did neither.
+    String sourceOf(String path) => File(path)
+        .readAsStringSync()
+        .replaceAll('\r\n', '\n')
+        .split('\n')
+        .map((line) {
+          final comment = RegExp(r'(?<!:)//').firstMatch(line);
+          return comment == null ? line : line.substring(0, comment.start);
+        })
+        .join('\n');
+
     test('Home.build renders the route provider and nothing else', () {
-      final code = File('lib/main.dart').readAsStringSync();
       expect(
-        code,
+        sourceOf('lib/main.dart'),
         contains('screenFor(ref.watch(homeRouteProvider))'),
         reason: 'if this moved, update the lint — do not delete it: the line '
             'it guards is the only one in the routing wire that no assertion '
             'in this file can reach',
+      );
+    });
+
+    /// **The two lines that spend `refusalForCode`, which no test can reach.**
+    ///
+    /// `InviteService.refusalForCode` and `inviteRefusalForCode` are pure and
+    /// table-tested — but their only callers sit inside
+    /// `catch (FirebaseFunctionsException)`, which no unit test can enter
+    /// without faking `FirebaseFunctions`, and none does. Revert either call to
+    /// `couldNotReach` and the whole suite stays green while every server-side
+    /// fault tells a reader whose phone demonstrably reached the backend to go
+    /// and check their internet connection — the defect the Phase 5 gate
+    /// closed, restored invisibly.
+    ///
+    /// A lint, because no cheap behaviour test exists here. The mutation
+    /// harness aims one line deeper, at the function body, which the table
+    /// tests already cover.
+    test('both callables map their exception through the tested function', () {
+      final code = sourceOf('lib/data/invite_service.dart');
+      expect(code, contains('PairingRefused(refusalForCode(e.code))'));
+      expect(code, contains('InviteRefused(inviteRefusalForCode(e.code))'));
+      expect(
+        code,
+        isNot(contains("e.code == 'unauthenticated'")),
+        reason: 'the inline mapping is what was wrong; it belongs in the pure '
+            'function that has a table test',
       );
     });
   });

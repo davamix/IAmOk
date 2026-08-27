@@ -12,6 +12,25 @@
 // guarantees — it can read its subprocess, its no-op control has to pass, and a
 // mutation that does not compile is refused rather than scored.
 //
+//
+// ## What these lists deliberately do NOT cover, so the score is read correctly
+//
+// Every mutation here is a **Phase 5 surface**. "14 of 14 caught" is a statement
+// about this phase's code, not about the suite, and the difference matters
+// because the risk in this design sits somewhere else.
+//
+// Not mutated, and named so nobody mistakes the number for coverage:
+// `DayKey`, `AwayPeriod`, `ReminderPolicy`, `WarningPolicy`, either reconciler,
+// the false-warning correction path, `AlarmIds` (whose per-process stability is
+// a `CLAUDE.md` constraint and the premise the correction path rests on), the
+// `onCheckInCreated` fan-out, and `firestore.rules` — which has 75 tests and no
+// mutation coverage at all.
+//
+// Those are exactly the six pure functions `docs/testing/strategy.md` says the
+// risk lives in. Extending the lists there is worth more than adding another
+// Phase 5 mutation; it is deliberately not done here, because a harness grown
+// past what it is run against stops being run.
+//
 // **When a mutation SURVIVES, suspect the mutation first.** Three of Phase 5's
 // Dart mutations came back unexpected and two of them were bad: one added a
 // branch that fires exactly when the original already does, one mutated a line
@@ -21,6 +40,7 @@
 import { mutate, report, run } from './mutate-runner.mjs';
 
 const suite = async () => run('flutter', ['test']);
+
 // `flutter test` prints one of these two, always. Requiring both phrases is
 // what makes an EMPTY capture `UNREADABLE` instead of silently reading as a
 // failing suite — the Phase 4 encoding failure, which reported five mutations
@@ -29,6 +49,27 @@ suite.phrases = {
   green: ['All tests passed!'],
   red: ['Some tests failed.', 'Test failed. See exception logs above.'],
 };
+
+/**
+ * **The compile gate, and it was missing.**
+ *
+ * `mutate-runner.mjs` only enforces *"a mutation that does not compile is
+ * REFUSED"* when a `compile` callback is supplied, and this driver supplied
+ * none. What happens without it is worse than nothing: a Dart compile error
+ * makes `flutter test` end with `Some tests failed.` — verbatim the red phrase
+ * below — so a mutation that never compiled is classified RED and printed as
+ * **CAUGHT**. "14 of 14 caught" could not tell you whether the suite noticed or
+ * the analyzer did.
+ *
+ * That is not hypothetical. The first `Home.build` mutation written at this gate
+ * was `ref.watch(otherProvider)`, an undefined name; a human spotted it. Under
+ * the harness as first committed it would have been scored as caught, on the one
+ * tool whose entire job is to distrust a green result.
+ *
+ * `flutter analyze` rather than a build: it is the cheapest thing that rejects an
+ * undefined name, and this repo already treats a clean analyze as the bar.
+ */
+const compile = () => run('flutter', ['analyze', '--no-pub']);
 
 /**
  * Every mutation names the file it edits, so one harness covers the phase.
@@ -71,10 +112,18 @@ const groups = [
           'three phases.',
       },
       {
-        name: 'decide: signed out still routes somewhere',
+        name: 'decide: the sign-in guard is inverted',
         from: 'if (!signedIn) {',
-        to: 'if (false) {',
-        why: 'Every link is keyed by a uid; nothing below that guard is answerable without one.',
+        to: 'if (signedIn) {',
+        why:
+          'Every link is keyed by a uid; nothing below that guard is ' +
+          'answerable without one. Inverted, a signed-in user is sent back to ' +
+          'onboarding for ever and a signed-out one is routed on their links.',
+        // **Rewritten after the compile gate REFUSED it.** It was `if (false)`,
+        // which `flutter analyze` rejects as dead code — and before the gate
+        // existed that scored as CAUGHT, because a Dart compile error ends
+        // `flutter test` with `Some tests failed.`, the red phrase verbatim.
+        // Inversion is the mutation operator that always compiles.
       },
     ],
   },
@@ -82,12 +131,18 @@ const groups = [
     file: 'lib/domain/entities/invite_code.dart',
     mutations: [
       {
-        name: 'tryParse: an off-alphabet character is accepted',
+        name: 'tryParse: an off-alphabet character is skipped, not refused',
         from: 'if (!alphabet.contains(char)) return null;',
-        to: 'if (false) return null;',
+        to: 'if (!alphabet.contains(char)) continue;',
         why:
-          'A typed `O` or `0` would be sent to `redeemInvite` rather than ' +
-          'refused here. §7 excludes them because the code is read aloud.',
+          'A typed `O` or `0` would be silently DROPPED rather than refused — ' +
+          'which is the realistic wrong implementation, not an absent check. ' +
+          'The reader then gets "That code is not right" for a five-character ' +
+          'code they cannot see is five characters, and §7 excludes those ' +
+          'glyphs precisely because the code is read aloud.',
+        // Rewritten after the compile gate refused `if (false)` as dead code.
+        // This is a better mutation anyway: skipping is what somebody would
+        // actually write by mistake; deleting the guard is not.
       },
       {
         name: 'tryParse: the length stops being checked',
@@ -162,13 +217,15 @@ const groups = [
     file: 'lib/domain/entities/watched_audience.dart',
     mutations: [
       {
-        name: 'WatchedAudience: revoked watchers stay in the audience',
+        name: 'WatchedAudience: the accepted-link filter is inverted',
         from: 'if (!link.isAccepted) continue;',
-        to: 'if (false) continue;',
+        to: 'if (link.isAccepted) continue;',
         why:
-          'The Tap screen would name somebody who will not be notified — a ' +
-          'false claim to the person the app is for, on her daily screen. It ' +
-          'also flips the 21:00 reminder back to promising a family.',
+          'The Tap screen would name only the people who will NOT be notified ' +
+          '— a false claim to the person the app is for, on her daily screen, ' +
+          'and it flips the 21:00 reminder to promising a family that is not ' +
+          'there.',
+        // Rewritten after the compile gate refused `if (false)` as dead code.
       },
       {
         name: 'WatchedAudience: two watchers with one name collapse',
@@ -192,6 +249,7 @@ for (const group of groups) {
       file: group.file,
       mutations: group.mutations,
       suite,
+      compile,
     })),
   );
 }

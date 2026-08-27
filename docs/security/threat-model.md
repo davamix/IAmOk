@@ -42,7 +42,7 @@ being dead, the app being force-stopped, and detecting that the person is incapa
 | Invite codes | Medium, short-lived. A live code grants a link to a watched person. | `invites/{CODE}` |
 | Release signing key | **Critical.** Signs updates to every install. | `.local/` — never the repo |
 | Admin service-account credentials | **Critical.** Bypasses all rules. | `.local/` — never the repo |
-| Pairing decisions in Cloud Logging | Medium. `redeemInvite` logs the caller's uid and the `linkId` on **every** call, so the log is a record of the link graph as it forms. | Cloud Logging, project `i-am-ok-c74ca` |
+| Pairing decisions in Cloud Logging | Medium. `redeemInvite` logs the caller's uid and the **outcome** on every authenticated, well-formed call, and the `linkId` on success; `createInvite` logs the caller's `watchedUid`. So the log is a record of the link graph as it forms. | Cloud Logging, project `i-am-ok-c74ca` |
 
 **That last row is deliberate and is load-bearing elsewhere**, which is why it is named here rather
 than left as an implementation detail somebody later removes as noise. `OPEN-QUESTIONS.md` #11 accepts
@@ -53,6 +53,19 @@ only detection this design has.
 It is a real asset all the same: a `linkId` is `{watchedUid}_{watcherUid}`, so anybody with project
 log access can reconstruct who watches whom without touching Firestore. Access to Cloud Logging is
 therefore access to the link graph, and should be treated as such when project IAM is reviewed.
+
+**The first version of this row said `linkId` was logged on *every* call.** It is not — `linkId` is
+spread in only when the status is `linked`, and two paths return before that line runs at all (the
+`unauthenticated` throw, and the early return for an ill-formed code). The detection argument is
+unaffected, because a guesser must send authenticated, well-formed codes and every one of those logs
+`watcherUid` with its status. Corrected because the row as written promised a log query more than it
+would find, and `OPEN-QUESTIONS.md` #11 had it right all along.
+
+**No invite code is ever logged**, and that is now pinned rather than merely intended: both `catch`
+blocks log `code: (error as { code?: unknown }).code` — the gRPC error code — while a local `const
+code` holding the live invite string sits three lines away. Shortening either literal to
+`{ watcherUid, code }` would put a bearer credential into Cloud Logging, so
+`functions/test/invites.test.js` carries a source lint that refuses object-literal shorthand there.
 
 ---
 

@@ -104,6 +104,21 @@ class NotificationAlarmScheduler implements AlarmScheduler {
   /// put it in the equality this class diffs against a store that cannot record
   /// it. Scheduling the whole desired set every time — see above — is what makes
   /// the wording follow the audience with no diff involved.
+  ///
+  /// **It follows the audience at the next reconcile, not the moment it
+  /// changes**, and the window is worth stating rather than implying. The body
+  /// is baked into the notification when it is scheduled, and the watched side
+  /// reconciles on open, resume, tap, FCM and alarm fire — **none of which a
+  /// remote link change triggers**. `hasAudience` is read from the local link
+  /// table.
+  ///
+  /// So: a first watcher appearing makes the armed 21:00 body *under*-claim
+  /// until the phone is next opened, which is harmless. The last watcher
+  /// revoking — from the **watcher's** phone — leaves this phone posting *"so
+  /// your family knows you're well"* for up to the rolling window if nobody
+  /// opens it. That is the false-claim direction, and it is the sentence this
+  /// variant exists to remove. Bounded, not zero; closing it means reconciling
+  /// on link sync, which nothing needs yet.
   @override
   Future<bool> apply({
     required Set<ScheduledReminder> toCancel,

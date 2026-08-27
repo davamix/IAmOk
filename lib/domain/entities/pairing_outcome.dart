@@ -81,6 +81,47 @@ enum PairingRefusal {
   notSignedIn,
 }
 
+/// Whether a refusal is a claim about **the code**, or about something else.
+///
+/// Decides where the sentence is rendered, and that is a correctness question
+/// rather than a layout one. `EnterCodeScreen` put every refusal into the
+/// `TextField`'s `errorText`, which does not merely print a sentence — it puts
+/// the field into its **error state**: red outline, red *"Code"* label. So a
+/// server fault, a dead radio or a missing profile on *this* phone all marked
+/// the code invalid, on paths where nothing whatever is known about the code.
+///
+/// `screens.md` says the opposite in as many words — *"The last four are not
+/// the reader's mistake and none of them says 'not right'"* — and the copy
+/// honours it while the colour contradicted it. Colour is what a reader takes
+/// first, so what a family member saw was: type a good code, the field turns
+/// red, retype the same six characters, loop.
+///
+/// **Exhaustive on purpose.** A refusal added later cannot default into either
+/// bucket; the switch stops compiling until somebody decides.
+extension PairingRefusalSurface on PairingRefusal {
+  /// True when re-reading or re-typing the code is the action that helps.
+  bool get isAboutTheCode => switch (this) {
+        // The four a person fixes by looking at the code again — or, for
+        // [PairingRefusal.ownCode], by looking at which phone they are holding.
+        // In all four the code is genuinely the subject of the sentence.
+        PairingRefusal.unknownCode ||
+        PairingRefusal.expired ||
+        PairingRefusal.alreadyUsed ||
+        PairingRefusal.ownCode =>
+          true,
+        // Everything else is about a phone, a profile, a radio or a backend.
+        // The code may well be perfectly good, and marking it invalid sends the
+        // reader to check the one thing that is not wrong.
+        PairingRefusal.watchedProfileMissing ||
+        PairingRefusal.watcherProfileMissing ||
+        PairingRefusal.unusableTimezone ||
+        PairingRefusal.couldNotReach ||
+        PairingRefusal.serverFault ||
+        PairingRefusal.notSignedIn =>
+          false,
+      };
+}
+
 /// Why this phone could not produce a code to share.
 enum InviteRefusal {
   /// No `users/{uid}` for the caller, so a redeemer would have no name or zone

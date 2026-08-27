@@ -42,6 +42,7 @@ void main() {
   const channel = MethodChannel('dexterous.com/flutter/local_notifications');
 
   final d = day('2026-08-16');
+  final madrid = TimeZones.location('Europe/Madrid');
   const mum = 'mum_ana';
   const granddad = 'granddad_ana';
 
@@ -209,5 +210,75 @@ void main() {
   test('the payload carries the link, so a tap can open that row', () async {
     await warn(mum, d);
     expect((calls.single.arguments as Map)['payload'], mum);
+  });
+
+  /// **The 21:00 body, asserted where it is actually chosen.**
+  ///
+  /// This is the same gap as the one at the top of this file, in the phase that
+  /// added it. `hasAudience` is a three-link chain — the reconcile computes it,
+  /// the scheduler carries it, `NotificationCopy.reminderBody` spends it — and
+  /// the first two links were tested while the third, the only one that produces
+  /// a sentence a person reads, was not.
+  ///
+  /// `AlarmScheduler`'s two test doubles both *replace* `scheduleReminder`, so
+  /// they can prove the flag was passed and never that it selects a body. Change
+  /// `notification_service.dart`'s call to `hasAudience: true` and the whole
+  /// suite stayed green, with the 21:00 nudge promising a family to a phone
+  /// whose own screen says nobody is set up — the exact defect the variant was
+  /// written to remove, restored invisibly.
+  ///
+  /// So this watches the method channel, like everything else in this file: the
+  /// string asserted below is the one that reaches the platform, produced by
+  /// production code, with no double in between.
+  group('the 21:00 reminder promises a family only when there is one', () {
+    // **A future day, because the plugin refuses to schedule into the past** —
+    // `validateDateIsInTheFuture` throws before the method channel is reached,
+    // so `d` (the 2026 fixture the rest of this file uses) never gets far enough
+    // to produce a body. Far enough out that the suite does not develop a
+    // shelf life.
+    final future = day('2099-08-16');
+
+    ScheduledReminder nightOf(DayKey on) => ScheduledReminder(
+          day: on,
+          slot: ReminderSlot.night,
+          at: on.at(ReminderSlot.night.time, madrid),
+        );
+
+    String bodyOf(MethodCall call) =>
+        (call.arguments as Map)['body'] as String;
+
+    test('with an audience it names the consequence', () async {
+      await notifications.scheduleReminder(nightOf(future), hasAudience: true);
+      expect(
+        bodyOf(calls.single),
+        "Please tap I'm OK before the day ends, so your family knows "
+        "you're well.",
+      );
+    });
+
+    test('with nobody set up it says only the instruction', () async {
+      await notifications.scheduleReminder(nightOf(future), hasAudience: false);
+      expect(bodyOf(calls.single),
+          "Please tap I'm OK before the day ends.");
+      expect(bodyOf(calls.single).toLowerCase(), isNot(contains('family')),
+          reason: 'the screen behind this may read "No one is set up to know '
+              'you are OK"');
+    });
+
+    test('the other two slots do not vary, in either direction', () async {
+      for (final slot in [ReminderSlot.midday, ReminderSlot.evening]) {
+        final reminder = ScheduledReminder(
+          day: future,
+          slot: slot,
+          at: future.at(slot.time, madrid),
+        );
+        calls = [];
+        await notifications.scheduleReminder(reminder, hasAudience: true);
+        final withFamily = bodyOf(calls.single);
+        calls = [];
+        await notifications.scheduleReminder(reminder, hasAudience: false);
+        expect(bodyOf(calls.single), withFamily, reason: slot.name);
+      }
+    });
   });
 }

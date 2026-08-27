@@ -90,10 +90,19 @@ are not live yet fails in a way that looks like a client bug.
 
 **And deploy Functions before any client build that is not pointed at the emulator.** From Phase 5
 the pairing flow — the *first screen a new user reaches* — is two callables. A client shipped ahead
-of them gets a 404, which `InviteService` maps to `couldNotReach`, which tells every new user
-*"Could not reach the internet. Check your connection and try again."* for ever. Same class of
-failure as the rules rule above, arriving through a different service, and nothing in this runbook
-named it until Phase 5.
+of them gets a 404 (`not-found`), which `InviteService` maps to **`serverFault`** — *"That did not
+work just now. Try again in a moment."* — for ever. Same class of failure as the rules rule above,
+arriving through a different service, and nothing in this runbook named it until Phase 5.
+
+**This paragraph said `couldNotReach` until the Phase 5 gate**, which the same commit that closed the
+phase had already made false: `not-found` now falls through to `serverFault`. Corrected here rather
+than left, because this file's own header records that its recurring failure is *the checklist
+somebody reads immediately before the first deploy, saying the opposite of the truth*.
+
+**And the ordering rule matters more now, not less.** The old sentence at least named a cause, false
+though it was. `serverFault` deliberately claims nothing about either side — right for the reader,
+and it leaves them nothing to report. Deploying in the wrong order now produces *"try again in a
+moment"*, indefinitely, on every new phone, with nothing on screen to say why.
 
 ## Emulators — running, 2026-08-21
 
@@ -406,18 +415,51 @@ a decision on Play App Signing all land in **Phase 8**. The keystore and its pas
 
 ```powershell
 flutter build apk --release
+if ($LASTEXITCODE -ne 0) { throw 'release build FAILED - anything below is the PREVIOUS build' }
 
-# 1. permissions — the closed set, from the merger report
-Select-String -Path build\app\outputs\logs\manifest-merger-release-report.txt `
-  -Pattern 'uses-permission#' | ForEach-Object { $_.Line.Trim() } | Sort-Object -Unique
+# Locate the merged manifest rather than hard-coding the path: it is an AGP
+# implementation detail and it has moved before. Fail loudly if it moves again.
+$m = (Get-ChildItem build\app\intermediates\merged_manifest\release -Recurse `
+        -Filter AndroidManifest.xml | Select-Object -First 1).FullName
+if (-not $m) { throw 'the merged manifest moved - find its new path before trusting this' }
+$xml = Get-Content $m -Raw
 
-# 2. components — from the merged manifest ITSELF, not the report
-$m = "build\app\intermediates\merged_manifest\release\outputReleaseAppLinkSettings\AndroidManifest.xml"
-[regex]::Matches((Get-Content $m -Raw), '<(provider|receiver|service|activity)[^>]*>') |
+# 1. permissions - counted from the manifest, which cannot double-count
+[regex]::Matches($xml, '<uses-permission[^>]*android:name="([^"]+)"') |
+  ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique
+
+# 2. components - including meta-data, which is how a plugin most often arrives
+[regex]::Matches($xml,
+  '<(provider|receiver|service|activity|activity-alias|meta-data|uses-library)[^>]*>') |
   ForEach-Object { $_.Value }
 ```
 
-Expect the **fourteen** in `test/android_manifest_test.dart`, and no fifteenth.
+Expect the **thirteen** in `test/android_manifest_test.dart`, and no fourteenth.
+
+> **Three corrections, all made at the Phase 5 gate review, and each is the same mistake in a
+> different place: a check cited as evidence for something it structurally cannot see.**
+>
+> - **Step 1 read the merger report and got fourteen.** The report lists AndroidX's
+>   `DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION` twice — once with `${applicationId}` unresolved and
+>   once resolved — so the grep double-counted one permission. The manifest itself has **13**
+>   distinct `<uses-permission>` elements. The repo's own arithmetic already disagreed with itself:
+>   six declared plus seven merged is thirteen.
+> - **Step 2's alternation had no `meta-data`**, while the finding it is cited for below —
+>   `cloud_functions` contributing Firebase component registrars — is *entirely* meta-data. It could
+>   not have seen what the paragraph says it measured.
+> - **Neither step checked that the build succeeded, or that the files came from it.** Gradle marks
+>   the merge task UP-TO-DATE and leaves the previous run's outputs in place, so a failed build
+>   leaves both commands reading stale files and exiting 0. That is `CLAUDE.md`'s `--out` constraint
+>   word for word, in a new place.
+>
+> **And read the merged manifest, not the merger report, for anything about a component.** The report
+> lists attribute *names* without their *values* — it says `android:exported` was added and never
+> what it was set to, which is the entire question you are asking.
+>
+> **The path is an AGP implementation detail.** `merged_manifest/release/` holds two byte-identical
+> copies, under `outputReleaseAppLinkSettings/` and `processReleaseMainManifest/`; the layout already
+> changed once between AGP 7 and 8, and this project is on AGP 9.1.0. Hence the glob and the throw
+> rather than a literal.
 
 > **Step 2 was added when Phase 5 closed, and step 1 was widened.** This block used to be a single
 > `Select-String … -Pattern INTERNET` expecting no output — which had been wrong twice over since
@@ -438,7 +480,7 @@ during Phase 2 and it had to be declared after the fact. So the merged report is
 answer, and it needs a release build, which is why it is a command here rather than a test.
 
 **Phase 4 removed the claim rather than the check, and it is done** — measured 2026-08-21, then
-twice more as plugins arrived. Six permissions became fourteen: `INTERNET` and
+twice more as plugins arrived. Six permissions became thirteen: `INTERNET` and
 `ACCESS_NETWORK_STATE` from Firebase, `USE_BIOMETRIC`/`USE_FINGERPRINT` from `androidx.biometric`
 behind `firebase_auth` for a feature this app does not have, `READ_GSERVICES` from recaptcha,
 `c2dm.permission.RECEIVE` from `firebase_messaging`, and — a recorded **null result** —
@@ -447,11 +489,15 @@ behind `firebase_auth` for a feature this app does not have, `READ_GSERVICES` fr
 `test/android_manifest_test.dart`.
 
 **Measured a fourth time when Phase 5 closed, 2026-08-26**, after `share_plus` and `cloud_functions`
-were added. Permissions: **still fourteen, no change**. Components: `share_plus` adds a
-`ShareFileProvider` and a `SharePlusPendingIntent` receiver, **both `android:exported="false"`**, the
-provider's authority scoped to this application id; `cloud_functions` adds one `meta-data` Firebase
-registrar. Recorded with the rest in `test/android_manifest_test.dart`, including the note that the
-provider is present and unused — this app shares text, never a file.
+were added, then **re-measured at the gate review**. Permissions: **thirteen, no change** — neither
+plugin contributes one. Components: `share_plus` adds a `ShareFileProvider` and a
+`SharePlusPendingIntent` receiver, **both `android:exported="false"`**, the provider's authority
+scoped to this application id, plus a `FILE_PROVIDER_PATHS` meta-data — which is the thing that
+actually bounds what the provider could expose, and is worth naming in a paragraph that argues it is
+harmless. `cloud_functions` adds **three** `meta-data` Firebase registrars
+(`FlutterFirebaseAppRegistrar`, `FunctionsRegistrar`, `FirebaseFunctionsKtxRegistrar`), not one.
+Recorded with the rest in `test/android_manifest_test.dart`, including the note that the provider is
+present and **unused** — this app shares text, never a file, so no URI is ever minted.
 
 **Run this whenever a plugin is added**, including when you expect no change — a rule only honoured
 when it finds something stops being run, which is how the App Check measurement came to be skipped

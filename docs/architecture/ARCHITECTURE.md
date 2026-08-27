@@ -204,7 +204,8 @@ thing some readers get.
 | `AwayRepository` | Data | Read / set / cancel the away period for a watched user | UI, FCM, Alarm |
 | `InviteService` | Data | Call `createInvite`; call `redeemInvite` ([ADR-0011](decisions/0011-creating-an-invite-is-a-function-too.md)). **Both are callables** — it holds no Firestore reference, because §8 makes `invites/{code}` unwritable as well as unreadable by every client. This row said *"create invite"* until Phase 5, which read as a client write and is one no client may perform. | UI |
 | `LocalStore` | Data | SQLite. Per-link `lastConfirmedDate`, `warningsShownFor` (day → **which** warning is standing, [ADR-0004](decisions/0004-refused-is-not-unreachable.md)), `correctionsOwedFor` (days whose warning has been **disproved and taken down** but whose retraction has not been spoken — a separate fact from the one above, and separate because that one is the sole input to the row's warned state, [ADR-0010](decisions/0010-a-push-may-not-post-a-warning-early.md)), `lastDecidedDay` ([ADR-0009](decisions/0009-decide-about-every-completed-day.md)'s catch-up pointer), `activeFrom`, `watchedTimezone`, cached `awayPeriod`, `accessLostSince` + `accessLostCause` + `accessLostNotifiedOn`; plus `deviceTimezone`, `pendingAlarms`, `lastReconcileAt` (a **timestamp** — §10 renders "offline since 10:14"), and the `reconcileLock` lease ([ADR-0006](decisions/0006-reconcile-is-serialised-on-disk.md)); plus three device-health settings that §13's panel reads in Phase 7 and `dump` shows meanwhile — `warningAlarmsExact` (the exact-alarm degradation actually happened), `linkReconcileFailed` (a link this app silently stopped checking), and `uses24HourClock` (a device fact a bare isolate cannot ask for, cached exactly as `deviceTimezone` is) | **All three** |
-| `AlarmScheduler` | Platform | Schedule / cancel / enumerate alarms; `rescheduleOnReboot` | UI, Alarm |
+| `AlarmScheduler` | Platform | Schedule / cancel / enumerate **reminder** alarms | UI, **FCM** |
+| `WarningAlarmScheduler` | Platform | The watcher side's warning alarms; `rescheduleOnReboot` | UI, Alarm, FCM |
 | `NotificationService` | Platform | Channels, display, cancel, replace-by-id, tap routing | All three |
 | `PushRegistration` | Data | This install's FCM token → `users/{uid}/tokens/{token}`, and its removal before a sign-out | UI |
 | `pushBackgroundHandler` | Application | §4's third entry point. Brings Firebase up, reconciles **both** sides, exits. Reads nothing out of the message (§3) | FCM |
@@ -214,6 +215,19 @@ thing some readers get.
 | `ClockService` | Platform | Discover the **device facts** a bare isolate cannot ask for — IANA tz and the 12h/24h setting — → `LocalStore` on launch and on resume; device-vs-server skew detection | UI |
 | `ConnectivityService` | Platform | Online state for the staleness banner | UI |
 | `Reconciler` | Domain | Pure desired-state calculation for both sides | All three |
+
+> **The `AlarmScheduler` row said "UI, Alarm" and was wrong in both halves** — corrected at the Phase
+> 5 gate review. The **alarm** isolate never touches it: `warning_alarm_handler.dart` builds only
+> `WatcherReconcileService` and reaches `WarningAlarmScheduler`. The **FCM** isolate does:
+> `push_handler.dart` constructs `NotificationAlarmScheduler` and reaches `apply` through
+> `WatchedReconcileService`. The row also folded two components with different isolate sets into one,
+> which is why `rescheduleOnReboot` now sits on its own line.
+>
+> Drift from Phase 4, and harmless until Phase 5 put a **required** `hasAudience` argument on
+> `apply` — at which point *"which isolates call `apply`"* became the exact question a reader must
+> answer to know whether the 21:00 reminder can ever promise a family to a phone that has none. (It
+> cannot: the FCM path reads the audience from `LocalStore` with a uid read off disk, and the alarm
+> isolate has no audience to pass because it never schedules a reminder.)
 
 `Reconciler` appearing in all three isolates while depending on nothing is the payoff of the
 layering. It is the same code deciding, whether a human opened the app or an alarm woke a

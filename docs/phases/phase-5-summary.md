@@ -1,6 +1,6 @@
 # Phase 5 — Onboarding and pairing · summary
 
-**Date:** 2026-08-26 · **1 193 Dart tests**, **79 Functions tests**, **75 rules tests**,
+**Date:** 2026-08-26 · **1 202 Dart tests**, **83 Functions tests**, **75 rules tests**,
 `flutter analyze` clean, debug **and release** APKs build, secrets guard clean.
 
 **Status: COMPLETE and SIGNED OFF, 2026-08-26.** Built, the exit criterion met on two devices, all
@@ -410,7 +410,10 @@ is worth more than this one line, because it would also unblock `app_lifecycle_t
 ### 6. Verification hygiene — all four
 
 **a. The release manifest, measured — the fourth measurement.** `flutter build apk --release`, then
-the merged report **and the merged manifest itself**. Permissions: **no change, still fourteen**,
+the merged report **and the merged manifest itself**. Permissions: **no change, thirteen** —
+corrected from *fourteen* at the gate review; the merger report double-counts AndroidX's
+`DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION`, once with `${applicationId}` unresolved and once
+resolved, and nothing had ever asserted the number —
 neither `share_plus` nor `cloud_functions` contributing one. But the check as documented would have
 missed what they did add, because it greps for a *permission*: `share_plus` contributes a
 **`ShareFileProvider`** and a **`SharePlusPendingIntent` receiver**, both `android:exported="false"`,
@@ -467,9 +470,25 @@ An ambiguous `from` — matching zero times or more than once — is refused bef
 mutation that might be editing a different line than the one it names cannot be scored. The source is
 restored in a `finally`, always.
 
-**Results, 2026-08-26.** Dart: **14 mutations, 14 caught, 0 survived**, five passing no-op controls,
-first run. Functions: **16 mutations, 16 caught, 0 survived** — but only on the *third* run, and what
-happened on the first two is the reason the harness was worth keeping.
+**Results, 2026-08-26, after the gate review.** Dart: **14 mutations, 14 caught, 0 survived**, five
+passing no-op controls — and that is the number *with* a compile gate, which is not what the first
+run reported.
+
+> **The first Dart run said 14/14 and it was not true.** The driver passed no `compile` callback, so
+> the engine's *"a mutation that does not compile is REFUSED"* was unreachable for it — and a Dart
+> compile error ends `flutter test` with `Some tests failed.`, which is **verbatim** the red phrase,
+> so a mutation that never compiled printed as CAUGHT. With the gate added, **three of the fourteen
+> came back `DID NOT COMPILE`**: all three were `if (false)` on a guard, which `flutter analyze`
+> rejects as dead code. So the honest first-run score was 11 caught and 3 proving nothing.
+>
+> Rewritten as inversions and a skip — mutation operators that always compile — the fourth run found
+> a **real gap**: `tryParse` skipping an unrecognised character instead of refusing it survived,
+> because every existing case puts the bad character *inside* six, where skipping and refusing both
+> end at null. Past six they diverge, and there it matters most: skipping turns `K7RTQXO` into the
+> perfectly valid, perfectly different code `K7RTQX`. Now pinned. **14/14, on the fifth run.** Functions: **16 mutations, 16 caught, 0 survived** — but only on the *third* run, and what
+happened on the first two is the reason the harness was worth keeping. (Its compile gate was real
+throughout: `npm run build` before every mutation, which is why its three `DID NOT COMPILE` verdicts
+were reported honestly and the Dart side's were not.)
 
 **The harness refused to score, twice, before it scored once. Both times the caller was wrong.**
 
@@ -511,7 +530,14 @@ rejects proves nothing about the tests, because the tests never ran. All three w
 change the same behaviour in a way that compiles — and the Dart harness had its own version of this,
 where the first `Home.build` mutation was `ref.watch(otherProvider)`, an undefined name.
 
-**Functions tests went from 75 to 79.**
+**Functions tests went from 75 to 83** — four closing the gaps above, then four more at the gate
+review: a `@types/node`-and-engine assertion so the pin cannot drift back unnoticed, and a source
+lint refusing object-literal shorthand where an invite code could reach Cloud Logging.
+
+**And a mutated build was found sitting in the tree.** `functions/lib/invites.js` held `dayKeyInZone`
+returning `'1970-01-01'` — the last mutation of the last run — while `src/` was clean and
+`git status` was empty. The runner restored the source and never recompiled, and **`lib/` is what the
+emulator serves**. It restores *and rebuilds* now.
 
 ### Recorded rather than fixed
 
@@ -541,6 +567,130 @@ CRLF first, and the guard was verified by forcing the file to CRLF and watching 
   recorded above. None is a false claim to a family; each is a one-line fix or a small one.
 - **`OPEN-QUESTIONS.md` #12** — the code block's contrast, new at this gate.
 - **Everything on Phase 4's standing list**, unchanged and listed below.
+
+---
+
+## The gate review — all five reviewers over the close-out, 2026-08-26
+
+The close-out changed 41 files and claimed the phase was done. The reviewers were run over **that**,
+one at a time, and they found the usual thing: **nothing came from a test failing**, and the sharpest
+findings were claims the close-out itself had written that were not true.
+
+### The four defects
+
+**1. A fresh watcher got no armed warning alarm, and no route to the list.** The chooser's second
+option — the whole point of adding it — leads to `EnterCodeScreen`, which calls `recordPairing`, which
+goes to `_persist`, which **deliberately does not tell the router**. So `linkRolesProvider` keeps its
+cached `watcher: false`, `watcherListReachable` stays false, and the button to the list never renders.
+And the reconcile that ran on the way back was the **watched** one; the link just made is a *watcher*
+link, whose warning alarm `WatcherReconcileService` arms.
+
+Pair today, the watched person does not tap, this app is not reopened — and tomorrow's warning was
+never scheduled. FCM does not save it: `onCheckInCreated` fires when the watched person *taps*, which
+is the case with nothing to warn about.
+
+**This is the failure `main.dart` has warned about for three phases, and the close-out opened a second
+door into it** — the same door review finding 6 had closed for the onboarding path, in the same phase.
+The comment sitting over it said *"the watcher side is reconciled by the list it can now reach"*, and
+both halves were false. Fixed with the repair its twin already uses, and the comment now says what is
+actually true.
+
+**2. The line where `hasAudience` is spent had no test.** The flagship change of the close-out is a
+three-link chain — the reconcile computes the flag, the scheduler carries it, `NotificationCopy`
+spends it — and links 1 and 2 were tested while link 3, the only one that produces a sentence a person
+reads, was not. Both `AlarmScheduler` doubles *replace* `scheduleReminder`, so they can prove the flag
+was passed and never that it selects a body. **Changing that call to `hasAudience: true` left all
+1 193 tests green** with the 21:00 nudge promising a family to a phone whose own screen says nobody is
+set up — the exact defect the variant removes, restored invisibly. Now asserted against the **method
+channel**, in the file that already argues this case for the correction path, and verified by
+mutation.
+
+**3. The chooser clipped at the largest font scale.** A default bottom sheet caps its child at 9/16 of
+the screen height; measured at scale 2.0 on 320×480, the sheet overflowed by **338 pixels**, which in
+release is a silent clip with no stripe. The row that gets cut is the *second* one — *"Someone I look
+after"* — so the cross-role dead end would come back for exactly the readers most likely to run a
+large font, which is the population this app is for.
+
+**The first test written for it passed against the unfixed code.** It set `textScaler` in a
+`MediaQuery` inside `home` — and a modal sheet is built by a **route**, above that widget, so the
+scale never reached it. Every measurement was identical at every scale. Caught by checking the numbers
+rather than the colour of the bar: the fixture was manufacturing its own green, which is the failure
+this suite catches in other people's tests twice a phase.
+
+**4. Every refusal painted the code field red.** `errorText` does not merely print a sentence — it
+puts the field into its error state, red outline and red *"Code"* label. So `serverFault`,
+`couldNotReach`, a missing profile on *this* phone and *"you are not signed in"* all marked the **code**
+invalid, on paths where nothing whatever is known about the code. `screens.md` says the opposite in
+words (*"none of them says 'not right'"*); the screen contradicted it in colour, and colour is what a
+reader takes first. What a family member saw: type a good code, the field turns red, retype the same
+six characters, loop. The split now lives in the domain as `PairingRefusalSurface.isAboutTheCode`,
+exhaustive so a later refusal cannot default into either bucket.
+
+### The harnesses were wrong in three ways, and one had already cost something
+
+The tool kept precisely because Phase 4's produced a green report by being broken:
+
+- **A mutated build was sitting in the tree.** `functions/lib/invites.js` held `dayKeyInZone`
+  returning `'1970-01-01'` — the last mutation of the last run — while `src/` was clean and
+  `git status` was empty. The runner restored the source and never recompiled, and **`lib/` is what
+  the emulator serves**. Anything that builds first hides it; a bare `firebase emulators:start` does
+  not. The restore recompiles now.
+- **The Dart harness had no compile gate at all**, so *"a mutation that does not compile is REFUSED"*
+  — listed in this file as a property the engine enforces — was unreachable for it. Worse than
+  absent: a Dart compile error ends `flutter test` with `Some tests failed.`, which is verbatim the
+  red phrase, so a mutation that never compiled printed as **CAUGHT**. The close-out's own first
+  `Home.build` mutation was an undefined name; under the committed harness it would have scored as
+  caught.
+- **`finally` does not survive Ctrl-C**, and two documents said *"always"*. Node's default SIGINT
+  handler terminates without unwinding — measured. These runs take minutes, so the window is wide,
+  and what it would leave is a **tracked** source holding a disabled expiry guard. Signals are
+  trapped now.
+- **Neither harness could run on a fresh clone.** Several `from` strings span two lines, and a fresh
+  checkout on Windows is CRLF while the repo stores LF, so they match zero times. The same root cause
+  the close-out fixed *inside the tests* and left in the tooling.
+
+### Claims that had stopped being true
+
+Five, all in the close-out's own writing, and all found by reading a claim against the thing it
+describes:
+
+| Said | Actually |
+|---|---|
+| `deploy-notes.md`: a client ahead of the Functions deploy is told *"check your connection"* | The same commit remapped `not-found` to `serverFault`. The ordering rule now matters **more**, because the new sentence names no cause at all |
+| The threat model: `redeemInvite` logs `linkId` on **every** call | Only on success; two paths return earlier. The detection argument survives, the log query promised more than it would find |
+| *"Still fourteen"* permissions | **Thirteen.** The merger report lists one AndroidX permission twice. The docstring's own arithmetic — six declared plus seven merged — already said thirteen, for two phases |
+| `cloud_functions` adds *one* meta-data registrar | **Three.** And the command cited as having measured it had no `meta-data` in its alternation, so it could not have seen them |
+| `screens.md`: *"Every Phase 5 string below is owed the owner's approval"* | Still there, in the commit whose purpose was to record that it is not |
+
+The manifest command also never checked that the build **succeeded** — Gradle marks the merge task
+UP-TO-DATE and leaves the previous run's outputs in place, so a failed build left both steps reading
+stale files and exiting 0. `CLAUDE.md`'s `--out` constraint, word for word, in a new place.
+
+### What the reviewers confirmed
+
+Worth recording, because it is most of what they looked at. `hasAudience` reaches the platform through
+the right seam and no background entry point can pass a wrong value — the alarm isolate never
+schedules a reminder, and the FCM path reads the audience from `LocalStore` with a uid read off disk.
+Domain purity holds across all ten forbidden tokens. The lockfile moved only `@types/node` and
+`undici-types`. The `share_plus` provider is `exported="false"` with an app-scoped authority and is
+**unused**, because this app shares text and never mints a URI. Every amended and new string matches
+`screens.md` character for character. The rules are untouched and still match the matrix. And the
+device evidence for Phase 5 says without prompting what it does **not** establish.
+
+### Left open, deliberately
+
+- **`Home.build`'s hang.** The lint was hardened — it stripped no comments, so commenting the line out
+  left it green — and a real behaviour test may well be available: `homeRouteProvider` is a plain
+  `Provider`, so overriding it means its body never runs and the recorded `sqflite` cause cannot
+  apply. Worth the timebox that is already owed for `app_lifecycle_test.dart`.
+- **`InviteCode.forSpeaking`.** The code's spoken spelling is computed inline in a widget
+  (`code.split('').join(' ')`) while its visual grouping lives in the domain with tests. The string
+  `OPEN-QUESTIONS.md` #12 calls the most-read-aloud in the app.
+- **The mutation lists cover Phase 5 surfaces only**, and now say so in both drivers. The six pure
+  functions `strategy.md` says the risk lives in are unmutated, as is `firestore.rules`.
+- **The audience is a snapshot.** The 21:00 body follows the audience at the next reconcile, and a
+  remote link change triggers none. The false-claim direction — the last watcher revoking from their
+  own phone — is now named in `AlarmScheduler.apply`'s docstring rather than implied away.
 
 ---
 
@@ -616,11 +766,8 @@ because it leaves a skipped first question as a dead end and makes a second watc
 
 **4. The 21:00 reminder. → an empty-audience variant.**
 
-**5. The five reviewers.** They ran at the review round (commit `e8af581`) and their fourteen
-findings were applied. **They have not been re-run over the close-out changes** — the chooser, the
-21:00 variant, the fourth refusal and the harnesses. That is the owner's to trigger, and this repo's
-memory records that launching them in parallel has twice exhausted the session limit, so they want
-running one at a time.
+**5. The five reviewers. → RUN, one at a time, over the close-out itself.** See *The gate review*
+below. They found nineteen things, four of them defects in the close-out's own work.
 
 ---
 
@@ -677,10 +824,17 @@ longer knows — **re-pair rather than trying to reconcile it.**
 >
 > **Phase 5 is COMPLETE and SIGNED OFF** (2026-08-26). Built, its exit criterion **met on two
 > devices** — two phones paired from a cold install using only a shared code, each landing on the
-> correct main screen — all five reviewers run with their findings applied, all three owner decisions
-> taken, and the review round's six open items closed or recorded. **1 193 Dart tests, 75 Functions
-> tests, 75 rules tests**, `flutter analyze` clean, debug and release APKs build, secrets guard
-> clean.
+> correct main screen — all three owner decisions taken, and **the five reviewers run twice: once
+> over the phase, once over the close-out itself**. **1 202 Dart tests, 83 Functions tests, 75 rules
+> tests**, `flutter analyze` clean, debug and release APKs build, secrets guard clean.
+>
+> **Read *The gate review* in the summary.** Running the reviewers over the close-out rather than
+> only over the phase found four more defects, and the two worth carrying as habits are these. The
+> chooser added to close a dead end **opened a second door into the failure `main.dart` has warned
+> about for three phases** — a watcher with no armed alarm — through the exact path a fix earlier the
+> same day had closed elsewhere. And the flagship change's user-visible half had **no test at all**:
+> both scheduler doubles replaced the method that spends the flag, so they proved it was passed and
+> never that it chose a sentence.
 >
 > **Read *Closing the phase* in the summary before you write anything**, because three of the things
 > settled there constrain Phase 6 directly: the **empty-audience 21:00 variant** threads
@@ -692,12 +846,20 @@ longer knows — **re-pair rather than trying to reconcile it.**
 >
 > **Two things about the close-out are worth carrying as habits.** The **mutation harnesses are in
 > the repo now** (`tools/mutate-dart.mjs`, `tools/functions-mutate.ps1`) and they refuse to score
-> rather than guess — mine refused twice before it scored once, both times on a mistake in the
-> harness's caller, and both times that refusal is what made the real cause findable. And **read a
-> claim against the thing it describes**: this close-out found a `deploy-notes.md` sentence that was
-> false (`@types/node` *was* installed, four majors ahead of the deployed runtime), a documented
-> permission check that greps for the wrong kind of thing, and an enum docstring that counted to four
-> against seven cases.
+> rather than guess. That refusal earned its keep three times — twice on a mistake in the harness's
+> caller, once on a **mutated build left in `functions/lib/`** while `src/` was clean and
+> `git status` empty. And the Dart harness reported **14/14 while having no compile gate at all**:
+> three of those mutations never compiled, and a Dart compile error prints the red phrase verbatim.
+> A harness that cannot tell "the suite noticed" from "the compiler noticed" is the Phase 4 failure
+> wearing a different hat.
+>
+> And **read a claim against the thing it describes.** Between the close-out and its review this
+> phase found: a `deploy-notes.md` sentence that was false (`@types/node` *was* installed, four
+> majors ahead of the deployed runtime), a documented permission check that greps for the wrong kind
+> of thing, a permission count that had been wrong for two phases while the same docstring's own
+> arithmetic disagreed with it, an enum docstring that counted to four against seven cases, and
+> `screens.md` still saying the copy was *owed approval* in the commit whose purpose was to record
+> that it is not.
 >
 > **Build against the emulator suite**, exactly as Phase 5 did. A 2nd-gen deploy would still fail —
 > four prerequisite APIs are missing — and it is the owner's call.

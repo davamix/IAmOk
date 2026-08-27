@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:timezone/timezone.dart' as tz;
 
+import '../application/onboarding_controller.dart';
 import '../application/providers.dart';
 import '../application/watched_reconcile_service.dart';
 import '../copy/notification_copy.dart';
@@ -498,44 +499,63 @@ class AddSomeoneButton extends ConsumerWidget {
   /// the elderly person never presses the control it sits behind.
   ///
   /// Returns null when dismissed — a back gesture or a tap outside — which is a
-  /// choice and not a failure, so nothing is said.
+  /// choice and not a failure, so nothing is said. Same decision `screens.md`
+  /// records by hand for the Google account chooser.
+  ///
+  /// **It scrolls, and that is the accessibility floor rather than a nicety.**
+  /// A default `showModalBottomSheet` caps its child at 9/16 of the screen
+  /// height. At the largest system font scale the title plus two two-line
+  /// options plus the `SafeArea` inset reaches that ceiling on a small phone,
+  /// and a `Column` that overflows its constraint is **clipped in release** —
+  /// silently, with no overflow stripe.
+  ///
+  /// What that costs is specific: the option at the bottom is *"Someone I look
+  /// after"*, so the row that gets cut is the one this sheet exists to provide.
+  /// The cross-role dead end would come back for exactly the users most likely
+  /// to be running a large font — which is the population this whole app is
+  /// for. `guidelines.md`'s floor is the largest system font scale with no
+  /// clipping, and every other surface here obeys it deliberately.
   @visibleForTesting
   static Future<bool?> chooseRole(BuildContext context) =>
       showModalBottomSheet<bool>(
         context: context,
+        // Lets the sheet grow past 9/16 before the scroll view has to engage.
+        isScrollControlled: true,
         builder: (sheetContext) => SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const SizedBox(height: 8),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(24, 16, 24, 8),
-                child: Text(
-                  OnboardingCopy.addSomeone,
-                  style: Theme.of(sheetContext).textTheme.headlineSmall,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const SizedBox(height: 8),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(24, 16, 24, 8),
+                  child: Text(
+                    OnboardingCopy.addSomeone,
+                    style: Theme.of(sheetContext).textTheme.headlineSmall,
+                  ),
                 ),
-              ),
-              // The order is onboarding's order: the watched question first,
-              // because this control lives on the watched person's screen.
-              ListTile(
-                key: watchedChoiceKey,
-                // 48dp floor, as everywhere else on this screen. A ListTile's
-                // default height already clears it; the constraint is stated so
-                // a later density change cannot quietly drop below it.
-                minTileHeight: 56,
-                leading: const Icon(Icons.person_add_alt),
-                title: Text(OnboardingCopy.addSomeoneToWatchMe),
-                onTap: () => Navigator.of(sheetContext).pop(true),
-              ),
-              ListTile(
-                key: watcherChoiceKey,
-                minTileHeight: 56,
-                leading: const Icon(Icons.people_outline),
-                title: Text(OnboardingCopy.addSomeoneIWatch),
-                onTap: () => Navigator.of(sheetContext).pop(false),
-              ),
-              const SizedBox(height: 16),
-            ],
+                // The order is onboarding's order: the watched question first,
+                // because this control lives on the watched person's screen.
+                ListTile(
+                  key: watchedChoiceKey,
+                  // 48dp floor, as everywhere else on this screen. A ListTile's
+                  // default height already clears it; the constraint is stated so
+                  // a later density change cannot quietly drop below it.
+                  minTileHeight: 56,
+                  leading: const Icon(Icons.person_add_alt),
+                  title: Text(OnboardingCopy.addSomeoneToWatchMe),
+                  onTap: () => Navigator.of(sheetContext).pop(true),
+                ),
+                ListTile(
+                  key: watcherChoiceKey,
+                  minTileHeight: 56,
+                  leading: const Icon(Icons.people_outline),
+                  title: Text(OnboardingCopy.addSomeoneIWatch),
+                  onTap: () => Navigator.of(sheetContext).pop(false),
+                ),
+                const SizedBox(height: 16),
+              ],
+            ),
           ),
         ),
       );
@@ -571,6 +591,8 @@ class AddSomeoneButton extends ConsumerWidget {
               builder: (_) => pairingScreenFor(wantsToBeWatched),
             ),
           );
+          if (!context.mounted) return;
+
           // **Reconcile on the way back, whatever the screen returned.** The
           // audience line is rendered from `WatchedState`, and a pairing that
           // completed while that screen was up has changed it. §3's rule is that
@@ -579,13 +601,58 @@ class AddSomeoneButton extends ConsumerWidget {
           //
           // `userInitiated` is left at its default true: she pressed the button
           // that opened this, so a refresh is the answer she asked for.
-          //
-          // Run for **either** screen. A code redeemed here makes this user a
-          // watcher, which does not change the audience line — but this is the
-          // cheap read that keeps §3's one rule (re-read, never patch) with no
-          // branch to get wrong, and the watcher side is reconciled by the list
-          // it can now reach.
           await ref.read(watchedStateProvider.notifier).refresh();
+          if (!context.mounted) return;
+
+          // **The watcher branch needs its own repair, and this used to say it
+          // did not.** The comment here read *"the watcher side is reconciled by
+          // the list it can now reach"*. Both halves were false, and together
+          // they are the failure `main.dart` has warned about for three phases —
+          // a watcher whose warning alarm was never armed.
+          //
+          // The list is **not** reachable. `TapScreen.watcherListReachable`
+          // comes from `HomeRoute.decide` through `homeRouteProvider`, which
+          // watches `linkRolesProvider` — and nothing on this path invalidates
+          // it. `EnterCodeScreen` calls `recordPairing`, which goes to `_persist`
+          // and deliberately does **not** tell the router (correct for its
+          // original mid-flow purpose; wrong for a re-entry from a main screen).
+          // So the provider keeps its cached `watcher: false`, the button never
+          // renders, and the user is a watcher with no control anywhere that
+          // reaches the list until the process is cold-started.
+          //
+          // And nothing armed the alarm. `refresh()` above reconciles the
+          // **watched** side; the link just created is a **watcher** link, whose
+          // warning alarm is armed by `WatcherReconcileService`. Pair today, the
+          // watched person does not tap, this app is not reopened — and
+          // tomorrow's warning was never scheduled. FCM does not save it either:
+          // `onCheckInCreated` fires when the watched person *taps*, which is
+          // exactly the case with nothing to warn about.
+          //
+          // Same repair as `OnboardingController._armWatcherSideIfNobodyElseWill`,
+          // whose docstring says why *"most people reopen before tomorrow
+          // morning"* is not the standard a dead man's switch is held to.
+          if (!wantsToBeWatched) {
+            // Makes the list reachable: the route is recomputed from the links,
+            // which now include one where this user is the watcher. Safe **at
+            // this call site specifically** — no onboarding flow is running, so
+            // this cannot re-open the summary-screen defect `_persist` avoids.
+            ref.invalidate(linkRolesProvider);
+
+            final services = ref.read(appServicesProvider);
+            try {
+              // `watcherListShowing: false` — the Tap screen is showing, not the
+              // list. Passing true here would be the lost-warning shape measured
+              // on the POCO F3: `redundant` consumes the day without posting,
+              // with nobody reading the row it deferred to.
+              await services
+                  .watcherReconcile(watcherListShowing: false)
+                  .reconcile(selfUid: services.selfUid);
+            } on Object {
+              // Swallowed like its twin: this is a repair behind a screen the
+              // user is already on, and it must never replace it with an error
+              // about work they did not ask for. The next resume runs it again.
+            }
+          }
         },
         icon: const Icon(Icons.person_add_alt),
         label: const Text(OnboardingCopy.addSomeone),

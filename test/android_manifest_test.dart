@@ -206,9 +206,13 @@ void main() {
   /// since Phase 3 for the alarm that wakes the watcher's isolate.
   ///
   /// **Re-measured a third time, after step 6 added `firebase_app_check`.** The
-  /// answer is **no change at all** — still fourteen, and
+  /// answer is **no change at all** — still thirteen, and
   /// `firebase-appcheck-playintegrity` plus `com.google.android.play:integrity`
   /// contribute none of their own.
+  ///
+  /// (This said *"fourteen"* until the Phase 5 gate review. See the correction
+  /// under the fourth measurement below — the number was always wrong, and the
+  /// arithmetic in this very docstring already disagreed with it.)
   ///
   /// That is worth recording precisely *because* it is a null result. The rule
   /// in this file's docstring is "owed whenever a plugin is added", and a rule
@@ -219,10 +223,24 @@ void main() {
   /// This is the routine the docstring above predicts: a plugin was added, the
   /// release build was run, and the diff is stated rather than guessed.
   ///
-  /// **Re-measured a fourth time, when Phase 5 closed — 2026-08-26.** Two
-  /// plugins were added that phase (`share_plus`, `cloud_functions`). The
-  /// permission answer is again **no change at all**: still the same fourteen,
-  /// and neither plugin contributes one of its own.
+  /// **Re-measured a fourth time, when Phase 5 closed — 2026-08-26**, and again
+  /// at the gate review. Two plugins were added that phase (`share_plus`,
+  /// `cloud_functions`). The permission answer is **no change at all**: still
+  /// the same **thirteen**, and neither plugin contributes one of its own.
+  ///
+  /// **Thirteen, not fourteen, and the number had been wrong since Phase 4.**
+  /// The merger report lists AndroidX's
+  /// `DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION` **twice** — once with
+  /// `${applicationId}` unresolved and once resolved — so a grep of the report
+  /// double-counts one permission. The merged manifest itself has 13 distinct
+  /// `<uses-permission>` elements.
+  ///
+  /// The arithmetic above already disagreed: this file says the merged set
+  /// differs from `main`'s by **seven**, and `main` declares **six**. 6 + 7 is
+  /// 13. Nothing asserted the number, so nothing caught it for two phases —
+  /// which is the argument for counting from the manifest, where a double count
+  /// is impossible, rather than from a report that resolves placeholders by
+  /// listing both forms.
   ///
   /// **But the permission check alone would have missed what they did add**, and
   /// that is the finding worth keeping. `deploy-notes.md`'s standing command is
@@ -238,19 +256,37 @@ void main() {
   ///   android:exported="false"
   /// ```
   ///
-  /// `cloud_functions` contributes one `meta-data` Firebase component registrar
-  /// and nothing else. Verified against the merged release manifest itself
+  /// `cloud_functions` contributes **three** `meta-data` Firebase component
+  /// registrars and nothing else: `FlutterFirebaseAppRegistrar`,
+  /// `FunctionsRegistrar` and `FirebaseFunctionsKtxRegistrar`. (Recorded as
+  /// *one* until the gate review — the command in `deploy-notes.md` had no
+  /// `meta-data` in its alternation, so it could not see the very thing it was
+  /// cited as having measured. Both are fixed.)
+  ///
+  /// `share_plus` also nests a `FILE_PROVIDER_PATHS` meta-data inside its
+  /// provider. That resource is what actually bounds what the provider could
+  /// expose, so it is the thing worth naming in a paragraph arguing the
+  /// provider is harmless.
+  ///
+  /// Verified against the merged release manifest itself
   /// (`build/app/intermediates/merged_manifest/release/…`) rather than the
   /// merger report, because **the report lists attribute names without their
   /// values** — it says `android:exported` was added and not what it was set
-  /// to, which is the whole question.
+  /// to, which is the whole question. Note the path is an AGP implementation
+  /// detail that has moved before; `deploy-notes.md` globs for it and throws
+  /// rather than hard-coding it.
   ///
   /// **Both components are `exported="false"`**, so neither is reachable from
   /// another app, and the provider's authority is scoped to this application id.
-  /// `grantUriPermissions="true"` is what a FileProvider is for: it lets the app
-  /// hand a share target temporary read access to a file. **This app shares only
-  /// text** — `ShareParams(text: …)`, the invite code and its expiry — so the
-  /// provider is present and unused. Recorded rather than removed: it is a
+  /// The receiver does carry an `<intent-filter>`; the explicit
+  /// `exported="false"` overrides the default that filter would otherwise imply,
+  /// so it stays unreachable.
+  ///
+  /// `grantUriPermissions="true"` is **not a grant**. It is permission for *this
+  /// app* to attach `FLAG_GRANT_READ_URI_PERMISSION` to a URI it hands out —
+  /// what a FileProvider is for. **This app shares only text** —
+  /// `ShareParams(text: …)`, the invite code and its expiry — so no URI is ever
+  /// minted, nothing is ever granted, and the provider is present and unused. Recorded rather than removed: it is a
   /// plugin's own manifest entry, it grants nothing while nothing calls it, and
   /// stripping a dependency's component is the kind of change that should be
   /// made with a device run behind it, alongside the biometric question below.
@@ -268,6 +304,27 @@ void main() {
   /// ever been proven on hardware would confound the first real measurement.
   /// Decide it at Phase 8, where the Play permission story is written anyway,
   /// with a device run behind it.
+  /// The permission count, asserted rather than left in prose.
+  ///
+  /// It was wrong for two phases *because nothing asserted it* — the docstring
+  /// said fourteen while its own arithmetic said thirteen. A number in a comment
+  /// is a claim nobody reads back against the thing it describes, which is the
+  /// failure this whole file exists to prevent one layer up.
+  ///
+  /// This asserts the **source** manifest's own count, which is the half that
+  /// lives in this repo; the merged total is `main`'s six plus seven merged in,
+  /// and the merged half needs a release build, so it stays a recorded
+  /// measurement with a date on it.
+  test('main declares six permissions, and the merged total is thirteen', () {
+    final declared = RegExp(r'android:name="android\.permission\.(\w+)"')
+        .allMatches(manifest('main'))
+        .map((m) => m.group(1))
+        .toSet();
+    expect(declared, hasLength(6),
+        reason: 'six declared here, seven merged in from dependencies, '
+            'thirteen in the release manifest — recorded above with dates');
+  });
+
   test('the merged-release finding above has a home and a date', () {
     // A comment nothing points at is a comment nobody re-reads. This asserts
     // only that the document carrying the standing claim still exists, so the

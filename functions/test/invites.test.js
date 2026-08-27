@@ -207,6 +207,31 @@ describe('dayKeyInZone', () => {
   });
 });
 
+/// `functions/src/invites.ts` with comments stripped and CRLF normalised, for
+/// the source lints below.
+function withoutComments(source) {
+  return (
+    source
+      // CRLF first: a fresh clone on Windows checks these out with CRLF
+      // while the repo stores LF, and every multi-line match would miss.
+      .replace(/\r\n/g, '\n')
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .split('\n')
+      .map((line) => {
+        const at = line.indexOf('//');
+        return at === -1 ? line : line.slice(0, at);
+      })
+      .join('\n')
+  );
+}
+
+/// `functions/src/invites.ts`, comment-free, for the source lints below.
+function sourceOfInvites() {
+  return withoutComments(
+    readFileSync(join(__dirname, '..', 'src', 'invites.ts'), 'utf8'),
+  );
+}
+
 describe('createInvite', () => {
   it('writes an invite owned by the caller, with a 24-hour expiry', async () => {
     const result = await createInviteFor(db, MUM, NOW);
@@ -335,8 +360,11 @@ describe('createInvite', () => {
   // function, deliberately — so if it silently no-ops, expired invites
   // accumulate for ever under a `watchedUid ==` read that is on the pairing path.
   it('the sweep is awaited, so Cloud Run cannot drop it', () => {
-    const source = readFileSync(join(__dirname, '..', 'src', 'invites.ts'), 'utf8')
-      .replace(/\r\n/g, '\n');
+    // Comments stripped as well as CRLF normalised. The prose above that call
+    // quotes both `await` and `void`, so matching raw source would let the
+    // positive half be satisfied by a sentence and the negative half fail on
+    // one. Same move the Dart source lints make, for the same reason.
+    const source = sourceOfInvites();
     assert.ok(
       source.includes('await Promise.allSettled('),
       'the invite sweep must be awaited',
@@ -344,6 +372,43 @@ describe('createInvite', () => {
     assert.ok(
       !/\bvoid Promise\.allSettled\(/.test(source),
       'a fire-and-forget sweep works ONLY in the emulator',
+    );
+  });
+
+  // **No invite code may reach a log line.** `index.ts` logs
+  // `code: (error as { code?: unknown }).code` — the gRPC error code — and a
+  // local `const code` holding the live invite string is in scope three lines
+  // away. Shortening either literal to `{ watcherUid, code }` would start
+  // logging a bearer credential to Cloud Logging, and nothing would notice: the
+  // Phase 5 review fixed exactly this and left no instrument behind.
+  //
+  // A lint, because the property is about what a deployed function writes to a
+  // log sink, which no emulator test observes.
+  it('the error logs carry a gRPC code, never the invite string', () => {
+    // Block comments stripped as well as line comments: `index.ts` says
+    // `invites/{code}` in prose twice, which is a literal match for the
+    // shorthand this looks for. The first version of this lint failed on both
+    // and reported them as leaks — a lint crying wolf is a lint that gets
+    // deleted.
+    const index = withoutComments(
+      readFileSync(join(__dirname, '..', 'src', 'index.ts'), 'utf8'),
+    );
+
+    // `{ code }` or `, code }` — an object literal SHORTHAND, on one line.
+    // `${code}` is excluded: that is a template interpolation, not a property.
+    const shorthand = /(?<!\$)\{[ 	]*code[ 	]*[,}]|,[ 	]*code[ 	]*[,}]/g;
+    const hits = index.match(shorthand) ?? [];
+    assert.deepEqual(
+      hits,
+      [],
+      `an object literal uses shorthand 'code' — if that is the invite string ` +
+        `it is now in Cloud Logging: ${JSON.stringify(hits)}`,
+    );
+    assert.equal(
+      (index.match(/code: \(error as \{ code\?: unknown \}\)\.code/g) ?? [])
+        .length,
+      2,
+      'both catch blocks should log the gRPC code explicitly',
     );
   });
 

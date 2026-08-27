@@ -278,6 +278,42 @@ void main() {
     });
   });
 
+  // **Where each refusal's sentence is rendered, decided in the domain.**
+  //
+  // `errorText` on the code field does not merely print a sentence — it turns
+  // the field red and relabels it invalid. That is a second, wordless claim, and
+  // it is the one a reader takes first, so it must not be made about a code
+  // nothing is known about. `screens.md` says so in words; until the Phase 5
+  // gate the screen contradicted it in colour.
+  group('which refusals are a claim about the code', () {
+    test('the four a person fixes by looking at the code, and only those', () {
+      const aboutTheCode = {
+        PairingRefusal.unknownCode,
+        PairingRefusal.expired,
+        PairingRefusal.alreadyUsed,
+        PairingRefusal.ownCode,
+      };
+      for (final reason in PairingRefusal.values) {
+        expect(reason.isAboutTheCode, aboutTheCode.contains(reason),
+            reason: reason.name);
+      }
+    });
+
+    test('nothing that names another phone, a radio or the backend', () {
+      for (final reason in [
+        PairingRefusal.watchedProfileMissing,
+        PairingRefusal.watcherProfileMissing,
+        PairingRefusal.unusableTimezone,
+        PairingRefusal.couldNotReach,
+        PairingRefusal.serverFault,
+        PairingRefusal.notSignedIn,
+      ]) {
+        expect(reason.isAboutTheCode, isFalse,
+            reason: '${reason.name} would mark a good code invalid');
+      }
+    });
+  });
+
   group('asMap', () {
     // The Android platform channel hands back Map<Object?, Object?>, and a
     // direct cast would throw AFTER the call succeeded — turning a completed

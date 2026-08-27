@@ -82,6 +82,24 @@ void main() {
       expect(InviteCode.tryParse('K7RTQXA'), isNull);
     });
 
+    // **A stray character is refused, never DROPPED.** Every case above has an
+    // off-alphabet character inside six, where skipping it and refusing it both
+    // end at null — so a `tryParse` that silently *skipped* what it does not
+    // recognise passed the whole group. Found by mutation.
+    //
+    // The difference only shows past six characters, and there it matters most:
+    // skipping turns `K7RTQXO` into the perfectly valid, perfectly different
+    // code `K7RTQX`, and pairs a family to whoever holds that one. Refusing is
+    // what §7's "guessing at what somebody meant" rule is about.
+    test('a stray character is not silently dropped into a valid code', () {
+      expect(InviteCode.tryParse('K7RTQXO'), isNull,
+          reason: 'dropping the O leaves K7RTQX — a real code, and not theirs');
+      expect(InviteCode.tryParse('OK7RTQX'), isNull);
+      expect(InviteCode.tryParse('K7R0TQX'), isNull);
+      expect(InviteCode.tryParse('K7RTQX.'), isNull,
+          reason: 'a full stop pasted from the end of the share message');
+    });
+
     test('empty, and separators only', () {
       expect(InviteCode.tryParse(''), isNull);
       expect(InviteCode.tryParse('   '), isNull);

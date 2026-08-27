@@ -28,6 +28,33 @@
 // A mutation applied to `src/` and not compiled would be tested against the
 // PREVIOUS build, and every mutation would come back SURVIVED.
 //
+//
+// ## What these lists deliberately do NOT cover, so the score is read correctly
+//
+// Every mutation here is a **Phase 5 surface**. "14 of 14 caught" is a statement
+// about this phase's code, not about the suite, and the difference matters
+// because the risk in this design sits somewhere else.
+//
+// Not mutated, and named so nobody mistakes the number for coverage:
+// `DayKey`, `AwayPeriod`, `ReminderPolicy`, `WarningPolicy`, either reconciler,
+// the false-warning correction path, `AlarmIds` (whose per-process stability is
+// a `CLAUDE.md` constraint and the premise the correction path rests on), the
+// `onCheckInCreated` fan-out, and `firestore.rules` — which has 75 tests and no
+// mutation coverage at all.
+//
+// Those are exactly the six pure functions `docs/testing/strategy.md` says the
+// risk lives in. Extending the lists there is worth more than adding another
+// Phase 5 mutation; it is deliberately not done here, because a harness grown
+// past what it is run against stops being run.
+//
+// One mandatory case is *nearly* covered and misses the half that matters:
+// `dayKeyInZone` is mutated for its null handling but never for **whose zone it
+// is**. `strategy.md` names that explicitly — *"`activeFrom` in the watched
+// person's timezone, not the redeemer's"* — and swapping the two compiles,
+// changes a real family's `activeFrom` by a day, and is not in the list below.
+// The deterministic link id `{watchedUid}_{watcherUid}` is likewise unmutated;
+// swapping the operands breaks double-redemption idempotence.
+//
 // See `mutate-runner.mjs` for the properties this shares with the Dart harness.
 
 import { mutate, report, run } from './mutate-runner.mjs';

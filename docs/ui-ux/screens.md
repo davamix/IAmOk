@@ -6,8 +6,11 @@ both pairing screens in Phase 5.** What remains specification is the away picker
 panel. (This line said *"everything else is still specification"* until 2026-08-25; `guidelines.md`
 had the identical claim corrected the same day and this file was missed.)
 
-**Every Phase 5 string below is owed the owner's approval**, like every user-visible string in this
-project. Two of them are *changes to already-approved copy* and are called out where they appear.
+**Every Phase 5 string below was approved by the owner on 2026-08-26**, at the Phase 5 gate. **Two**
+are *deletions* from already-approved copy and **four** are *amendments* to it; each is called out
+where it appears. (This paragraph still said the copy was *owed* approval until the gate review — in
+the commit whose whole purpose was to record that it is not, which is this file's own recurring
+failure mode.)
 
 What is recorded here is **only what has actually been decided** — mostly behaviour and copy,
 carried over from [PLAN.md](../PLAN.md) and [ARCHITECTURE.md](../architecture/ARCHITECTURE.md).
@@ -19,10 +22,10 @@ here as a free choice: add the decision to this file when it is made.
 | Tap (watched main) | 2 | **Built.** Behaviour, copy and layout decided |
 | Debug harness | 2 | **Built.** Debug builds only |
 | Sign-in | 5 | **Built.** Not in this inventory before Phase 5 — see below |
-| Onboarding 1 — "Who should know you're OK?" | 5 | **Built.** Copy below, **owed the owner's approval** |
-| Onboarding 2 — "Who are you looking after?" | 5 | **Built.** Copy below, **owed the owner's approval** |
-| Onboarding 3 — summary | 5 | **Built.** Reports the links that exist, never what was tapped |
-| Pairing — create invite / redeem code | 5 | **Built**, and proven on two devices |
+| Onboarding 1 — "Who should know you're OK?" | 5 | **Built.** Copy below, approved 2026-08-26 |
+| Onboarding 2 — "Who are you looking after?" | 5 | **Built.** Copy below, approved 2026-08-26 |
+| Onboarding 3 — summary | 5 | **Built.** Copy approved 2026-08-26. Reports the links that exist, never what was tapped |
+| Pairing — create invite / redeem code | 5 | **Built**, proven on two devices, copy approved 2026-08-26 |
 | Away picker | 6 | Copy decided; layout undesigned |
 | Watcher list (watcher main) | 7 | Row content decided; multi-person layout undesigned |
 | Health panel | 7 | Checks decided incl. backend access (ADR-0004); layout undesigned |
@@ -127,9 +130,38 @@ is what stops the app asking an 80-year-old the same two questions every single 
 | Someone redeemed it | *"Ana will now know you're OK."* |
 | Then | **"Done"** · **"Add someone else"** |
 
+**Why a code could not be made**, which this section did not carry until the gate review. The
+screen renders one sentence and a **"Try again"** button.
+
+| The device knows | Says |
+|---|---|
+| this phone has no `users/{uid}` | *"This phone could not finish getting ready. Try again."* |
+| it could not reach the backend | *"Could not reach the internet. Check your connection and try again."* |
+| the backend answered, and this build cannot act on the answer | *"That did not work just now. Try again in a moment."* |
+| nobody is signed in | *"You are not signed in. Sign in and try again."* |
+| Action | **"Try again"** |
+
+Every sentence is the one its twin uses in *Why a code did not work* below — deliberately, because a
+family who hits the same fault while making a code and while using one must not be told two different
+things about it. The record was the gap, not the copy: `serverFault` was added to **both** enums at
+approval and only one of them had a home in this file.
+
+**The confirmation and the refusal are both spoken.** `SemanticsService.sendAnnouncement` carries
+*"Ana will now know you're OK."* and the refusal sentence, for the reason the watcher list's
+announcements section gives at length: nothing re-reads a changed widget, so a blind reader presses
+the button and hears nothing at all. Both are already-approved text.
+
 **The expiry is 24 hours**, the owner's decision, and it is rendered in the device's own zone and its
 own 12/24-hour setting through `NotificationCopy`'s formatters — not a third set. The date is written
 out; never `27/08`.
+
+> **The shared expiry is a wall-clock time in the *sender's* zone, and that cost is accepted.** The
+> share sheet is the path for somebody who is **not** at the same table, so it is the path most
+> likely to cross a zone — and *"It stops working at 11:14 am on Thursday 27 August"* is then a time
+> that is not the reader's. Bounded, because a code read too late fails with *"That code has expired.
+> Ask for a new one."*, which is honest and names the action that works. Recorded rather than fixed:
+> the alternative is naming a zone in a sentence an elderly person reads, and the failure it would
+> prevent already lands somewhere safe.
 
 **The code is spelled out for a screen reader** — `K 7 R T Q X` — because "K7RTQX" is read as a word
 and a listener cannot spell a word back. The visual grouping is for the eye; the spelling is the same
@@ -176,6 +208,12 @@ punished for it.
 either, so there is no character a substitution could arrive at, and guessing at what somebody meant
 is how a family ends up paired to the wrong person.
 
+**The code is spoken character by character** — `K 7 R T Q X` — for the same reason it is grouped
+visually: "K7RTQX" is read as a word by a screen reader and a listener cannot spell a word back.
+
+**The confirmation and every refusal are announced**, as on the other pairing screen and for the same
+reason.
+
 ### Why a code did not work — **every branch is a claim**
 
 | The device knows | Says |
@@ -189,6 +227,20 @@ is how a family ends up paired to the wrong person.
 | this phone could not reach the backend | *"Could not reach the internet. Check your connection and try again."* |
 | the backend answered, and this build cannot act on the answer | *"That did not work just now. Try again in a moment."* |
 | nobody is signed in | *"You are not signed in. Sign in and try again."* |
+
+> **Only the first four are rendered on the code field — settled at the gate review, 2026-08-26.**
+> `errorText` does not merely print a sentence: it puts the field into its **error state**, red
+> outline and red *"Code"* label. Every refusal went there, so a server fault, a dead radio or a
+> missing profile on *this* phone all marked the code invalid — a second, wordless claim, and the one
+> a reader takes first, on paths where nothing whatever is known about the code.
+>
+> The copy already said this must not happen (*"The last four are not the reader's mistake and none
+> of them says 'not right'"*); the screen contradicted it in colour. What a family member saw was:
+> type a perfectly good code, the field turns red, retype the same six characters, loop.
+>
+> The other five now render **above the action button**, in the same words, without the claim. The
+> split lives in the domain as `PairingRefusalSurface.isAboutTheCode` and is exhaustive, so a refusal
+> added later cannot default into either bucket.
 
 **The failures are distinguished rather than collapsed**, and that is a deliberate trade recorded in
 ADR-0011: collapsing them leaks marginally less, but these tell a family three different next
@@ -294,6 +346,22 @@ things across the two screens — produce a code here, consume one there.
 > copy, but a permanent second icon there, and it contradicts PLAN.md, which specifies that button
 > for a both-roles user); and accepting the dead end until Phase 7 (cheapest, and it leaves a real
 > family able to get stuck).
+
+**Dismissing the chooser says nothing**, and that is the same decision this file records by hand for
+the Google account chooser two sections up: a dismissal is a choice, not a fault. A back gesture, a
+drag down or a tap outside all return without opening anything.
+
+**The chooser scrolls.** A default bottom sheet caps its child at 9/16 of the screen height, and at
+the largest system font scale the second option falls past that — measured at 338 pixels of overflow
+on a 320×480 screen at scale 2.0, which in a release build is a **silent clip**. The option that
+would be cut is *"Someone I look after"*, so the dead end this chooser closes would come back for
+exactly the readers most likely to be running a large font.
+
+**The two secondary controls on the Tap screen sit in this order: *Add someone*, then *I'm away*, 20dp
+apart.** Recorded because Phase 6 makes it matter — they are two text buttons of the same weight, and
+Away is inert until then. `guidelines.md`'s mis-tap reasoning is about the distance from the *tap
+target*, which is still satisfied; what it does not consider is a nearer neighbour of equal weight.
+**Give Away visible separation in the same change that enables it**, not after.
 
 **The control that opens the watcher list is labelled *"See who you look after"***, which is not the
 list's title. A title says what a screen **is**; a control's label says what pressing it **does**, and

@@ -83,8 +83,11 @@ which `redeemInvite` refuses as a self-link.
 redeemer appears **by name** on the watched person's Tap screen the moment they use it (ADR-0005),
 where either party can revoke. That is why this is a recorded cost rather than a defect.
 
-**A `cancelInvite` callable is cheap if it is ever wanted** — a delete of `invites/{code}` gated on
-`watchedUid == request.auth.uid`, and a control on the share screen. Not built, because nothing in
+**A `cancelInvite` callable is cheap if it is ever wanted** — a delete of `invites/{code}` from
+**inside the callable**, gated there on `watchedUid == request.auth.uid`, plus a control on the share
+screen. The gate is a line of TypeScript, **not** a rules clause: `invites/` stays
+`allow read, write: if false` for every client, because granting `delete` there turns the one deny
+the guidelines call load-bearing into a rule with an exception, and an exception is a probe. Not built, because nothing in
 Phase 5 needed it and a control the elderly user does not need is a surface `guidelines.md` would
 rather not have. It belongs with Phase 7's UI pass if it is built at all.
 

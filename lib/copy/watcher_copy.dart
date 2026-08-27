@@ -26,6 +26,15 @@ abstract final class WatcherCopy {
   /// and the only thing a screen-reader user gets for it — it is an icon
   /// button, so this is its whole identity.
   ///
+  /// **It reaches the tree as a `tooltip`, not as a `label`** — measured, and
+  /// worth stating rather than assuming. `IconButton(tooltip:)` populates
+  /// `SemanticsProperties.tooltip`, which is Android's `setTooltipText`, and
+  /// leaves `label` empty; TalkBack does announce it for a control with no
+  /// content description, but that is a weaker guarantee than a real label.
+  /// Making it one means a wrapping `Semantics(label:)`, which then risks the
+  /// string being spoken twice. Left as it is, named here, and owed a decision
+  /// at Phase 7's accessibility pass alongside `OPEN-QUESTIONS.md` #1.
+  ///
   /// Not [title]. A title says what a screen is; a control's label says what
   /// pressing it does, and *"People you're looking after"* on a button reads as
   /// a heading somebody has landed on rather than a door. It is approved as a

@@ -53,11 +53,29 @@
 // third was a real gap. Scoring the two as "caught" would have been the harness
 // lying in the other direction.
 //
-// ## The source file is restored in a `finally`, always
+// ## The source file is restored on every exit, including Ctrl-C
 //
-// A harness that leaves a mutated line in the tree after a Ctrl-C is worse than
-// no harness. Every write is wrapped, and the original text is held in memory
+// A harness that leaves a mutated line in the tree is worse than no harness.
+// Every write is wrapped in a `finally`, and the original text is held in memory
 // from before the first mutation.
+//
+// **A `finally` alone is not enough, and this file claimed it was.** Node's
+// default SIGINT handler terminates without unwinding, so `try/finally` around an
+// `await` does not run on Ctrl-C — measured. These harnesses are slow by
+// construction, so the interrupt window is wide, and what an interrupt would
+// leave behind is a **tracked** source file holding a disabled expiry guard or a
+// disabled sign-in check, with nothing but `git status` to say so. Signals are
+// trapped explicitly below.
+//
+// **And restoring the source is not the whole job where a build is involved.**
+// The Functions emulator serves `functions/lib/`, not `functions/src/` — `main`
+// is `lib/index.js`. Restoring `src/` and stopping there leaves the last
+// mutation's *compiled* output on disk: found by the infrastructure reviewer at
+// the Phase 5 gate, with `dayKeyInZone` returning `'1970-01-01'` sitting in
+// `lib/invites.js` while `src/` was clean and `git status` was empty. Anything
+// that builds first — `emulators.ps1`, `functions-test.ps1`, `firebase deploy` —
+// hides it; a bare `firebase emulators:start` does not. So the restore
+// recompiles.
 
 import { spawn } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -158,10 +176,30 @@ export function classify({ text }, { green, red }) {
  * something other than the line it names, so it is refused before anything runs.
  */
 export async function mutate({ file, mutations, suite, compile }) {
-  const original = readFileSync(file, 'utf8');
+  // **Normalised to LF on the way in.** Git for Windows defaults to
+  // `core.autocrlf=true` and this repo has no `.gitattributes`, so a fresh clone
+  // checks these files out with CRLF while the repo stores LF. Several `from`
+  // strings span two lines; against a CRLF working tree they match **zero**
+  // times and the harness refuses to start.
+  //
+  // The failure is safe — it declines rather than mis-editing — but it makes the
+  // harness unrunnable on a fresh clone, which is exactly the root cause this
+  // phase fixed inside the tests and left in the tooling. Writing the normalised
+  // text back is correct: LF is what the repo stores.
+  const original = readFileSync(file, 'utf8').replace(/\r\n/g, '\n');
   const results = [];
 
   const write = (text) => writeFileSync(file, text, { encoding: 'utf8' });
+
+  // **Restore on a signal, not only on a normal exit.** See the header: a
+  // `finally` does not run when Node is terminated by SIGINT.
+  const onSignal = () => {
+    write(original);
+    process.exit(130);
+  };
+  for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP', 'SIGBREAK']) {
+    process.on(signal, onSignal);
+  }
 
   try {
     // ---------------------------------------------------------------- control
@@ -236,6 +274,18 @@ export async function mutate({ file, mutations, suite, compile }) {
   } finally {
     // **Always.** A mutated line left in the tree is worse than no harness.
     write(original);
+
+    // **And rebuild, because the source is not what runs.** The Functions
+    // emulator serves `lib/`; without this the last mutation's compiled output
+    // outlives the run while `git status` stays clean. Awaited and its result
+    // ignored: a failed rebuild here cannot make things worse than not
+    // rebuilding, and throwing from a `finally` would mask whatever brought us
+    // here.
+    if (compile) await compile();
+
+    for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP', 'SIGBREAK']) {
+      process.off(signal, onSignal);
+    }
   }
 
   return results;

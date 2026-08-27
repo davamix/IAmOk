@@ -290,9 +290,9 @@ allowances mean effectively €0 at this scale, but the card must be on the acco
 
 ## Phase 5 — Onboarding and pairing
 
-> **COMPLETE and SIGNED OFF, 2026-08-26.** Built, the exit criterion met on two devices, all five
-> reviewers run with their findings applied, **all three owner decisions taken**, and the review
-> round's six open items closed or recorded. Start from
+> **COMPLETE and SIGNED OFF, 2026-08-26.** Built, the exit criterion met on two devices, **all three
+> owner decisions taken**, the review round's six open items closed or recorded, and **the five
+> reviewers run twice — once over the phase, once over the close-out itself**. Start from
 > [phases/phase-5-summary.md](phases/phase-5-summary.md) — *Closing the phase* is what happened at
 > the gate. [phases/phase-5-handover.md](phases/phase-5-handover.md) was the close-out plan and is
 > now historical.
@@ -317,9 +317,19 @@ allowances mean effectively €0 at this scale, but the card must be on the acco
 >
 > **The mutation harnesses are in the repo now** — `tools/mutate-dart.mjs`,
 > `tools/functions-mutate.ps1` — rather than being a claim nobody could re-run. Rebuilt and re-run,
-> they found four further test gaps in `functions/test/invites.test.js`, including a TTL assertion
-> that imported the constant it was checking. They also **refused to score twice before scoring
-> once**, both times on a mistake in the caller rather than in the suite.
+> they found five test gaps: four in `functions/test/invites.test.js`, including a TTL assertion that
+> imported the constant it was checking, and one in `InviteCode.tryParse`, where skipping an
+> unrecognised character instead of refusing it turns `K7RTQXO` into somebody else's valid code. They
+> also **refused to score three times before scoring cleanly** — twice on a mistake in the caller,
+> once on a mutated build left behind in `functions/lib/`.
+>
+> **And running the reviewers over the close-out is what made the phase actually done.** They found
+> four more defects in it, two of them serious: the chooser added to close a dead end opened a second
+> door into the unarmed-watcher failure `main.dart` has warned about for three phases, and the
+> flagship 21:00 change had **no test on the line that produces the sentence** — both scheduler
+> doubles replaced it, so they proved the flag was passed and never that it chose a body. The Dart
+> mutation harness had also been reporting 14/14 with **no compile gate**, and three of those
+> mutations never compiled.
 >
 > Built against the emulator suite as the brief instructed, so **nothing here says anything about a
 > deployed `redeemInvite`**; the 2nd-gen deploy is still blocked on four missing APIs and remains

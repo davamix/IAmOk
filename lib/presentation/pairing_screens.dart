@@ -261,12 +261,19 @@ class _CodeOnOffer extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
-    // **The same expiry sentence the screen shows, in the message that leaves
-    // the phone.** Read here rather than inside the share callback so the two
-    // cannot disagree: what the sender reads above the button is what the
-    // recipient receives. Null when device facts are not loaded, which is the
-    // state `_ExpiryLine` renders nothing in — the message then goes without
-    // it rather than not going.
+    // **One sentence, computed once, rendered twice.** What the sender reads
+    // above the button is the string that leaves the phone — and it is the same
+    // `String`, not two calls that happen to agree.
+    //
+    // It was two calls until the Phase 5 gate, with this comment already
+    // claiming they "cannot disagree". They could: `_ExpiryLine` called
+    // `codeExpiry` again from its own `ref.watch`, with a second argument list,
+    // and a one-word edit in either would have put a different sentence on the
+    // screen from the one in the message. The invariant is held by
+    // construction now rather than by two call sites being kept in step.
+    //
+    // Null when device facts are not loaded: `_ExpiryLine` then renders
+    // nothing, and the message goes without the expiry rather than not going.
     final facts = ref.watch(deviceFactsProvider).value;
     final expiry = facts == null
         ? null
@@ -282,7 +289,7 @@ class _CodeOnOffer extends ConsumerWidget {
         const SizedBox(height: 32),
         _BigCode(code: ready.code),
         const SizedBox(height: 16),
-        _ExpiryLine(expiresAt: ready.expiresAt),
+        _ExpiryLine(sentence: expiry),
         const SizedBox(height: 32),
         FilledButton.tonalIcon(
           onPressed: () => SharePlus.instance.share(
@@ -359,25 +366,27 @@ class _BigCode extends StatelessWidget {
 
 /// *"It stops working at 09:00 on Thursday 27 August."*
 ///
-/// Rendered in the **device's** zone and its own 12/24-hour setting, both read
-/// from `LocalStore` where `ClockService` cached them (ADR-0002). A watched
-/// person reading this is in their own zone by definition, so the device's is
-/// the right one — unlike a warning, which is about somebody else's day.
-class _ExpiryLine extends ConsumerWidget {
-  const _ExpiryLine({required this.expiresAt});
+/// **Handed the finished sentence rather than computing one.** It is rendered in
+/// the *device's* zone and its own 12/24-hour setting, both read from
+/// `LocalStore` where `ClockService` cached them (ADR-0002) — but that reading
+/// happens once, in `_CodeOnOffer`, because the same string goes into the share
+/// message. A watched person reading this is in their own zone by definition, so
+/// the device's is the right one, unlike a warning, which is about somebody
+/// else's day.
+///
+/// Renders nothing when [sentence] is null, which is the state where device
+/// facts have not loaded. Saying nothing is right: a wrong expiry is worse than
+/// no expiry, and the code itself is still on the screen.
+class _ExpiryLine extends StatelessWidget {
+  const _ExpiryLine({required this.sentence});
 
-  final DateTime expiresAt;
+  final String? sentence;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final facts = ref.watch(deviceFactsProvider).value;
-    if (facts == null) return const SizedBox.shrink();
+  Widget build(BuildContext context) {
+    if (sentence == null) return const SizedBox.shrink();
     return Text(
-      OnboardingCopy.codeExpiry(
-        expiresAt: expiresAt,
-        zone: facts.zone,
-        uses24Hour: facts.uses24Hour,
-      ),
+      sentence!,
       style: Theme.of(context).textTheme.bodyMedium,
       textAlign: TextAlign.center,
     );
@@ -445,6 +454,19 @@ class _EnterCodeScreenState extends ConsumerState<EnterCodeScreen> {
 
   /// Why the previous attempt was refused, so a retry can repair what it can.
   PairingRefusal? _lastRefusal;
+
+  /// The refusal sentence, split by **what it is a claim about**.
+  ///
+  /// One of these is null at any moment; `_error` holds the sentence and
+  /// [PairingRefusalSurface.isAboutTheCode] decides which surface it belongs
+  /// on. A refusal that says nothing about the code must not turn the code
+  /// field red — that is a second, wordless claim, and it is the one a reader
+  /// takes first.
+  String? get _codeError =>
+      (_lastRefusal?.isAboutTheCode ?? false) ? _error : null;
+
+  String? get _otherError =>
+      (_lastRefusal?.isAboutTheCode ?? true) ? null : _error;
 
   @override
   void dispose() {
@@ -579,13 +601,26 @@ class _EnterCodeScreenState extends ConsumerState<EnterCodeScreen> {
                       decoration: InputDecoration(
                         labelText: OnboardingCopy.codeFieldLabel,
                         border: const OutlineInputBorder(),
-                        errorText: _error,
+                        // **Only refusals that are about the code**, because
+                        // `errorText` also turns the field red and relabels it
+                        // as invalid. See [PairingRefusalSurface]. The rest are
+                        // rendered below, in the same words, without the claim.
+                        errorText: _codeError,
                         // Never truncated to a line: these sentences all name a
                         // next action, and the action is the half that would be
                         // cut off.
                         errorMaxLines: 4,
                       ),
                     ),
+                    if (_otherError != null) ...[
+                      const SizedBox(height: 16),
+                      Text(
+                        _otherError!,
+                        textAlign: TextAlign.center,
+                        style: theme.textTheme.bodyLarge
+                            ?.copyWith(color: theme.colorScheme.error),
+                      ),
+                    ],
                     const SizedBox(height: 32),
                     FilledButton(
                       onPressed: _busy ? null : () => unawaited(_submit()),

@@ -541,13 +541,23 @@ class _DebugHarnessScreenState extends ConsumerState<DebugHarnessScreen> {
                 services.store,
                 (b) => b.copyWith(
                   outcome: SimulatedReadOutcome.succeeded,
-                  away: AwayPeriod(
-                    from: today.plusDays(-3),
-                    through: today.plusDays(3),
+                  // **Attributed**, because the unattributed path is the one
+                  // that renders the already-approved string and the attributed
+                  // one is the branch `screens.md` added for Phase 6. A harness
+                  // that could only drive the fallback would leave the away row
+                  // that names a person exercisable on a device by nothing.
+                  away: AwayRecord(
+                    period: AwayPeriod(
+                      from: today.plusDays(-3),
+                      through: today.plusDays(3),
+                    ),
+                    setBy: 'simulated-watcher-uid',
+                    setByName: 'Ana',
                   ),
                 ),
               );
-              return 'away ${today.plusDays(-3)} … ${today.plusDays(3)}';
+              return 'away ${today.plusDays(-3)} … ${today.plusDays(3)}, '
+                  'set by Ana';
             }),
             _Action('Clear the simulated backend — back to Firestore', () async {
               await services.store.setSimulatedBackendRaw(null);

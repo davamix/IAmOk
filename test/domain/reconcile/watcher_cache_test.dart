@@ -4,8 +4,11 @@ import 'package:test/test.dart';
 import '../../support/zones.dart';
 
 void main() {
-  final holiday =
-      AwayPeriod(from: day('2026-08-01'), through: day('2026-08-20'));
+  final holiday = AwayRecord(
+    period: AwayPeriod(from: day('2026-08-01'), through: day('2026-08-20')),
+    setBy: 'ana-uid',
+    setByName: 'Ana',
+  );
   final now = at(utc, 2026, 8, 6, 10);
 
   group('applyRead — only a read that SUCCEEDED is an answer', () {
@@ -91,8 +94,11 @@ void main() {
     });
 
     test('an away period is replaced by a shortened one', () {
-      final shortened =
-          AwayPeriod(from: day('2026-08-01'), through: day('2026-08-04'));
+      final shortened = AwayRecord(
+        period: AwayPeriod(from: day('2026-08-01'), through: day('2026-08-04')),
+        setBy: 'ana-uid',
+        setByName: 'Ana',
+      );
       final result = WatcherCache(away: holiday)
           .applyRead(FirestoreRead.succeeded(away: shortened), at: now);
       expect(result.away, shortened);
@@ -268,7 +274,12 @@ void main() {
         lastReconcileAt: now,
       );
       final b = WatcherCache(
-        away: AwayPeriod(from: day('2026-08-01'), through: day('2026-08-20')),
+        away: AwayRecord(
+          period:
+              AwayPeriod(from: day('2026-08-01'), through: day('2026-08-20')),
+          setBy: 'ana-uid',
+          setByName: 'Ana',
+        ),
         lastConfirmedDay: day('2026-08-05'),
         warningsShownFor: {day('2026-08-04'): WarningOutcome.warnOnline, day('2026-08-03'): WarningOutcome.warnOnline},
         lastReconcileAt: at(utc, 2026, 8, 6, 10),

@@ -16,7 +16,10 @@
 /// [TimeZones].
 library;
 
+export 'away/away_outcome.dart';
 export 'away/away_period.dart';
+export 'away/away_read.dart';
+export 'away/away_record.dart';
 export 'entities/check_in.dart';
 export 'entities/invite_code.dart';
 export 'entities/link.dart';

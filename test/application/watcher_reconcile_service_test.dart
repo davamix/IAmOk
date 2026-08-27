@@ -938,7 +938,8 @@ void main() {
   group('suppressed when away covers the day', () {
     test('a freshly-read away period silences it', () async {
       reader.result = FirestoreRead.succeeded(
-        away: AwayPeriod(from: day('2026-08-14'), through: day('2026-08-20')),
+        away: AwayRecord.unattributed(
+            AwayPeriod(from: day('2026-08-14'), through: day('2026-08-20'))),
       );
 
       await service().reconcile(selfUid: selfUid);
@@ -951,7 +952,8 @@ void main() {
       // did not hear" from "the away is still on and I have not checked". It
       // prefers speaking, and says both of the things it actually knows.
       reader.result = FirestoreRead.succeeded(
-        away: AwayPeriod(from: day('2026-08-14'), through: day('2026-08-20')),
+        away: AwayRecord.unattributed(
+            AwayPeriod(from: day('2026-08-14'), through: day('2026-08-20'))),
       );
       await service().reconcile(selfUid: selfUid);
 

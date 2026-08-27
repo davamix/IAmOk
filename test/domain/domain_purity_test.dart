@@ -335,6 +335,13 @@ void main() {
     'lib/data/check_in_repository.dart',
     'lib/platform/alarm_scheduler.dart',
     'lib/platform/permission_service.dart',
+    // Phase 6. The watched side now refreshes its own away period from
+    // Firestore inside `reconcile()`, and BOTH background entry points run that
+    // reconcile — the boot path and the FCM handler, the latter because
+    // `onAwayChanged` fans out to the watched person's own device and their
+    // reminders are what has to change. Same shape as the two Firestore
+    // dependencies above it: `cloud_firestore` and nothing with a widget tree.
+    'lib/data/away_repository.dart',
   ];
 
   /// Held to the bare-isolate rule **before** a bare isolate reaches it.

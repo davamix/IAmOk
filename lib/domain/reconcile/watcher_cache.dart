@@ -1,4 +1,5 @@
 import '../away/away_period.dart';
+import '../away/away_record.dart';
 import '../policy/warning_policy.dart';
 import '../time/day_key.dart';
 import 'firestore_read.dart';
@@ -35,9 +36,16 @@ class WatcherCache {
         accessLostNotifiedOn = null,
         lastDecidedDay = null;
 
-  /// The away period as last successfully read. Cached per link even though
-  /// away is global to the watched person, because §6 stores it that way.
-  final AwayPeriod? away;
+  /// The away **document** as last successfully read — the period and who set
+  /// it. Cached per link even though away is global to the watched person,
+  /// because §6 stores it that way.
+  ///
+  /// [AwayRecord] rather than a bare [AwayPeriod] so the row a watcher reads
+  /// **offline** can still name who set the period, which `screens.md` requires
+  /// of every away surface. Policies take `away.period`: attribution is never
+  /// an input to a decision, and keeping the two apart at the call site is what
+  /// stops it becoming one.
+  final AwayRecord? away;
 
   /// The latest day known to have a check-in. Monotonic — see [applyRead].
   final DayKey? lastConfirmedDay;
@@ -381,7 +389,7 @@ class WatcherCache {
   /// `away` is not covered by the null-means-unchanged convention, because
   /// null is a meaningful value for it. Use [clearAway] to remove it.
   WatcherCache copyWith({
-    AwayPeriod? away,
+    AwayRecord? away,
     DayKey? lastConfirmedDay,
     Map<DayKey, WarningOutcome>? warningsShownFor,
     Set<DayKey>? correctionsOwedFor,

@@ -41,7 +41,8 @@ void main() {
     test('a successful read refreshes the cache before the decision runs', () {
       final result = reconcile(
         cache: WatcherCache(
-          away: AwayPeriod(from: day('2026-08-01'), through: day('2026-08-20')),
+          away: AwayRecord.unattributed(
+              AwayPeriod(from: day('2026-08-01'), through: day('2026-08-20'))),
           lastReconcileAt: at(utc, 2026, 8, 1),
         ),
       );
@@ -52,8 +53,8 @@ void main() {
 
     // ADR-0004 splits failure for MESSAGE selection but not for CACHE
     // retention, so these two differ in outcome and agree on the cache.
-    final holiday =
-        AwayPeriod(from: day('2026-08-01'), through: day('2026-08-20'));
+    final holiday = AwayRecord.unattributed(
+        AwayPeriod(from: day('2026-08-01'), through: day('2026-08-20')));
     final freshAway = WatcherCache(
       away: holiday,
       lastReconcileAt: at(utc, 2026, 8, 5, 9),
@@ -417,8 +418,8 @@ void main() {
       // that watchers see as usual. The plausible bug is suppressing the write
       // along with the reminders — so the silence here must come from the
       // check-in, not from the away period.
-      final holiday =
-          AwayPeriod(from: day('2026-08-01'), through: day('2026-08-20'));
+      final holiday = AwayRecord.unattributed(
+          AwayPeriod(from: day('2026-08-01'), through: day('2026-08-20')));
       final result = reconcile(
         read: FirestoreRead.succeeded(checkInDays: {theDay}, away: holiday),
       );
@@ -553,8 +554,8 @@ void main() {
       // Each fire re-verifies against Firestore, which is how an away cancelled
       // remotely is picked up even when every push was lost. Cancelling and
       // re-arming would be cheaper and less correct.
-      final holiday =
-          AwayPeriod(from: day('2026-08-01'), through: day('2026-08-20'));
+      final holiday = AwayRecord.unattributed(
+          AwayPeriod(from: day('2026-08-01'), through: day('2026-08-20')));
       final result = reconcile(
         when: at(utc, 2026, 8, 6, 9),
         read: FirestoreRead.succeeded(away: holiday),
@@ -1015,7 +1016,8 @@ void main() {
       final result = reconcile(
         link: revoked,
         cache: WatcherCache(
-          away: AwayPeriod(from: day('2026-08-01'), through: day('2026-08-20')),
+          away: AwayRecord.unattributed(
+              AwayPeriod(from: day('2026-08-01'), through: day('2026-08-20'))),
           lastReconcileAt: at(utc, 2026, 8, 1),
         ),
         read: const FirestoreRead.unreachable(UnreachableCause.offline),
@@ -1027,6 +1029,14 @@ void main() {
   group('previousAway — the evidence applyRead would otherwise destroy', () {
     final holiday =
         AwayPeriod(from: day('2026-08-01'), through: day('2026-08-20'));
+    // `previousAway` is the PERIOD and the cache holds the RECORD, which is the
+    // split this group is really about: attribution is a display label and may
+    // never reach the diff that tells a cancelled away from an expired one.
+    final holidayRecord = AwayRecord(
+      period: holiday,
+      setBy: 'ana-uid',
+      setByName: 'Ana',
+    );
 
     test('the period the cache held is handed back', () {
       // applyRead overwrites `away` wholesale, so the diff is the only thing
@@ -1035,7 +1045,8 @@ void main() {
       // re-read the cache before applyRead, i.e. to keep a second source of
       // truth for away state exactly where ADR-0001 says there must not be one.
       final result = reconcile(
-        cache: WatcherCache(away: holiday, lastReconcileAt: at(utc, 2026, 8, 5)),
+        cache: WatcherCache(
+            away: holidayRecord, lastReconcileAt: at(utc, 2026, 8, 5)),
       );
       expect(result.previousAway, holiday);
       expect(result.cache.away, isNull, reason: 'Firestore says it is gone');
@@ -1049,11 +1060,11 @@ void main() {
 
     test('survives a failed read, where the cache is unchanged', () {
       final result = reconcile(
-        cache: WatcherCache(away: holiday),
+        cache: WatcherCache(away: holidayRecord),
         read: const FirestoreRead.unreachable(UnreachableCause.offline),
       );
       expect(result.previousAway, holiday);
-      expect(result.cache.away, holiday);
+      expect(result.cache.away, holidayRecord);
     });
   });
 

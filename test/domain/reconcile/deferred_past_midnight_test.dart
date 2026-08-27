@@ -327,7 +327,7 @@ void main() {
 
     test('only the current day speaks', () {
       final cache = WatcherCache(
-        away: holiday,
+        away: AwayRecord.unattributed(holiday),
         lastDecidedDay: d.previous,
         // Read three days ago, so the away is past ADR-0001's two-day bound.
         lastReconcileAt: at(madrid, 2026, 8, 11, 10),
@@ -347,7 +347,7 @@ void main() {
     test('and those days are left unsettled, to be decided on evidence later',
         () {
       final cache = WatcherCache(
-        away: holiday,
+        away: AwayRecord.unattributed(holiday),
         lastDecidedDay: d.previous,
         lastReconcileAt: at(madrid, 2026, 8, 11, 10),
       );

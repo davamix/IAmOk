@@ -3,6 +3,7 @@ import 'dart:math';
 
 import 'package:timezone/timezone.dart' as tz;
 
+import '../data/away_repository.dart';
 import '../data/check_in_repository.dart';
 import '../data/local_store.dart';
 import '../domain/domain.dart';
@@ -18,6 +19,7 @@ class WatchedState {
     required this.todayCheckIn,
     required this.away,
     required this.notificationsEnabled,
+    this.selfUid = LocalStore.signedOutUid,
     required this.armed,
     this.tapFailed = false,
     this.remindersAreExact = true,
@@ -64,7 +66,24 @@ class WatchedState {
   /// rather than a boolean being flipped and remembered.
   final CheckIn? todayCheckIn;
 
-  final AwayPeriod? away;
+  /// The away period this device believes is in force, with who set it.
+  ///
+  /// [AwayRecord] rather than a bare period because `screens.md` requires every
+  /// away surface to name who set it, and this screen is the one where that
+  /// matters most: a watcher can mark this person away from her own phone, and
+  /// this line is how the watched person finds out it happened at all
+  /// (§17's mitigation, ADR-0003).
+  ///
+  /// Read from `self_away`, which the reconcile refreshes from Firestore — so
+  /// it is a **cache**, and it is honoured whether or not the last read
+  /// succeeded. Expiry needs no read: §12 makes it arithmetic against
+  /// [AwayPeriod.through], which is what lets a phone that was offline for the
+  /// whole period still end away on the right day.
+  final AwayRecord? away;
+
+  /// Whose screen this is, so the away line can tell *"you set this"* from
+  /// *"somebody else did"*. [LocalStore.signedOutUid] when nobody is signed in.
+  final String selfUid;
 
   /// False when `POST_NOTIFICATIONS` is revoked — §13's hard gate, and the app
   /// is inert without it.
@@ -100,6 +119,7 @@ class WatchedState {
         audience: audience,
         todayCheckIn: todayCheckIn,
         away: away,
+        selfUid: selfUid,
         notificationsEnabled: notificationsEnabled,
         armed: armed,
         tapFailed: tapFailed ?? this.tapFailed,
@@ -107,7 +127,22 @@ class WatchedState {
         uses24Hour: uses24Hour,
       );
 
-  bool get isAway => away != null && away!.covers(today);
+  /// Whether an away period covers **today**.
+  ///
+  /// `covers` is the clamped predicate, deliberately: a document claiming ten
+  /// years must not silence this phone for ten years, and
+  /// `AwayPeriod.clampedToSanityBound` is the read-time bound that stops it.
+  ///
+  /// Nothing here consults an expiry flag, because there is none to consult.
+  /// A period whose `through` has passed simply stops covering today — §12's
+  /// *"expiry is arithmetic"*, which is the whole reason there is no
+  /// "away finished" message that could be lost.
+  bool get isAway => away != null && away!.period.covers(today);
+
+  /// The name to put in front of *"marked you away"*, or null when the line
+  /// must name nobody — because she set it herself, or because the document
+  /// carries no usable name (ADR-0003's *Absence* case).
+  String? get awaySetByName => away?.nameToShowFor(selfUid);
 }
 
 /// The watched side's one idempotent entry point (§3 — *reconcile, don't
@@ -131,6 +166,7 @@ class WatchedReconcileService {
     required this.alarms,
     required this.notificationsEnabled,
     this.checkIns,
+    this.away,
     this.selfUid = LocalStore.signedOutUid,
     this.lockOwner = 'ui',
   });
@@ -152,6 +188,19 @@ class WatchedReconcileService {
   /// hundreds of existing ones honest: they assert the local half, which is the
   /// half that decides what the screen shows.
   final CheckInRepository? checkIns;
+
+  /// Where this device refreshes its own away period from (§12).
+  ///
+  /// **Nullable for the same reason [checkIns] is**, and null is the same real
+  /// state: nobody is signed in, so there is no `users/{uid}/shared/away` to
+  /// read. The cached row is still honoured — a period set before signing out
+  /// covers the days it covers — because expiry is arithmetic and needs no
+  /// server (§12).
+  ///
+  /// It is also null in every test that does not care about the refresh, which
+  /// keeps the existing suite asserting what it always asserted: what the
+  /// **cache** makes the screen show.
+  final AwayRepository? away;
 
   /// Whose check-ins these are. [LocalStore.signedOutUid] when nobody is.
   ///
@@ -229,6 +278,7 @@ class WatchedReconcileService {
 
     final links = await store.linksWatching(selfUid);
     final checkedIn = await store.checkedInDays();
+    final away = await _refreshedAway(selfUid);
 
     final owner = '$lockOwner:$_isolateSalt:${_sequence++}';
     final holdsLock = await store.acquireReconcileLock(
@@ -248,11 +298,13 @@ class WatchedReconcileService {
     final result = WatchedReconciler.reconcile(
       now: now,
       watchedZone: zone,
-      // Phase 6 reads this from `self_away`; every Phase 2 call site passes
-      // null, which is exactly the arrangement PLAN.md mandates for the `away`
-      // argument — the parameter exists from the first line so that retrofitting
-      // it later does not touch every call site and every test.
-      away: null,
+      // Phase 6, and the parameter has been here since Phase 1 for exactly this
+      // moment — PLAN.md made it non-negotiable so that away mode would be a
+      // feature rather than a retrofit through every call site and every test.
+      //
+      // The **period**, never the record: attribution is a display label
+      // (ADR-0003) and the reminder set may not depend on who set the period.
+      away: away?.period,
       checkedInDays: checkedIn,
       currentlyScheduled: pending,
       links: links,
@@ -299,7 +351,8 @@ class WatchedReconcileService {
       zone: zone,
       audience: result.audience,
       todayCheckIn: await store.checkInOn(today),
-      away: null,
+      away: away,
+      selfUid: selfUid,
       notificationsEnabled: await notificationsEnabled(),
       armed: await alarms.armedAccordingToPlugin(),
       remindersAreExact: exact,
@@ -347,6 +400,47 @@ class WatchedReconcileService {
     }
 
     return reconcile(selfUid: selfUid);
+  }
+
+  /// This device's away period, refreshed from Firestore where it can be.
+  ///
+  /// ## ADR-0001 decision 1, on the watched side
+  ///
+  /// **A read that fails is not an answer**, so only [AwayRead.succeeded]
+  /// replaces the cached row — and when it does it replaces it **wholesale,
+  /// including with null**. That single assignment is what makes an away period
+  /// cancelled from a *watcher's* phone take effect here even though the
+  /// `onAwayChanged` nudge was lost, which is the same failure the watcher-side
+  /// `applyRead` was written for. A merge would leave her reading *"Your family
+  /// isn't expecting a check-in"* about a holiday somebody had called off.
+  ///
+  /// A refusal and a timeout both leave the cache exactly as it was. That is
+  /// the direction this app prefers on *this* side: keeping a period the server
+  /// might have dropped costs a family a warning they would have got, while
+  /// dropping one the server still holds nags an elderly person three times a
+  /// day through a holiday and tells her family she has stopped checking in.
+  ///
+  /// ## Nothing expires anything here
+  ///
+  /// There is no "has it ended" branch, and there must not be one. §12 makes
+  /// expiry **arithmetic** against `through`, computed independently on every
+  /// device, so a phone that has been offline for the whole period still ends
+  /// away on the right day — the exit criterion this phase is judged on. A
+  /// cache that had to be *told* to expire would be the "away finished" message
+  /// §12 refuses to send, rebuilt locally and just as losable.
+  Future<AwayRecord?> _refreshedAway(String selfUid) async {
+    final repository = away;
+    if (repository != null && selfUid != LocalStore.signedOutUid) {
+      // Never allowed to throw out of a reconcile: this runs from the boot
+      // entry point and from the FCM isolate, where a throw is silence. The
+      // repository already returns failure as a value; this is the belt for a
+      // fault it cannot classify.
+      final read = await repository
+          .read(selfUid)
+          .catchError((Object _, StackTrace _) => const AwayRead.unreachable());
+      if (read.succeeded) await store.setSelfAway(read.awayOrNull);
+    }
+    return store.selfAway();
   }
 
   /// The device's cached IANA zone, falling back to UTC.

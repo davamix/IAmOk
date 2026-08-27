@@ -240,7 +240,11 @@ void main() {
 
     test('every field round-trips', () async {
       final cache = WatcherCache(
-        away: AwayPeriod(from: day('2026-08-01'), through: day('2026-08-20')),
+        away: AwayRecord(
+          period: AwayPeriod(from: day('2026-08-01'), through: day('2026-08-20')),
+          setBy: 'ana-uid',
+          setByName: 'Ana',
+        ),
         lastConfirmedDay: day('2026-08-16'),
         warningsShownFor: {
           day('2026-08-14'): WarningOutcome.warnOnline,
@@ -357,7 +361,9 @@ void main() {
       await store.saveWatcherCache(
         'mum_ana',
         WatcherCache(
-          away: AwayPeriod(from: day('2026-08-01'), through: day('2026-08-20')),
+          away: AwayRecord.unattributed(
+            AwayPeriod(from: day('2026-08-01'), through: day('2026-08-20')),
+          ),
         ),
       );
       await store.saveWatcherCache('mum_ana', const WatcherCache.empty());
@@ -754,6 +760,117 @@ void main() {
       ));
       await store.setOnboardingChoices(const OnboardingChoices.none());
       expect(await store.onboardingChoices(), const OnboardingChoices.none());
+    });
+  });
+
+  group('self away — the table that existed for five versions with no reader',
+      () {
+    final period =
+        AwayPeriod(from: day('2026-08-15'), through: day('2026-08-22'));
+
+    test('nothing stored reads as not away, not as an error', () async {
+      expect(await store.selfAway(), isNull);
+    });
+
+    test('every field round-trips, attribution included', () async {
+      await store.setSelfAway(AwayRecord(
+        period: period,
+        setBy: 'ana-uid',
+        setByName: 'Ana',
+      ));
+
+      final read = await store.selfAway();
+      expect(read!.period.from, day('2026-08-15'));
+      expect(read.period.through, day('2026-08-22'));
+      expect(read.setBy, 'ana-uid');
+      expect(read.setByName, 'Ana',
+          reason: 'this is the name the Tap screen puts in front of "marked '
+              'you away" — losing it makes the line unattributed and §17\'s '
+              'mitigation degrades to nothing');
+    });
+
+    test('an unattributed period round-trips as unattributed', () async {
+      await store.setSelfAway(AwayRecord.unattributed(period));
+      final read = await store.selfAway();
+      expect(read!.period, period);
+      expect(read.setBy, isNull);
+      expect(read.setByName, isNull);
+    });
+
+    test('it is ONE row — a second write replaces rather than appends',
+        () async {
+      // Away is one document and one truth (§12). The `CHECK (id = 0)` is what
+      // makes that structural rather than a convention, and this is what would
+      // catch an INSERT that dropped the conflict algorithm.
+      await store.setSelfAway(AwayRecord.unattributed(period));
+      await store.setSelfAway(AwayRecord(
+        period: AwayPeriod(from: day('2026-08-15'), through: day('2026-08-18')),
+        setBy: 'mum-uid',
+        setByName: 'Mum',
+      ));
+
+      expect((await store.dump())['self_away'], hasLength(1));
+      final read = await store.selfAway();
+      expect(read!.period.through, day('2026-08-18'));
+      expect(read.setByName, 'Mum',
+          reason: '§12 is last-write-wins, and re-attribution is the point');
+    });
+
+    test('null removes the row wholesale', () async {
+      // The watched side's version of `WatcherCache.applyRead` overwriting the
+      // away with nothing: it is what makes a period cancelled from a WATCHER'S
+      // phone take effect here when the onAwayChanged nudge was lost.
+      await store.setSelfAway(AwayRecord.unattributed(period));
+      await store.setSelfAway(null);
+
+      expect(await store.selfAway(), isNull);
+      expect((await store.dump())['self_away'], isEmpty);
+    });
+
+    test('an EXPIRED period is still returned, and is not self-cleaning',
+        () async {
+      // §12 makes expiry ARITHMETIC — nothing here may decide a period is over.
+      // A cache that had to be told to expire would be the "away finished"
+      // message §12 refuses to send, rebuilt locally and just as losable. The
+      // days already spent away also stay covered, which is ADR-0001's argument
+      // for truncating rather than deleting, applied to the cache.
+      await store.setSelfAway(AwayRecord.unattributed(
+        AwayPeriod(from: day('2026-01-01'), through: day('2026-01-05')),
+      ));
+
+      final read = await store.selfAway();
+      expect(read, isNotNull);
+      expect(read!.period.hasExpiredOn(day('2026-08-15')), isTrue);
+      expect(read.period.covers(day('2026-08-15')), isFalse,
+          reason: 'the row survives; it simply stops covering today');
+    });
+
+    test('a stored pair that cannot form a period reads as nothing', () async {
+      // `tryCreate`, not the constructor. This is read inside an alarm isolate
+      // where a throw is silence — and a `through` before its `from` is exactly
+      // the shape ADR-0001 turns on being unrepresentable.
+      await store.setSelfAway(AwayRecord.unattributed(period));
+      await store.database.update(
+        'self_away',
+        {'from_day': '2026-08-22', 'through_day': '2026-08-15'},
+        where: 'id = 0',
+      );
+
+      expect(await store.selfAway(), isNull,
+          reason: 'no valid away period, rather than a throw — and NOT a '
+              'silently reversed one, which would silence a family');
+    });
+
+    test('signing out takes it, because away belongs to the account',
+        () async {
+      await store.setSelfUid('mum');
+      await store.setSelfAway(AwayRecord.unattributed(period));
+
+      await store.clearSelfUid();
+
+      expect(await store.selfAway(), isNull,
+          reason: 'the next account would otherwise be silently not-expected '
+              'to check in, on somebody else\'s holiday');
     });
   });
 

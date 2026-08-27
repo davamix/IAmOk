@@ -234,6 +234,21 @@ abstract final class AwayRules {
   /// magnitude below the ten-year document it exists to stop.
   static const int absurdLengthInDays = 60;
 
+  /// The bounds `firestore.rules` puts on `setByName`, mirrored here.
+  ///
+  /// **Not derived from anything and not free to drift** — the rules clause is
+  /// `data.setByName.size() >= 1 && data.setByName.size() <= 100`, and a client
+  /// that writes outside it gets `permission-denied`, which ADR-0004 maps to
+  /// **refused**. A name too long is therefore not a cosmetic problem: it is an
+  /// away write that fails with a message about lost access.
+  ///
+  /// [AwayRecord] applies the same bounds on **read**, which the rules cannot:
+  /// they bound only what this app's clients may put there, and ADR-0003's
+  /// `setByName: "Dr. Smith, Hospital Admissions"` is the injection that arrives
+  /// through any other door.
+  static const int nameMinLength = 1;
+  static const int nameMaxLength = 100;
+
   /// Validates a create. Returns null when the write is allowed.
   static AwayRejection? validateCreate(AwayPeriod period, DayKey today) {
     if (period.from < today) return AwayRejection.retroactiveFrom;

@@ -74,13 +74,18 @@ class SimulatedBackend {
   /// Days the fake backend holds a check-in for.
   final Set<DayKey> checkInDays;
 
-  /// The away period the fake backend holds, or null for "no document".
+  /// The away **document** the fake backend holds, or null for "no document".
   ///
   /// Null is meaningful and not merely absent: a successful read returning null
   /// is the signal that clears a **cancelled** away, which is the failure
   /// ADR-0001 exists to fix. A simulator that could not express it would make
   /// the most important away case untestable.
-  final AwayPeriod? away;
+  ///
+  /// It carries attribution for the same reason: `screens.md` requires every
+  /// away surface to name who set it, so a simulator holding a bare period
+  /// could only ever drive the *unattributed* half of the watcher's away row —
+  /// and the attributed half is the one §17's mitigation rests on.
+  final AwayRecord? away;
 
   final RefusedCause refusedCause;
   final UnreachableCause unreachableCause;
@@ -96,8 +101,10 @@ class SimulatedBackend {
   String encode() => jsonEncode({
         'outcome': outcome.name,
         'checkInDays': checkInDays.map((d) => d.toString()).toList(),
-        'awayFrom': away?.from.toString(),
-        'awayThrough': away?.through.toString(),
+        'awayFrom': away?.period.from.toString(),
+        'awayThrough': away?.period.through.toString(),
+        'awaySetBy': away?.setBy,
+        'awaySetByName': away?.setByName,
         'refusedCause': refusedCause.name,
         'unreachableCause': unreachableCause.name,
       });
@@ -124,9 +131,11 @@ class SimulatedBackend {
         },
         away: (from == null || through == null)
             ? null
-            : AwayPeriod.tryCreate(
+            : AwayRecord.tryCreate(
                 from: DayKey.parse(from),
                 through: DayKey.parse(through),
+                setBy: map['awaySetBy'] as String?,
+                setByName: map['awaySetByName'] as String?,
               ),
         refusedCause: _byName(RefusedCause.values, map['refusedCause']) ??
             RefusedCause.permissionDenied,
@@ -149,7 +158,7 @@ class SimulatedBackend {
   SimulatedBackend copyWith({
     SimulatedReadOutcome? outcome,
     Set<DayKey>? checkInDays,
-    AwayPeriod? away,
+    AwayRecord? away,
     bool clearAway = false,
     RefusedCause? refusedCause,
     UnreachableCause? unreachableCause,

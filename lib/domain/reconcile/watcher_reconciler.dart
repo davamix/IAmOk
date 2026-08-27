@@ -624,7 +624,11 @@ abstract final class WatcherReconciler {
           day: day,
           now: now,
           watchedZone: watchedZone,
-          away: refreshed.away,
+          // The **period**, never the record. Attribution is a display label
+          // (ADR-0003) and the moment a policy can see it, it can decide from
+          // it — and `setByName` is the one field on that document nothing can
+          // authenticate.
+          away: refreshed.away?.period,
           linkAccepted: link.isAccepted,
           activeFrom: link.activeFrom,
           lastConfirmedDay: refreshed.lastConfirmedDay,
@@ -853,7 +857,7 @@ abstract final class WatcherReconciler {
       watchedZoneUnknown: link.tryWatchedZone == null,
       withdrawnWarnings: withdrawn,
       cancelAccessLostNotice: cancelAccessLostNotice,
-      previousAway: cache.away,
+      previousAway: cache.away?.period,
       desiredWarnings: desired,
       warningsToSchedule: desired.difference(currentlyScheduled),
       warningsToCancel: currentlyScheduled.difference(desired),

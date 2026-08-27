@@ -136,7 +136,18 @@ class FirestoreCheckInReader implements CheckInReader {
   }
 
   /// `users/{uid}/shared/away` — absent means not away (§12).
-  Future<AwayPeriod?> _readAway(String watchedUid) async {
+  ///
+  /// Attribution is read with the period, not beside it. A watcher has no other
+  /// route to the name: links are `(watched, watcher)` pairs and §7 keeps
+  /// watchers out of other users' documents, so the denormalised `setByName` on
+  /// this document is the only thing that can make `screens.md`'s
+  /// *"Away until Sat 22 Aug — set by Ana"* renderable at all — offline
+  /// included, which is why it is cached rather than resolved per render.
+  ///
+  /// **A missing or malformed name never costs the period.** `AwayRecord`
+  /// degrades to unattributed, because dropping the period would warn a family
+  /// about days somebody really did mark away. ADR-0003's *Absence* case.
+  Future<AwayRecord?> _readAway(String watchedUid) async {
     final snapshot = await _firestore
         .doc('users/$watchedUid/shared/away')
         .get(const GetOptions(source: Source.server));
@@ -150,12 +161,17 @@ class FirestoreCheckInReader implements CheckInReader {
     final through = data['through'];
     if (from is! String || through is! String) return null;
 
+    final setBy = data['setBy'];
+    final setByName = data['setByName'];
+
     // `tryCreate`, not the constructor: a stored pair that cannot form a valid
     // period must not throw here. Same shape and same reason as
     // `Link.tryWatchedZone` and `LocalStore.watcherCache`.
-    return AwayPeriod.tryCreate(
+    return AwayRecord.tryCreate(
       from: DayKey.parse(from),
       through: DayKey.parse(through),
+      setBy: setBy is String ? setBy : null,
+      setByName: setByName is String ? setByName : null,
     );
   }
 

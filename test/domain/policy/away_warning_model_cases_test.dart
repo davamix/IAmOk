@@ -79,7 +79,10 @@ void main() {
         ? const FirestoreRead.refused(RefusedCause.permissionDenied)
         : online && readOk
             ? FirestoreRead.succeeded(
-                checkInDays: checkins, away: firestoreAway)
+                checkInDays: checkins,
+                away: firestoreAway == null
+                    ? null
+                    : AwayRecord.unattributed(firestoreAway))
             : FirestoreRead.unreachable(online
                 ? UnreachableCause.timeout
                 : UnreachableCause.offline);
@@ -89,7 +92,7 @@ void main() {
       link: link,
       watcherZone: utc,
       cache: WatcherCache(
-        away: cachedAway,
+        away: cachedAway == null ? null : AwayRecord.unattributed(cachedAway),
         lastConfirmedDay: lastConfirmedDay,
         lastReconcileAt:
             lastReconcileAt == null ? null : reconciled(lastReconcileAt),
@@ -285,14 +288,14 @@ void main() {
         link: link,
         watcherZone: utc,
         cache: WatcherCache(
-          away: holiday,
+          away: AwayRecord.unattributed(holiday),
           lastReconcileAt: reconciled('2026-08-05'),
         ),
         read: const FirestoreRead.refused(RefusedCause.appCheckRejected),
         currentlyScheduled: const {},
         delivery: const WatcherDelivery.uniform(NotificationDelivery.available),
       );
-      expect(result.cache.away, holiday);
+      expect(result.cache.away?.period, holiday);
       expect(result.cache.lastReconcileAt, reconciled('2026-08-05'));
     });
 
@@ -373,7 +376,9 @@ void main() {
         // cancellation nudge is lost — Doze, throttling, force-stop.
         if (i == 0) {
           cache = cache.applyRead(
-            FirestoreRead.succeeded(checkInDays: julyCheckins, away: holiday),
+            FirestoreRead.succeeded(
+                checkInDays: julyCheckins,
+                away: AwayRecord.unattributed(holiday)),
             at: now,
           );
         }
@@ -384,7 +389,10 @@ void main() {
           watcherZone: utc,
           cache: cache,
           read: FirestoreRead.succeeded(
-              checkInDays: julyCheckins, away: storedAway),
+              checkInDays: julyCheckins,
+              away: storedAway == null
+                  ? null
+                  : AwayRecord.unattributed(storedAway)),
           currentlyScheduled: const {},
           delivery: const WatcherDelivery.uniform(NotificationDelivery.available),
         );

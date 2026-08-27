@@ -39,8 +39,10 @@ class LocalStore {
   /// [acquireReconcileLock]. **v4** adds `last_decided_day` (ADR-0009). **v5**
   /// adds `corrections_owed` — a retraction that was established but could not
   /// be spoken, which is lost state of exactly the kind the paragraph above is
-  /// about.
-  static const int schemaVersion = 5;
+  /// about. **v6** adds `away_set_by` / `away_set_by_name` to `watcher_cache`,
+  /// so an offline watcher's away row can still name who set the period
+  /// (ADR-0003, `screens.md`).
+  static const int schemaVersion = 6;
 
   static const String defaultDatabaseName = 'i_am_ok.db';
 
@@ -226,6 +228,30 @@ class LocalStore {
             // the honest answer rather than a guessed one.
             case 5:
               await db.execute(_correctionsOwedTable);
+            // ADR-0003's attribution on the cached away period. Additive, and
+            // idempotent by inspection for the reason the v4 block spells out —
+            // `onDowngrade` accepts a newer file and rewrites its version down,
+            // so this step can be replayed against a table that already has the
+            // columns, and a bare ALTER TABLE would throw `duplicate column
+            // name` out of `openDatabase` itself.
+            //
+            // Nothing is back-filled and nothing can be: a store written by v5
+            // never read the fields. An upgrading install renders its away row
+            // unattributed until the next successful read, which is the honest
+            // answer — the alternative is naming somebody the store cannot show
+            // wrote the document.
+            case 6:
+              final awayColumns =
+                  await db.rawQuery('PRAGMA table_info(watcher_cache)');
+              for (final column in const ['away_set_by', 'away_set_by_name']) {
+                final present =
+                    awayColumns.any((c) => c['name'] == column);
+                if (!present) {
+                  await db.execute(
+                    'ALTER TABLE watcher_cache ADD COLUMN $column TEXT',
+                  );
+                }
+              }
             default:
               throw StateError('no migration to v$v');
           }
@@ -329,6 +355,17 @@ class LocalStore {
       link_id                 TEXT PRIMARY KEY REFERENCES links(id) ON DELETE CASCADE,
       away_from               TEXT,
       away_through            TEXT,
+      -- ADR-0003's attribution, cached with the period rather than resolved
+      -- per render: a watcher has NO path from a peer's uid to their name
+      -- (§7 keeps watchers out of other users' documents), so the
+      -- denormalised label read off the away document is the only thing that
+      -- can render `screens.md`'s "set by Ana" — and the row it appears on is
+      -- read offline, which is the case the cache exists for.
+      --
+      -- Nullable, and null is a real state: ADR-0003's *Absence* case must
+      -- degrade to an unattributed away period, never to no away period.
+      away_set_by             TEXT,
+      away_set_by_name        TEXT,
       last_confirmed_day      TEXT,
       last_reconcile_at       INTEGER,
       access_lost_since       TEXT,
@@ -995,9 +1032,11 @@ class LocalStore {
     // same reason, as `Link.tryWatchedZone`.
     final away = (from == null || through == null)
         ? null
-        : AwayPeriod.tryCreate(
+        : AwayRecord.tryCreate(
             from: DayKey.parse(from),
             through: DayKey.parse(through),
+            setBy: row['away_set_by'] as String?,
+            setByName: row['away_set_by_name'] as String?,
           );
 
     return WatcherCache(
@@ -1025,8 +1064,10 @@ class LocalStore {
           'watcher_cache',
           {
             'link_id': linkId,
-            'away_from': cache.away?.from.toString(),
-            'away_through': cache.away?.through.toString(),
+            'away_from': cache.away?.period.from.toString(),
+            'away_through': cache.away?.period.through.toString(),
+            'away_set_by': cache.away?.setBy,
+            'away_set_by_name': cache.away?.setByName,
             'last_confirmed_day': cache.lastConfirmedDay?.toString(),
             'last_reconcile_at':
                 cache.lastReconcileAt?.toUtc().millisecondsSinceEpoch,
@@ -1095,6 +1136,76 @@ class LocalStore {
       result[DayKey.parse(row['day']! as String)] = outcome;
     }
     return result;
+  }
+
+  // --------------------------------------------------------------- self away
+
+  /// The watched person's **own** away period, as this device last knew it.
+  ///
+  /// One row, because away is one document and one truth (§12). Tier 3 of the
+  /// truth model on this side: what a bare isolate can see when it cannot ask
+  /// Firestore, and what the Tap screen renders before the first read of a
+  /// session returns.
+  ///
+  /// ## It is a cache, and it is the half the exit criterion turns on
+  ///
+  /// *"A device that was offline for the whole period still ends away on the
+  /// right day."* Nothing here expires anything and nothing needs to: §12 makes
+  /// expiry **arithmetic**, so a period whose `through` has passed simply stops
+  /// covering today, on every device, whether or not any of them has been online
+  /// since it started. The failure this design refuses is an "away finished"
+  /// message that can be lost — a cached row that had to be *told* to end is the
+  /// same defect wearing a local hat.
+  ///
+  /// So the row is deliberately **not** cleared when it expires. Deleting it
+  /// would retroactively un-cover days already spent away, which is ADR-0001's
+  /// argument for truncating rather than deleting, applied to the cache.
+  ///
+  /// Returns null when there is no row, and also when the stored pair cannot
+  /// form a valid period — `tryCreate`, not the constructor, for the same reason
+  /// as [watcherCache] and `Link.tryWatchedZone`: this is read inside an alarm
+  /// isolate where a throw is silence.
+  Future<AwayRecord?> selfAway() async {
+    final rows = await _db.query('self_away', where: 'id = 0');
+    if (rows.isEmpty) return null;
+    final row = rows.first;
+    return AwayRecord.tryCreate(
+      from: DayKey.parse(row['from_day']! as String),
+      through: DayKey.parse(row['through_day']! as String),
+      setBy: row['set_by'] as String?,
+      setByName: row['set_by_name'] as String?,
+    );
+  }
+
+  /// Replaces the away row wholesale, or removes it when [away] is null.
+  ///
+  /// **Wholesale, including with null**, and that single assignment is the
+  /// watched side's version of `WatcherCache.applyRead`'s: it is what makes an
+  /// away period cancelled from a *watcher's* phone visible here when the
+  /// `onAwayChanged` nudge was lost. A merge would keep a period Firestore no
+  /// longer holds, and the watched person would read *"Your family isn't
+  /// expecting a check-in"* while her family expected one.
+  ///
+  /// The caller decides whether the read was good enough to write from —
+  /// ADR-0001 decision 1, and it is not this method's to guess: a failed read is
+  /// not an answer, so only [WatchedReconcileService] calls this with null, and
+  /// only on a read that succeeded.
+  Future<void> setSelfAway(AwayRecord? away) async {
+    if (away == null) {
+      await _db.delete('self_away', where: 'id = 0');
+      return;
+    }
+    await _db.insert(
+      'self_away',
+      {
+        'id': 0,
+        'from_day': away.period.from.toString(),
+        'through_day': away.period.through.toString(),
+        'set_by': away.setBy,
+        'set_by_name': away.setByName,
+      },
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
   }
 
   // ---------------------------------------------------------- pending alarms

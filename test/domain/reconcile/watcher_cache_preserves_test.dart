@@ -27,7 +27,8 @@ void main() {
   // Every nullable field set to something distinguishable, so a dropped one
   // shows up as null rather than as a coincidentally equal default.
   final full = WatcherCache(
-    away: AwayPeriod(from: day('2026-08-10'), through: day('2026-08-20')),
+    away: AwayRecord.unattributed(
+        AwayPeriod(from: day('2026-08-10'), through: day('2026-08-20'))),
     lastConfirmedDay: day('2026-08-09'),
     warningsShownFor: {day('2026-08-08'): WarningOutcome.warnOnline},
     lastReconcileAt: at(madrid, 2026, 8, 11, 10, 14),

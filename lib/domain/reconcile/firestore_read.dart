@@ -1,4 +1,5 @@
 import '../away/away_period.dart';
+import '../away/away_record.dart';
 import '../time/day_key.dart';
 
 /// What a reconcile attempt actually established.
@@ -86,7 +87,7 @@ sealed class FirestoreRead {
   /// away document, which is the signal that clears a cancelled away.
   const factory FirestoreRead.succeeded({
     Set<DayKey> checkInDays,
-    AwayPeriod? away,
+    AwayRecord? away,
   }) = ReadSucceeded;
 
   const factory FirestoreRead.unreachable([UnreachableCause cause]) =
@@ -111,8 +112,20 @@ final class ReadSucceeded extends FirestoreRead {
   /// Days `checkins/{watchedUid}/days/{d}` exists for, within the window read.
   final Set<DayKey> checkInDays;
 
-  /// The away period Firestore holds, or null if the document is absent.
-  final AwayPeriod? away;
+  /// The away **document** Firestore holds, or null if it is absent.
+  ///
+  /// [AwayRecord] rather than [AwayPeriod] because `screens.md` requires every
+  /// surface that displays an away period to name who set it, and a watcher has
+  /// no other path to that name: links are `(watched, watcher)` pairs and §7
+  /// keeps watchers out of other users' documents, so the denormalised
+  /// `setByName` on this document is the only thing that makes the row
+  /// renderable at all (§12, ADR-0003).
+  ///
+  /// The attribution travels **with** the period rather than beside it, because
+  /// `WatcherCache.applyRead` replaces `away` wholesale in one assignment — two
+  /// fields would be two assignments, and the pair that got out of step would
+  /// name the wrong person for somebody else's holiday.
+  final AwayRecord? away;
 
   @override
   String toString() =>

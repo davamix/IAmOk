@@ -392,7 +392,7 @@ The only screen the watched person needs.
 |---|---|
 | Not yet tapped today | The tap target, enabled, reading **"I'm OK"**. Large, high contrast, minimal chrome. |
 | Tapped today | Target **disabled for the rest of the local day**. The target itself changes to a tick and **"Tapped"**, and the line beneath reads *"You already tapped today, at 09:14."* Re-enables at local midnight. |
-| Away | *"You're away until Saturday 22. Your family isn't expecting a check-in."* Tapping is still **allowed** — harmless, reassuring, and it writes a normal check-in watchers see as usual. |
+| Away — **specified, not built; Phase 6** | *"You're away until Saturday 22. Your family isn't expecting a check-in."* Tapping is still **allowed** — harmless, reassuring, and it writes a normal check-in watchers see as usual. `TapCopy.away` has **no call site** today, and the row is a specification for Phase 6 rather than a description of the screen. |
 
 The Away control is present but visibly secondary, and not adjacent to the tap target. It reads
 **"I'm away"**, and while an away period is active **"I'm not away"**. It is inert until Phase 6

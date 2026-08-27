@@ -1414,6 +1414,172 @@ void main() {
     });
   });
 
+  group('the away row — Phase 6', () {
+    // `screens.md` named this position in Phase 3: above "Everything OK", which
+    // is where a verified away period used to fall — a row reading "Everything
+    // OK" with a last-seen date about to stop moving for a fortnight, and
+    // nothing anywhere saying why.
+    AwayRecord awayRecord({
+      String? setByName = 'Ana',
+      DayKey? from,
+      DayKey? through,
+    }) =>
+        AwayRecord(
+          period: AwayPeriod(
+            from: from ?? DayKey(2026, 8, 15),
+            through: through ?? DayKey(2026, 8, 22),
+          ),
+          setBy: 'ana-uid',
+          setByName: setByName,
+        );
+
+    testWidgets('names who set it', (tester) async {
+      // The rule `screens.md` states for EVERY away surface, and §17's recorded
+      // mitigation for "one watcher silences the whole family". A state change
+      // nobody can attribute is a state change nobody trusts.
+      await pump(tester, [person(cache: WatcherCache(away: awayRecord()))]);
+
+      expect(find.text('Away until Sat 22 Aug — set by Ana'), findsOneWidget);
+      expect(find.text(WatcherCopy.everythingOk), findsNothing);
+    });
+
+    testWidgets('an unattributed period names nobody rather than "??"',
+        (tester) async {
+      // ADR-0003's *Absence* case. A subtraction from the attributed line — one
+      // clause removed, nothing reworded — so the two states cannot describe
+      // the same thing differently. The period is still shown, because dropping
+      // it would warn a family about days somebody really did mark away.
+      await pump(tester, [
+        person(cache: WatcherCache(away: awayRecord(setByName: null))),
+      ]);
+
+      expect(find.text('Away until Sat 22 Aug'), findsOneWidget);
+      expect(find.textContaining('set by'), findsNothing);
+    });
+
+    testWidgets('it is NOT error-coloured — nobody is expected to tap',
+        (tester) async {
+      // "Quiet confirm, loud miss" keeps alarm styling for a miss. Colour is
+      // never the only signal in either direction.
+      await pump(tester, [person(cache: WatcherCache(away: awayRecord()))]);
+
+      final line = tester.widget<Text>(
+        find.text('Away until Sat 22 Aug — set by Ana'),
+      );
+      expect(line.style?.color, isNot(AppTheme.light.colorScheme.error));
+    });
+
+    testWidgets('a standing WARNING still outranks it', (tester) async {
+      // They look mutually exclusive and are not: `warnUnverifiableAway` is a
+      // warning ABOUT an away period this device could not re-verify, and it
+      // must render as the warning it is rather than as a calm "Away until
+      // Saturday" claiming a certainty the read never established.
+      await pump(tester, [
+        person(
+          outcome: WarningOutcome.warnUnverifiableAway,
+          unverifiedSince: DateTime.utc(2026, 8, 14, 8, 14),
+          cache: WatcherCache(
+            away: awayRecord(),
+            warningsShownFor: {d: WarningOutcome.warnUnverifiableAway},
+          ),
+        ),
+      ]);
+
+      expect(find.text('Away until Sat 22 Aug — set by Ana'), findsNothing);
+      expect(find.textContaining("Can't check on Mum"), findsOneWidget);
+    });
+
+    testWidgets('a revoked link outranks it, and offers no away control',
+        (tester) async {
+      // §8 gates the away write on `isSelf(uid) || hasAcceptedLink(uid)`, so
+      // offering the control would be offering an action refused by design.
+      await pump(tester, [
+        person(
+          status: LinkStatus.revoked,
+          cache: WatcherCache(away: awayRecord()),
+        ),
+      ]);
+
+      expect(find.text('Away until Sat 22 Aug — set by Ana'), findsNothing);
+      expect(find.textContaining('Mark Mum away'), findsNothing);
+      expect(find.textContaining('End Mum'), findsNothing);
+    });
+
+    testWidgets('a period that ENDED yesterday reads as Everything OK',
+        (tester) async {
+      // Expiry is arithmetic. `d` is the 16th, so her today is the 17th; a
+      // period through the 16th no longer covers it and she is expected to tap.
+      await pump(tester, [
+        person(
+          cache: WatcherCache(
+            away: awayRecord(from: DayKey(2026, 8, 10), through: d),
+          ),
+        ),
+      ]);
+
+      expect(find.textContaining('Away until'), findsNothing);
+      expect(find.text(WatcherCopy.everythingOk), findsOneWidget);
+    });
+
+    testWidgets('the row is keyed on HER today, not on the day decided about',
+        (tester) async {
+      // A period starting today: `d` (the 16th) is NOT covered, her today (the
+      // 17th) is. Keyed on `d` this row would say "Everything OK" on the first
+      // day of a holiday.
+      await pump(tester, [
+        person(
+          cache: WatcherCache(
+            away: awayRecord(from: today, through: DayKey(2026, 8, 22)),
+          ),
+        ),
+      ]);
+
+      expect(find.text('Away until Sat 22 Aug — set by Ana'), findsOneWidget);
+    });
+
+    testWidgets('the away control names the person, and switches label',
+        (tester) async {
+      // One control, two labels — cancellation is symmetric with activation
+      // (§12). Both name the person: this row is one of several, and a bare
+      // "Mark away" is ambiguous about whom to a screen-reader user.
+      await pump(tester, [person()]);
+      expect(find.text('Mark Mum away'), findsOneWidget);
+
+      await pump(tester, [person(cache: WatcherCache(away: awayRecord()))]);
+      expect(find.text("End Mum's away period"), findsOneWidget);
+      expect(find.text('Mark Mum away'), findsNothing);
+    });
+
+    testWidgets('the away control clears the 48dp floor', (tester) async {
+      await pump(tester, [person()]);
+
+      final size = tester.getSize(find.byKey(const Key('watcher-away-mum_ana')));
+      expect(size.height, greaterThanOrEqualTo(48));
+    });
+
+    testWidgets('the row is still ONE utterance, with the control beside it',
+        (tester) async {
+      // The row is `ExcludeSemantics`-wrapped into a single stop; the control
+      // is deliberately outside it, or it would be unreachable to a screen
+      // reader — `guidelines.md` requires every interactive element to be
+      // labelled and reachable.
+      final handle = tester.ensureSemantics();
+      await pump(tester, [person(cache: WatcherCache(away: awayRecord()))]);
+
+      // The footer is part of the utterance — the visual distinction between
+      // the claim and the device fact is carried by colour, which a screen
+      // reader does not see.
+      expect(
+        find.bySemanticsLabel(
+          RegExp(r'^Mum\. Away until Sat 22 Aug — set by Ana'),
+        ),
+        findsOneWidget,
+      );
+      expect(find.bySemanticsLabel("End Mum's away period"), findsOneWidget);
+      handle.dispose();
+    });
+  });
+
   group('a tapped notification', () {
     testWidgets('is consumed once the person has been shown', (tester) async {
       // The cold-start path: the payload is captured in main() before runApp,

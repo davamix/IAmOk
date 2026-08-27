@@ -258,9 +258,11 @@ abstract final class WarningPolicy {
   /// only one of them means the phone is offline, and saying so when the phone
   /// is fine is a false claim about the device.
   ///
-  /// [away] is a parameter from the first line even though away mode is not
-  /// built until Phase 6 and every production call site passes null until then
-  /// (PLAN.md, Phase 1, non-negotiable).
+  /// [away] has been a parameter since the first line of this file, written in
+  /// Phase 1 when every production call site passed null (PLAN.md, Phase 1,
+  /// non-negotiable). **Phase 6 filled it in** — `WatcherReconciler` passes
+  /// `cache.away?.period`, the **period only**: attribution is a display label
+  /// ADR-0003 says cannot be authenticated, and no warning decision may see it.
   static WarningDecision decide({
     required DateTime now,
     required tz.Location watchedZone,

@@ -82,10 +82,15 @@ abstract final class ReminderPolicy {
   /// - Slots whose instant has already passed are not desired. Scheduling into
   ///   the past is at best a no-op and at worst an immediate spurious fire.
   ///
-  /// [away] is a parameter from the first line even though away mode is not
-  /// built until Phase 6 and every production call site passes null until then.
-  /// Retrofitting it later would mean touching every call site and every test
-  /// written in between (PLAN.md, Phase 1, non-negotiable).
+  /// [away] has been a parameter since the first line of this file, written in
+  /// Phase 1 when every production call site passed null — because retrofitting
+  /// it later would have meant touching every call site and every test written
+  /// in between (PLAN.md, Phase 1, non-negotiable).
+  ///
+  /// **Phase 6 filled it in**, and away mode was a feature rather than a
+  /// retrofit precisely because of that. `WatchedReconcileService` now reads the
+  /// period from `self_away` and passes it here; it is still null when nobody is
+  /// away, which is the ordinary case.
   static List<ScheduledReminder> remindersFor({
     required DayKey day,
     required AwayPeriod? away,

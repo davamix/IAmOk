@@ -140,6 +140,63 @@ Full evidence in [phase-2-summary.md](../phases/phase-2-summary.md).
 - [x] The debug harness works on-device: force date, fire alarm now, dump `LocalStore`, run
       `reconcile()`. Without it every later item on this page costs a day to verify.
 
+**Phase 6 — away mode** · **NOT RUN. Nothing in Phase 6 has been on a handset.**
+
+The feature is built and all three exit criteria are met in tests
+(`test/application/away_exit_criteria_test.dart`); this list is what only a device answers. Written
+before the run rather than after, so the checklist is not shaped by what happened to be tried.
+
+**First, and carried from the Phase 5 gate** — it is a Phase 5 defect that no Phase 6 test can reach:
+
+- [ ] Press **Add someone**, take the **second** option (*"Someone I look after"*), complete a
+      pairing, and confirm a **warning alarm actually arms** — read `dumpsys alarm` off the device,
+      not the app's own belief. The chooser's second option, the empty-audience 21:00 reminder and
+      the fourth refusal are covered by tests and mutation only.
+
+**Then Phase 6's own:**
+
+- [ ] Set away from the Tap screen: the picker opens, both frozen labels read correctly and follow
+      the selection, and **nothing clips at the largest system font scale**.
+- [ ] Reminders stop on the away days — from `dumpsys alarm`, and the window still extends to
+      `through` + 7 so the days back are already armed.
+- [ ] The Tap screen's away line renders, the control reads *"I'm not away"*, and **the tap target
+      is still enabled** — §12 allows tapping during away and the plausible bug is suppressing the
+      write with the reminders.
+- [ ] Set away from the **watcher's** phone for the watched person, and confirm the watched device's
+      Tap screen names the watcher: *"Ana marked you away until …"*. This is the surface §17's
+      mitigation depends on and the one thing no emulator run has ever exercised.
+- [ ] The watcher's row reads *"Away until Sat 22 Aug — set by …"* and the away control switches to
+      *"End …'s away period"*.
+- [ ] Cancel from **either** side and confirm both restore — the truncation, not a delete, and the
+      days already spent away stay covered.
+- [ ] `onAwayChanged` reaches a **closed** app: away set on one phone, the other phone's app force-
+      stopped, and the reconcile runs. Same shape as Phase 4's fan-out measurement, and the same
+      caveat — over `adb reverse` this is loopback, not a radio.
+- [ ] The write **queued offline**: aeroplane mode, set away, confirm the screen says
+      *"Saved. Your family will see this when this phone is back online."* and that the period lands
+      when the radio returns. §8 chose a direct client write for exactly this, and it is the claim
+      `AwayOutcome.queued` makes.
+- [ ] The **v5 → v6 migration on a real store**, the way the v4 → v5 one was run: install the
+      previous build, pair, let a watcher cache exist, then install this build over it and pull the
+      database. `LocalStore.open()` is unguarded in both background entry points, so a migration that
+      throws is an app that cannot open its own store.
+
+**Two of these need a second device, and they are listed again under *Owed on a second device*
+below** — with a detail this list does not carry: the "reminders for the first days back fire without
+the app being opened" check **must run on the POCO**, because it is watched-side alarm reliability on
+real OEM hardware. Roles live on links (§1), so the POCO plays the *watched* person for that one
+test, and **the role swap has to be recorded in the result** or the run reads as contradicting the
+device table.
+
+**Cannot be driven in a session, and that is stated rather than quietly skipped:**
+
+- [ ] *"A device that was offline for the whole period still ends away on the right day."* It needs a
+      phone to sit offline **across a period boundary**. The arithmetic is asserted in tests and
+      mutation-checked from the silent direction; what a device would add is confidence that nothing
+      *else* — an OEM cache wipe, a force-stop, a store migration — expires or resurrects the cached
+      period. The debug harness can force the date, which shortens this from days to minutes and is
+      the intended route.
+
 ### How to read the alarms — the only ground truth
 
 **`dumpsys alarm` piped through adb truncates.** It returned 3 of 21 once and looked exactly like
@@ -1424,7 +1481,8 @@ suite.** Full write-up in *Pairing on two phones* below.
       cannot be told apart from the outside. The row above wants the app *killed*. Ticking it on this
       evidence would record a measurement that was not isolated.
 
-**Phase 6 — away mode.** All four, one of them with a role swap.
+**Phase 6 — away mode.** All four, one of them with a role swap. **The full Phase 6 checklist is in
+*Per-device checklist* above**; these are the rows that specifically need a second handset.
 
 - [ ] Away set from either side silences both sides everywhere
 - [ ] Cancelling restores both

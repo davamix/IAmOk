@@ -70,8 +70,10 @@ abstract final class WatchedReconciler {
   /// can stay display-only and needs no logic-bearing alarm. A window that
   /// stops at `through` leaves nothing armed after a holiday.
   ///
-  /// [away] is a parameter from the first line even though away mode is not
-  /// built until Phase 6 (PLAN.md, Phase 1, non-negotiable).
+  /// [away] has been a parameter since the first line of this file, written in
+  /// Phase 1 when every production call site passed null (PLAN.md, Phase 1,
+  /// non-negotiable). **Phase 6 filled it in**, which is why away mode was a
+  /// feature here rather than a retrofit through every call site and test.
   ///
   /// [links] is the watched person's **own** links — the ones where they are
   /// the watched party, which §8 already lets them read. It is required rather

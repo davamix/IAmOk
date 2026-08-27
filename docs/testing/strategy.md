@@ -53,9 +53,19 @@ alarm or FCM path is a finding, not a fixture problem.
 
 ## Give the policies their `away` argument from the first line
 
-`ReminderPolicy` and `WarningPolicy` take an `away` argument in Phase 1, **while it is still always
-null**. Away mode is not built until Phase 6, but retrofitting the parameter later means touching
-every call site and every test written in between.
+`ReminderPolicy` and `WarningPolicy` took an `away` argument in Phase 1, **while it was still always
+null**, because retrofitting the parameter later means touching every call site and every test
+written in between.
+
+**Phase 6 filled it in and the bet paid**: away mode landed as a feature rather than as a change to
+every policy signature in the app. The rule generalises — a parameter a design has already committed
+to is cheaper to carry as `null` than to add later — and `WatchedReconciler`'s `links` argument was
+made required on the same reasoning.
+
+One thing that did *not* generalise: the policies take an `AwayPeriod`, and the away **document**
+also carries who set it. That attribution is a separate type (`AwayRecord`), and every policy call
+site passes `away.period`, so no decision can ever be made from a `setByName` ADR-0003 says cannot be
+authenticated.
 
 ## Test the denied case
 

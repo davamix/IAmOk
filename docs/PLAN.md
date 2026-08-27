@@ -362,6 +362,14 @@ watcher list showing Mum. **The AVD also tapped**, which closes the half Phase 4
 
 ## Phase 6 — Away mode
 
+> **Briefed and ready to start** — [phases/phase-6-brief.md](phases/phase-6-brief.md), written at the
+> end of Phase 5. Nothing in `OPEN-QUESTIONS.md` triggers on this phase. **More of away already
+> exists than the deliverable list suggests**: `AwayPeriod`, `AwayRules`, the away rules in
+> `firestore.rules` with 27 tests, the `self_away` table, the watcher-side read, and the `away`
+> parameter threaded through every policy and reconciler since Phase 1 — so this is a feature, not a
+> retrofit. What does not exist is the client write path, `onAwayChanged`, the picker, and any
+> `self_away` accessor at all.
+
 **Deliverables** — `users/{uid}/shared/away`, rules validation (31-day cap — **deliberately slack in the rules, see `security/firestore-rules-guidelines.md`; the exact check is `AwayRules`**, no retroactive,
 `through >= from`), the `onAwayChanged` fan-out, the Away button on the Tap screen (which becomes
 *"I'm not away"* while active), and the away action on the watcher list.

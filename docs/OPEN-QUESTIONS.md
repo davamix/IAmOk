@@ -197,8 +197,16 @@ returns a uid, so the blast radius stops there"*. Both halves were wrong.
   detect in itself.
 
 **What limits it.** The new watcher appears **by name** on the watched person's Tap screen
-(ADR-0005), and either party can revoke. Both are real, and neither is automatic — the away half in
-particular has no surface at all until Phase 6 builds one.
+(ADR-0005), and either party can revoke. Both are real, and neither is automatic.
+
+> **Updated at the Phase 6 gate, 2026-08-27.** The away half now has surfaces, and they cut both
+> ways. A stranger with a guessed link can reach the away write from a **screen** rather than only
+> from an API call — which is what this entry warned about — and at the same time the watched
+> person's own Tap screen now reads *"X marked you away until Saturday 22"*, naming the writer, on
+> the screen she opens every morning. §17's mitigation is *`setByName` on every surface, and anyone
+> can cancel*; before this phase the first half had no surface on the watched side at all. It is
+> still not automatic, and it still depends on her reading the line — but *"nothing anywhere says
+> this happened"* is no longer true, which was the sharper half of the risk.
 
 **A cheap counter was considered and not built.** It is a Firestore document per uid on the pairing
 path, with contention and its own failure modes, for a threat the concurrency cap now bounds.

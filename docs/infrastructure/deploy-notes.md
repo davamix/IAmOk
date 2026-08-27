@@ -82,7 +82,7 @@ something breaks at a bad moment.
 |---|---|---|
 | Firestore rules | `firebase deploy --only firestore:rules --project i-am-ok-c74ca` | **Deployed** 2026-08-20 |
 | Firestore indexes | `firebase deploy --only firestore:indexes --project i-am-ok-c74ca` | Not needed yet — every query so far is single-field equality, which Firestore indexes automatically |
-| Functions | `firebase deploy --only functions --project i-am-ok-c74ca` | **None deployed.** Three exist: `onCheckInCreated`, `createInvite`, `redeemInvite` |
+| Functions | `firebase deploy --only functions --project i-am-ok-c74ca` | **None deployed.** Four exist: `onCheckInCreated`, `createInvite`, `redeemInvite`, and `onAwayChanged` (Phase 6) |
 | A single Function | `firebase deploy --only functions:redeemInvite --project i-am-ok-c74ca` | — |
 
 Deploy rules **before** the client code that depends on them. A client shipped against rules that

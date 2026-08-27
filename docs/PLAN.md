@@ -362,13 +362,38 @@ watcher list showing Mum. **The AVD also tapped**, which closes the half Phase 4
 
 ## Phase 6 — Away mode
 
-> **Briefed and ready to start** — [phases/phase-6-brief.md](phases/phase-6-brief.md), written at the
-> end of Phase 5. Nothing in `OPEN-QUESTIONS.md` triggers on this phase. **More of away already
-> exists than the deliverable list suggests**: `AwayPeriod`, `AwayRules`, the away rules in
-> `firestore.rules` with 27 tests, the `self_away` table, the watcher-side read, and the `away`
-> parameter threaded through every policy and reconciler since Phase 1 — so this is a feature, not a
-> retrofit. What does not exist is the client write path, `onAwayChanged`, the picker, and any
-> `self_away` accessor at all.
+> **BUILT against the emulator suite, 2026-08-27. Not signed off** — the five reviewers have not run
+> and **nothing in this phase has been on a handset**. Start from
+> [phases/phase-6-summary.md](phases/phase-6-summary.md).
+>
+> **The owner decision this phase opened with is taken**: the away line names who set it **when it
+> wasn't you** — `TapCopy.awayBy` for a watcher's action, and the already-approved `TapCopy.away`
+> unchanged for her own and for a document that names nobody. It is the surface §17's *one watcher
+> silences the whole family* mitigation depends on, and it was put before the screen was built rather
+> than after.
+>
+> **What existed already was as much as the brief promised** — `AwayPeriod`, `AwayRules`, the away
+> rules with 27 tests, the `self_away` table and the `away` parameter on every policy since Phase 1 —
+> so this was a feature rather than a retrofit. What this phase added: `AwayRecord` (attribution,
+> deliberately a **separate type**, because the moment a policy can see `setByName` it can decide from
+> it), `AwayRead`, `AwayOutcome`, `AwayRepository`, the `self_away` accessors, schema **v6**,
+> `onAwayChanged`, the picker, the Tap screen's away state and the watcher list's away row and action.
+>
+> **`AwayOutcome` has no "could not reach the server", and the absence is the decision.** Away is a
+> direct client write so it queues offline (§8); a write that has not confirmed is either in flight or
+> queued behind a dead radio, the client cannot tell them apart, and both end with the write landing.
+> Saying it failed would be a false claim about a write that arrives ninety seconds later.
+> `AwayOutcome.queued` is the honest name — ADR-0004's *refused is not unreachable*, one layer below
+> `PairingRefusal.serverFault`.
+>
+> **`AwayPeriod` came off the mutation harness's "not mutated" list**, where it had sat for five
+> phases as a type nothing read. 25 Dart mutations, 25 caught, 0 survived, 0 failed to compile, eight
+> passing controls. 1 322 Dart tests, 102 Functions tests, analyze clean, debug APK builds.
+>
+> **Owed:** the device run (including the Phase 5 gate's unarmed-warning check, which is still
+> outstanding), all five reviewers, owner approval of the drafted picker and refusal copy, and §12's
+> four away **transition notifications**, which are specified and deliberately not built — PLAN.md's
+> deliverable list does not name them and the exit criteria do not turn on them.
 
 **Deliverables** — `users/{uid}/shared/away`, rules validation (31-day cap — **deliberately slack in the rules, see `security/firestore-rules-guidelines.md`; the exact check is `AwayRules`**, no retroactive,
 `through >= from`), the `onAwayChanged` fan-out, the Away button on the Tap screen (which becomes
@@ -377,8 +402,13 @@ watcher list showing Mum. **The AVD also tapped**, which closes the half Phase 4
 **Calendar copy** — the picker labels the chosen day unambiguously: *"Last day away: Saturday 22"*
 and *"Back on Sunday 23"*.
 
-**Exit criteria** — away set from either side silences both sides everywhere; cancelling restores
-both; and a device that was offline for the whole period still ends away on the right day.
+**Exit criteria** — ~~away set from either side silences both sides everywhere; cancelling restores
+both; and a device that was offline for the whole period still ends away on the right day.~~ **All
+three met in tests, 2026-08-27** (`test/application/away_exit_criteria_test.dart`), driven end to end
+through both reconcilers and built around **ending** rather than starting, because away is the first
+feature here whose failure mode is silence. **Not met on a device.** The third clause in particular
+cannot be driven in a session — it needs a phone to sit offline across a period boundary — so what a
+device would add there is confidence that nothing *else* expires the cache.
 
 ---
 

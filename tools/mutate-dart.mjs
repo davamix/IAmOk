@@ -15,21 +15,25 @@
 //
 // ## What these lists deliberately do NOT cover, so the score is read correctly
 //
-// Every mutation here is a **Phase 5 surface**. "14 of 14 caught" is a statement
-// about this phase's code, not about the suite, and the difference matters
-// because the risk in this design sits somewhere else.
+// Every mutation here is a **Phase 5 or Phase 6 surface**. The score is a
+// statement about those, not about the suite, and the difference matters
+// because the risk in this design sits somewhere else as well.
 //
-// Not mutated, and named so nobody mistakes the number for coverage:
-// `DayKey`, `AwayPeriod`, `ReminderPolicy`, `WarningPolicy`, either reconciler,
-// the false-warning correction path, `AlarmIds` (whose per-process stability is
-// a `CLAUDE.md` constraint and the premise the correction path rests on), the
+// **`AwayPeriod` came off this list at the Phase 6 gate**, which is the point:
+// it sat here for five phases as a type nothing read, and it is now what every
+// away decision on both sides runs through. `AwayRecord` and the watched
+// reconcile's away half joined it.
+//
+// Still not mutated, and named so nobody mistakes the number for coverage:
+// `DayKey`, `ReminderPolicy`, `WarningPolicy`, either reconciler, the
+// false-warning correction path, `AlarmIds` (whose per-process stability is a
+// `CLAUDE.md` constraint and the premise the correction path rests on), the
 // `onCheckInCreated` fan-out, and `firestore.rules` — which has 75 tests and no
 // mutation coverage at all.
 //
-// Those are exactly the six pure functions `docs/testing/strategy.md` says the
-// risk lives in. Extending the lists there is worth more than adding another
-// Phase 5 mutation; it is deliberately not done here, because a harness grown
-// past what it is run against stops being run.
+// Those are most of the pure functions `docs/testing/strategy.md` says the risk
+// lives in. Extending the lists there is worth more than adding another Phase 5
+// mutation; a harness grown past what it is run against stops being run.
 //
 // **When a mutation SURVIVES, suspect the mutation first.** Three of Phase 5's
 // Dart mutations came back unexpected and two of them were bad: one added a
@@ -235,6 +239,143 @@ const groups = [
           'Two different people genuinely called "Ana" would become one, ' +
           'silently dropping a real watcher from a list whose only job is to ' +
           'be complete.',
+      },
+    ],
+  },
+  // ---------------------------------------------------------------- Phase 6
+  //
+  // `AwayPeriod` becoming live code is what made this worth doing: it sat on
+  // the "not mutated" list above for five phases while nothing read it, and it
+  // is now the type every away decision on both sides runs through.
+  //
+  // Away is the first feature here whose failure mode is **silence**, so these
+  // are chosen for the direction that produces no notification and no error —
+  // a period honoured when it should not be, or one that never ends.
+  {
+    file: 'lib/domain/away/away_period.dart',
+    mutations: [
+      {
+        name: 'AwayPeriod.covers: `through` stops being inclusive',
+        from: 'return day >= honoured.from && day <= honoured.through;',
+        to: 'return day >= honoured.from && day < honoured.through;',
+        why:
+          'The last away day would stop being an away day: she is reminded ' +
+          'three times on a day she is away, and every watcher is warned about ' +
+          'it the next morning. `through` being INCLUSIVE is the whole reason ' +
+          'the picker copy says "Last day away" rather than "until".',
+      },
+      {
+        name: 'AwayPeriod.covers: reads the document instead of the clamp',
+        from: 'final honoured = clampedToSanityBound();',
+        to: 'final honoured = this;',
+        why:
+          'A ten-year away document would be honoured for ten years, and ' +
+          'nothing could catch it: the read SUCCEEDS every day, so nothing is ' +
+          'stale and the staleness bound never fires. That is the failure ' +
+          'clampedToSanityBound exists for, and it is silent on both sides.',
+      },
+      {
+        name: 'AwayPeriod.hasExpiredOn: off by one, in the silent direction',
+        from: 'bool hasExpiredOn(DayKey today) => today > through;',
+        to: 'bool hasExpiredOn(DayKey today) => today > through.next;',
+        why:
+          'The period would outlive itself by a day. Section 12 makes expiry ' +
+          'ARITHMETIC precisely so nothing can be lost in delivery — this is ' +
+          'the arithmetic, and getting it wrong is exactly the "away that ' +
+          'never ends" the exit criterion is written against.',
+      },
+      {
+        name: 'AwayPeriod.cancelOn: cancels by deleting rather than truncating',
+        from: 'if (cancelDay <= from) return null;',
+        to: 'if (cancelDay <= from.next) return null;',
+        why:
+          'ADR-0001 decision 5. Deleting mid-period retroactively UN-COVERS ' +
+          'the days already spent away, so the next device to refresh its ' +
+          'cache warns about a day the person really was away — a false claim ' +
+          'to a family, which is the worst thing this app can do.',
+      },
+      {
+        name: 'AwayRules.validateCreate: retroactive away is allowed',
+        from: 'if (period.from < today) return AwayRejection.retroactiveFrom;',
+        to:
+          'if (period.from < today.minusDays(400)) ' +
+          'return AwayRejection.retroactiveFrom;',
+        why:
+          'No retroactive away (section 12) is an owner decision, and the ' +
+          'client check is the one that is exact — the rules clause is ' +
+          'deliberately slack because it cannot compare a local date to a UTC ' +
+          'instant.',
+      },
+      {
+        name: 'AwayRules.validateUpdate: `from` stops being immutable',
+        from:
+          'if (period.from != existing.from) return AwayRejection.fromChanged;',
+        to:
+          'if (period.from == existing.from) return AwayRejection.fromChanged;',
+        why:
+          'Inverted rather than removed, so it compiles and so the mutation ' +
+          'is observable in both directions. ADR-0001 decision 6 froze `from` ' +
+          'because truncation rewrites a document whose `from` is already in ' +
+          'the past.',
+      },
+    ],
+  },
+  {
+    file: 'lib/domain/away/away_record.dart',
+    mutations: [
+      {
+        name: 'AwayRecord.tryCreate: a missing name costs the PERIOD',
+        from: 'if (period == null) return null;',
+        to: 'if (period == null || setByName == null) return null;',
+        why:
+          'ADR-0003 Absence case, got wrong. An older build or an admin write ' +
+          'omitting the name would become NO away period at all — so a family ' +
+          'is warned about days somebody really did mark away. The name may ' +
+          'degrade; the period may not.',
+      },
+      {
+        name: 'AwayRecord.nameToShowFor: the reader is told they did it',
+        from: 'if (forUid != null && wasSetBy(forUid)) return null;',
+        to: 'if (forUid == null) return null;',
+        why:
+          'The owner decision of 2026-08-27, inverted. She would read ' +
+          '"Mum marked you away" about her own action — addressed in the ' +
+          'wrong grammatical person — and a watcher would read their own name ' +
+          'back on the row they just set.',
+      },
+      {
+        name: 'AwayRecord: an unbounded name reaches the notification tray',
+        from: 'if (trimmed.length > AwayRules.nameMaxLength) return null;',
+        to: 'if (trimmed.length > AwayRules.nameMaxLength * 1000) return null;',
+        why:
+          'ADR-0003 names a long clinical string as the injection this bound ' +
+          'exists for. The rules bound only what THIS app clients write; a ' +
+          'document arriving by any other door reaches every family member ' +
+          'phone through this field.',
+      },
+    ],
+  },
+  {
+    file: 'lib/application/watched_reconcile_service.dart',
+    mutations: [
+      {
+        name: 'the watched reconcile: a FAILED read clears the away cache',
+        from: 'if (read.succeeded) await store.setSelfAway(read.awayOrNull);',
+        to: 'await store.setSelfAway(read.awayOrNull);',
+        why:
+          'ADR-0001 decision 1 — a read that FAILED is not an answer. A ' +
+          'timeout, a permission denial and an App Check rejection all happen ' +
+          'while online, and clearing on any of them nags an elderly person ' +
+          'through a holiday and tells her family she has stopped checking in.',
+      },
+      {
+        name: 'the watched reconcile: away stops suppressing reminders',
+        from: '      away: away?.period,',
+        to: '      away: null,',
+        why:
+          'The `away` parameter has been threaded through every policy since ' +
+          'Phase 1 for this line. Passing null re-arms all three reminders on ' +
+          'every away day, which is the visible half of the feature.',
       },
     ],
   },

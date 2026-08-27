@@ -1,9 +1,9 @@
 # Screen inventory
 
 **Date:** 2026-08-16 · **Status:** Specification-in-progress. **The Tap screen and the debug harness
-were built in Phase 2, the watcher list in Phase 3, and sign-in, the three onboarding screens and
-both pairing screens in Phase 5.** What remains specification is the away picker and the health
-panel. (This line said *"everything else is still specification"* until 2026-08-25; `guidelines.md`
+were built in Phase 2, the watcher list in Phase 3, sign-in, the three onboarding screens and
+both pairing screens in Phase 5, and the away picker in Phase 6.** What remains specification is the
+health panel. (This line said *"everything else is still specification"* until 2026-08-25; `guidelines.md`
 had the identical claim corrected the same day and this file was missed.)
 
 **Every Phase 5 string below was approved by the owner on 2026-08-26**, at the Phase 5 gate. **Two**
@@ -26,7 +26,7 @@ here as a free choice: add the decision to this file when it is made.
 | Onboarding 2 — "Who are you looking after?" | 5 | **Built.** Copy below, approved 2026-08-26 |
 | Onboarding 3 — summary | 5 | **Built.** Copy approved 2026-08-26. Reports the links that exist, never what was tapped |
 | Pairing — create invite / redeem code | 5 | **Built**, proven on two devices, copy approved 2026-08-26 |
-| Away picker | 6 | Copy decided; layout undesigned |
+| Away picker | 6 | **Built.** Layout decided 2026-08-27; two labels frozen, the rest owed approval |
 | Watcher list (watcher main) | 7 | Row content decided; multi-person layout undesigned |
 | Health panel | 7 | Checks decided incl. backend access (ADR-0004); layout undesigned |
 
@@ -363,6 +363,11 @@ Away is inert until then. `guidelines.md`'s mis-tap reasoning is about the dista
 target*, which is still satisfied; what it does not consider is a nearer neighbour of equal weight.
 **Give Away visible separation in the same change that enables it**, not after.
 
+> **Done, Phase 6: a divider between them**, indented, with 20dp either side. A rule is a signal a
+> reader takes at a glance; a gap is one they have to measure. Both controls stay text buttons — the
+> equal weight is fine once there is a structural break between them — and the 48dp floor is
+> asserted at every font scale.
+
 **The control that opens the watcher list is labelled *"See who you look after"***, which is not the
 list's title. A title says what a screen **is**; a control's label says what pressing it **does**, and
 this one is an icon button — so that string is a screen-reader user's whole identification of their
@@ -392,13 +397,17 @@ The only screen the watched person needs.
 |---|---|
 | Not yet tapped today | The tap target, enabled, reading **"I'm OK"**. Large, high contrast, minimal chrome. |
 | Tapped today | Target **disabled for the rest of the local day**. The target itself changes to a tick and **"Tapped"**, and the line beneath reads *"You already tapped today, at 09:14."* Re-enables at local midnight. |
-| Away — **specified, not built; Phase 6** | *"You're away until Saturday 22. Your family isn't expecting a check-in."* Tapping is still **allowed** — harmless, reassuring, and it writes a normal check-in watchers see as usual. `TapCopy.away` has **no call site** today, and the row is a specification for Phase 6 rather than a description of the screen. |
+| Away — **built, Phase 6** | *"Ana marked you away until Saturday 22. Your family isn't expecting a check-in."* when somebody else set it; *"You're away until Saturday 22. …"* when she did, or when the document names nobody. Rendered **above** the tap confirmation — it is the frame for the rest of the screen. Tapping is still **allowed** and the target stays enabled: harmless, reassuring, and it writes a normal check-in watchers see as usual. See *The away line names who set it* under **Away picker**. |
 
 The Away control is present but visibly secondary, and not adjacent to the tap target. It reads
-**"I'm away"**, and while an away period is active **"I'm not away"**. It is inert until Phase 6
-(`onPressed: null`), and present now so the layout it has to live in is settled while the screen is
-still simple. Only the active-state label was quoted here before, which left the label a reader
-actually sees today outside the approved set.
+**"I'm away"**, and while an away period is active **"I'm not away"**. **Live since Phase 6.**
+
+**No confirmation step on the cancel, decided 2026-08-27.** A mis-tap on *"I'm not away"* fails
+**loud** — reminders and warnings come back, which is this app's default-safe state — and setting
+away again is two taps. A confirmation dialog would be a third surface on the screen `WatchedAudience`
+records this project refusing extra surfaces on. The mis-tap worth defending against is the *other*
+direction, pressing **away** by accident, which is silent; that is what the separation below is for,
+and the screen states the outcome in words the moment it happens.
 
 ### The tapped state changes the target, not only its colour
 
@@ -545,7 +554,7 @@ run `reconcile()` on demand.
 
 ## Away picker
 
-A calendar picker where the selected day is labelled unambiguously:
+**Built in Phase 6.** A calendar picker where the selected day is labelled unambiguously:
 
 > **Last day away: Saturday 22** · Back on Sunday 23
 
@@ -555,6 +564,97 @@ v1. Maximum 31 days — the last selectable day is 30 days after today.
 
 Every surface that displays an away period names who set it: *"Ana marked Mum away until Sat 22 Aug."*
 
+### The layout, decided 2026-08-27
+
+Marked *undesigned* here since Phase 3; these are the decisions taken when it was built.
+
+**A full screen, not a dialog.** A calendar plus two sentences plus a 48dp action does not fit a
+dialog at the largest system font scale on a small phone, and a `Column` that overflows its
+constraint is **clipped in release** — silently, with no overflow stripe. That is the defect the
+Phase 5 gate measured in the *Add someone* sheet (338 pixels of overflow at scale 2.0 on 320×480),
+and the floor `guidelines.md` sets is the largest scale with no clipping. The screen scrolls.
+
+**Both labels render live, beneath the calendar**, and update as the selection moves. A label that
+only appeared after confirming would be describing a choice already made rather than disambiguating
+the one being made — which is the entire job of the second sentence.
+
+**The two are one utterance to a screen reader**, in a live region. The second sentence is what
+resolves the first, so a reader who got only one of them is back where *"until Saturday"* left them.
+
+**The last selectable day comes from `AwayRules.maxDaysAhead`**, not from a number typed into the
+widget. So the picker cannot offer a day the client's own validation would refuse — which is why
+`AwayRefusal.rejectedPeriod` is reachable only by the device's date moving underneath the reader
+between opening the picker and confirming it, and not by anything they can press.
+
+**An out-of-range stored period is clamped, not trusted.** The Firestore rules are deliberately
+slacker than `AwayRules`, so a period the server legitimately accepted can sit a day or two past
+what this screen may offer — and `CalendarDatePicker` asserts on an `initialDate` outside its own
+bounds. Unclamped, the screen would crash for exactly the family whose period sits on the boundary.
+
+**Dismissing says nothing**, and there is a control as well as a back gesture: `guidelines.md`
+forbids a gesture being the only route to an action. The same decision this file records by hand for
+the *Add someone* chooser and the Google account chooser — a dismissal is a choice, not a fault.
+
+### Copy — **owed the owner's approval**
+
+The two labels above are frozen and were approved long ago. Everything else the picker and the away
+write path say is **drafted, not approved**, and is listed here so approval has something to read.
+`AwayCopy` is the code-side twin.
+
+| | |
+|---|---|
+| Picker title | *"Choose the last day you are away"* — names the one thing this screen collects. `from` is always today, so a title offering a range would promise a choice the screen cannot make |
+| Confirm | *"Save"* |
+| Dismiss | *"Not now"* |
+| Write queued offline | *"Saved. Your family will see this when this phone is back online."* |
+| Refused — the period | *"That day does not work. Choose a day in the next month."* |
+| Refused — the server said no | *"That could not be saved. I Am Ok is no longer allowed to change this."* |
+| Refused — a server fault | *"That did not work just now. Try again in a moment."* — **`PairingRefusal.serverFault`'s approved sentence, verbatim** |
+| Refused — not signed in | *"You are not signed in. Sign in and try again."* — the pairing screens' sentence, verbatim |
+| Watched screen, somebody else set it | *"Ana marked you away until Saturday 22. Your family isn't expecting a check-in."* — **approved 2026-08-27**, see *The away line names who set it* below |
+| Watcher row | *"Away until Sat 22 Aug — set by Ana"* — already approved; *"Away until Sat 22 Aug"* is the unattributed variant |
+| Watcher row control | *"Mark Mum away"* / *"End Mum's away period"* |
+
+> **There is deliberately no *"could not reach the server"* refusal**, and its absence is
+> [ADR-0004](../architecture/decisions/0004-refused-is-not-unreachable.md)'s rule one layer below
+> `PairingRefusal.serverFault`. Away is a direct client write so it **queues offline** (§8), and
+> Firestore replays it when the connection returns — so a write that has not confirmed is either
+> still in flight or queued behind a dead radio, and the client cannot tell those apart. Both end
+> with the write landing. Saying *"could not reach the server"* would tell somebody their family had
+> not been told about a write that arrives ninety seconds later, and the obvious response is to set
+> the period again. **`queued` is the honest name for the state that actually exists.**
+
+### The away line names who set it — **decided 2026-08-27 · OWNER**
+
+The item this file carried as *"Owed before Phase 6 ships the away picker"* since Phase 3, now
+settled. `TapCopy.away` named nobody while this file requires every away surface to name who set it,
+and the two contradicted.
+
+**The rule adopted: name who set it *when it wasn't you*.**
+
+| Who set it | The watched person reads |
+|---|---|
+| A watcher | *"Ana marked you away until Saturday 22. Your family isn't expecting a check-in."* |
+| Herself | *"You're away until Saturday 22. Your family isn't expecting a check-in."* — the already-approved string, **unchanged** |
+| Nobody nameable | The same unattributed string — see below |
+
+It reads the way a person speaks, and it keeps the approved string exactly as it was for the case
+she did it herself. **It is the surface §17's mitigation depends on**: that risk — *one watcher
+silences the whole family by setting away* — is accepted by design, and the recorded control is
+`setByName` on every surface plus anyone being able to cancel. This screen is read by the one person
+best placed to notice *"I am not away"*, so a line here naming nobody would have left the mitigation
+resting on surfaces she never sees.
+
+**The unattributed line is also the fallback**, and that is the right fallback rather than a
+convenient one. [ADR-0003](../architecture/decisions/0003-away-attribution.md)'s *Absence* case — an
+older build or an admin write omitting the name — must degrade to an away period nobody is named
+for, never to *"?? marked you away"* and never to no away period at all. Dropping the period would
+warn a family about days somebody really did mark away.
+
+*"marked … away"* rather than a new phrasing, because it is already this file's approved vocabulary
+for the act (*"Ana marked Mum away until Sat 22 Aug."*), and one verb for one action is worth more
+than a sentence tuned in isolation.
+
 ## Watcher list — watcher main
 
 One row per watched person. Per row: the person's name, current status, and the away action.
@@ -563,22 +663,47 @@ One row per watched person. Per row: the person's name, current status, and the 
 |---|---|
 | Checked in today | Last check-in time |
 | Unresolved warning | The warning, unresolved |
-| Away | *"Away until Sat 22 Aug — set by Ana"* — in the app, never as a notification. **Phase 6, not Phase 3** — see below |
+| Away | *"Away until Sat 22 Aug — set by Ana"* — in the app, never as a notification. **Built in Phase 6** — see below |
 | Stale / offline | Last successful update, honestly dated |
 | The link ended | *"Your link with Mum has ended."* + what that costs |
 | This phase could not check the link at all | A fault about **us**, naming the person, with a control — see the Phase 3 copy below |
 
-**The away row is deliberately absent in Phase 3, and that is a decision rather than an omission.**
-No user can set an away period yet: the Tap screen's *"I'm away"* action is present, visibly
-secondary and `onPressed: null` until Phase 6, and there is no backend to carry one. The state is
-reachable only through the debug harness, in debug builds.
+**The away row was deliberately absent in Phase 3, and that was a decision rather than an
+omission.** No user could set an away period, and building the row would have broken a rule this
+document sets: **every surface showing an away period names who set it**, while `AwayPeriod` carried
+no attribution. An unattributed *"Away until Sat 22 Aug"* is exactly the away state the guidelines
+forbid.
 
-Building the row now would also break a rule this document sets: **every surface showing an away
-period names who set it**, and `AwayPeriod` carries no `setBy`/`setByName` until Phase 6. An
-unattributed *"Away until Sat 22 Aug"* is exactly the away state the guidelines forbid. So the row
-lands in Phase 6 together with the attribution that makes it honest — at which point
-`WatcherScreen._status()` gains a branch above *"Everything OK"*, which is where a verified away
-period currently falls.
+**Phase 6 built it, with the attribution that makes it honest.** `AwayRecord` carries `setBy` and
+`setByName` alongside the period; `WatcherScreen._status()` gained the branch **above "Everything
+OK"** exactly where this file said it would, and `WatchedRowKind` gained an `away` case so the
+precedence lives in one place rather than in the widget.
+
+Three things settled while building it:
+
+- **It is keyed on *her* today, not on the day the warning decision is about.** The decision is
+  about `D` — the last completed day in her zone — so a period starting today does not touch it, and
+  a row keyed on `D` would read *"Everything OK"* on the first day of a holiday, with a last-seen
+  date about to stop moving for a fortnight and nothing saying why. `decision.day.next` is her today
+  by definition, so there is no second source to disagree at a watched-local midnight.
+- **A standing warning still outranks it.** The two look mutually exclusive and are not:
+  `warnUnverifiableAway` is a warning *about* an away period this device could not re-verify, and it
+  must render as the warning it is rather than as a calm *"Away until Saturday"* claiming a certainty
+  the read never established.
+- **It is not error-coloured.** Nobody is expected to tap, so nothing is wrong — *quiet confirm, loud
+  miss* keeps alarm styling for a miss. The same decision the revoked row makes, for the same reason.
+
+**The unattributed variant is *"Away until Sat 22 Aug"***, a subtraction from the attributed line
+rather than a rewording, so the two states cannot describe the same thing differently. It renders
+for ADR-0003's *Absence* case, and the period is still shown, because dropping it would warn a
+family about days somebody really did mark away.
+
+**The away action sits outside the row's single utterance.** The row is one stop for a screen reader
+(`ExcludeSemantics` under one `Semantics` label); a control folded into it would be unreachable.
+Both labels name the person — *"Mark Mum away"*, *"End Mum's away period"* — because the list holds
+several rows and a bare *"Mark away"* is ambiguous about whom to somebody swiping through it. **A
+revoked link offers no control at all**: §8 gates the away write on `isSelf(uid) ||
+hasAcceptedLink(uid)`, so offering it would be offering an action refused by design.
 
 **Cold open shows current state, not the most recent event ever.** An unresolved warning if one
 stands; otherwise "Everything OK" with the last check-in time. A warning from three weeks ago
@@ -1312,9 +1437,10 @@ and the tap must route on a **cold start** — `getNotificationAppLaunchDetails(
 callback. A watcher tapping this is by definition someone whose app has been closed, so the cold path
 is the normal one here rather than the edge case. It is on the Phase 3 device list.
 
-**Owed before Phase 6 ships the away picker:** `TapCopy.away` names nobody, while this file also
-says *"every surface that displays an away period names who set it"*. Those two contradict, and the
-string is frozen now. If a watcher marks her away, she should probably read who did.
+**Settled 2026-08-27, in *The away line names who set it* above.** `TapCopy.away` named nobody
+while this file requires every away surface to name who set it. The owner's decision: name who set
+it **when it wasn't you** — `TapCopy.awayBy` for a watcher's action, the already-approved
+`TapCopy.away` unchanged for her own and for a document that names nobody.
 
 **Settled 2026-08-26, in *The three reminders* above:** the 21:00 reminder said *"so your family
 knows you're well"* while the screen might simultaneously say nobody is set up. It now has an

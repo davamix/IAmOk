@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../copy/away_copy.dart';
 import '../data/auth_repository.dart';
 import '../data/away_repository.dart';
 import '../data/check_in_repository.dart';
@@ -678,7 +679,7 @@ class WatcherStateNotifier extends AsyncNotifier<WatcherState> {
       // the rules enforce `setBy == request.auth.uid` — so writing anything else
       // here is not a misattribution, it is a rejected write.
       setBy: services.selfUid,
-      setByName: services.auth.displayName ?? 'Someone',
+      setByName: services.auth.displayName ?? AwayCopy.unnamedWriter,
       period: period,
       today: watchedToday,
       existing: existing,
@@ -709,7 +710,7 @@ class WatcherStateNotifier extends AsyncNotifier<WatcherState> {
         : await services.awayDocument.write(
             watchedUid: watchedUid,
             setBy: services.selfUid,
-            setByName: services.auth.displayName ?? 'Someone',
+            setByName: services.auth.displayName ?? AwayCopy.unnamedWriter,
             period: truncated,
             today: watchedToday,
             existing: existing,
@@ -890,7 +891,7 @@ class WatchedStateNotifier extends AsyncNotifier<WatchedState> {
       // The Google profile name, the same value `users/{uid}` carries and the
       // same fallback `upsertProfile` uses. It is a display LABEL and not an
       // identity (ADR-0003) — `setBy` beside it is what is enforced.
-      setByName: services.auth.displayName ?? 'Someone',
+      setByName: services.auth.displayName ?? AwayCopy.unnamedWriter,
       period: period,
       today: current.today,
       existing: current.away?.period,
@@ -930,7 +931,7 @@ class WatchedStateNotifier extends AsyncNotifier<WatchedState> {
             // a truncation that kept the original `setByName` would tell the
             // family the person who set the holiday also cut it short.
             setBy: services.selfUid,
-            setByName: services.auth.displayName ?? 'Someone',
+            setByName: services.auth.displayName ?? AwayCopy.unnamedWriter,
             period: truncated,
             today: current.today,
             existing: away.period,

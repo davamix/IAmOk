@@ -781,16 +781,31 @@ class _AwayRowActionState extends ConsumerState<_AwayRowAction> {
       _busy = true;
       _message = null;
     });
-    final outcome = await action();
+    // Guarded for the same reason as the Tap screen's twin: an unguarded
+    // throw leaves `_busy` true and the control dead for the session, with
+    // nothing said.
+    AwayOutcome outcome;
+    try {
+      outcome = await action();
+    } on Object {
+      outcome = const AwayOutcome.refused(AwayRefusal.serverFault);
+    }
     if (!mounted) return;
+    final message = AwayCopy.awayMessageFor(outcome);
     setState(() {
       _busy = false;
-      _message = switch (outcome) {
-        AwaySet() => AwayCopy.saved,
-        AwayQueued() => AwayCopy.queued,
-        AwayRefused(:final refusal) => AwayCopy.refusal(refusal),
-      };
+      _message = message;
     });
+    // **Spoken, because nothing re-reads a changed widget.** On this row the
+    // outcome is the ONLY feedback — a blind watcher presses *"End Mum's away
+    // period"*, the write is refused, and otherwise they hear nothing at all.
+    if (message != null) {
+      SemanticsService.sendAnnouncement(
+        View.of(context),
+        message,
+        Directionality.of(context),
+      );
+    }
   }
 
   Future<void> _setAway() async {
@@ -1106,9 +1121,16 @@ _RowStatus _statusFor(
           // Non-null by construction: `rowKind` answers `away` only when the
           // cache holds a period that covers her today.
           setByName == null
-              ? WatcherCopy.awayUntil(AwayCopy.shortDate(away!.period.through))
+              // **The HONOURED `through`.** `isAwayToday` decides through
+              // `covers`, which clamps to the sanity bound — so the raw value
+              // would name a date the app stops honouring, on a row that goes
+              // quiet the same day. `WarningPolicy.warningBody` sets the
+              // precedent and gives the reason.
+              ? WatcherCopy.awayUntil(AwayCopy.shortDate(
+                  away!.period.clampedToSanityBound().through))
               : WatcherCopy.awayUntilBy(
-                  AwayCopy.shortDate(away!.period.through),
+                  AwayCopy.shortDate(
+                      away!.period.clampedToSanityBound().through),
                   setByName,
                 ),
         ],

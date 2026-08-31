@@ -1,3 +1,4 @@
+import 'package:i_am_ok/copy/away_copy.dart';
 import 'package:i_am_ok/domain/domain.dart';
 import 'package:test/test.dart';
 
@@ -135,13 +136,38 @@ void main() {
       expect(anonymous.nameToShowFor(null), isNull);
     });
 
-    test('a name with no uid behind it is still shown to everyone', () {
-      // `wasSetBy` is false for an unreadable uid, which is the conservative
-      // direction: the reader is never told they did something the document
-      // cannot show they did.
+    test('a name with NO uid behind it names nobody', () {
+      // Corrected at the Phase 6 gate. A label with no `setBy` has nothing to
+      // resolve a dispute through, and the app has no evidence that anybody
+      // acted — so it may not say somebody did. It is also the case that can
+      // put her OWN name in front of "marked you away", because the
+      // self-suppression guard keys on the uid the document lacks.
       final unsigned = AwayRecord(period: period, setBy: null, setByName: 'Ana');
-      expect(unsigned.nameToShowFor('ana-uid'), 'Ana');
+      expect(unsigned.nameToShowFor('mum-uid'), isNull);
+      expect(unsigned.nameToShowFor('ana-uid'), isNull);
       expect(unsigned.wasSetBy('ana-uid'), isFalse);
+    });
+
+    test('the placeholder for a writer with no name is suppressed', () {
+      // The rules REQUIRE `setByName`, so a writer whose account has no display
+      // name must still put something there — but "Someone marked you away
+      // until Saturday 22" names a role, which `guidelines.md` forbids, and is
+      // ADR-0003's "?? marked you away" wearing a word.
+      final unnamed = AwayRecord(
+        period: period,
+        setBy: 'ana-uid',
+        setByName: AwayRecord.unnameable,
+      );
+      expect(unnamed.isUnnameable, isTrue);
+      expect(unnamed.nameToShowFor('mum-uid'), isNull,
+          reason: 'the approved unattributed line renders instead, which is '
+              'honest: nobody can be named');
+    });
+
+    test('the placeholder matches the one the write path uses', () {
+      // Duplicated deliberately — the domain may not import the copy layer —
+      // so the two are pinned against each other rather than trusted to agree.
+      expect(AwayRecord.unnameable, AwayCopy.unnamedWriter);
     });
   });
 

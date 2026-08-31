@@ -50,9 +50,18 @@ class AwayPickerScreen extends StatefulWidget {
   /// second answer to a question already settled.
   final DayKey today;
 
-  /// The day to open on — the current period's last day when one is in force,
-  /// so **extending** a holiday starts from where it ends rather than from
-  /// today.
+  /// The day to open on.
+  ///
+  /// **Not reachable with a period in force in v1, and the docstring used to
+  /// say otherwise.** Both surfaces flip their control to *end* while away, so
+  /// this screen is only ever opened when no period covers today — and what
+  /// reaches here is therefore an *ended* period's last day, which `_openOn`
+  /// clamps forward to today.
+  ///
+  /// It stays a parameter because §12 says away may be **extended** and
+  /// `AwayRules.validateUpdate` exists for exactly that; the surface that would
+  /// reach it is owed a decision, recorded in `screens.md`. When it lands, this
+  /// is where it plugs in.
   final DayKey? initialLastDay;
 
   static const Key calendarKey = Key('away-picker-calendar');
@@ -93,13 +102,32 @@ class _AwayPickerScreenState extends State<AwayPickerScreen> {
     final firstBack = AwayCopy.dayAndDate(_selected.next);
 
     return Scaffold(
-      appBar: AppBar(title: const Text(AwayCopy.pickerTitle)),
+      // **A bare bar, and the title is in the body.** `AppBar` wraps its title
+      // in `softWrap: false, overflow: ellipsis` and clamps text scaling at
+      // 1.34 — so *"Choose the last day you are away"* truncates on an ordinary
+      // 360dp phone at scale 1.0, and the half that gets cut is the word
+      // **last**, which is the entire reason the title is worded this way. A
+      // bar that refuses to honour the system font scale also breaks
+      // `guidelines.md`'s floor outright.
+      appBar: AppBar(),
       body: SafeArea(
+        // **No horizontal padding here.** `CalendarDatePicker` adds its own
+        // 12dp each side and divides what is left by seven, so 16dp here made
+        // each day cell `(width - 56) / 7` — below the 48dp floor on any phone
+        // narrower than 392dp, which is most of them, on the only control this
+        // screen exists for. The padding is on the children instead.
         child: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+          padding: const EdgeInsets.only(top: 8, bottom: 24),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                child: Text(
+                  AwayCopy.pickerTitle,
+                  style: theme.textTheme.headlineSmall,
+                ),
+              ),
               CalendarDatePicker(
                 key: AwayPickerScreen.calendarKey,
                 initialDate: _asDateTime(_openOn()),
@@ -116,52 +144,61 @@ class _AwayPickerScreenState extends State<AwayPickerScreen> {
               // reader who got only one of them would be back where "until
               // Saturday" left them. `MergeSemantics` is what makes the pair a
               // single stop rather than two swipes.
-              MergeSemantics(
-                child: Semantics(
-                  liveRegion: true,
-                  label: AwayCopy.pickerLabel(lastDay, firstBack),
-                  child: ExcludeSemantics(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        Text(
-                          AwayCopy.lastDayAway(lastDay),
-                          textAlign: TextAlign.center,
-                          style: theme.textTheme.headlineSmall,
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          AwayCopy.backOn(firstBack),
-                          textAlign: TextAlign.center,
-                          style: theme.textTheme.titleMedium,
-                        ),
-                      ],
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: MergeSemantics(
+                  child: Semantics(
+                    liveRegion: true,
+                    label: AwayCopy.pickerLabel(lastDay, firstBack),
+                    child: ExcludeSemantics(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Text(
+                            AwayCopy.lastDayAway(lastDay),
+                            textAlign: TextAlign.center,
+                            style: theme.textTheme.headlineSmall,
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            AwayCopy.backOn(firstBack),
+                            textAlign: TextAlign.center,
+                            style: theme.textTheme.titleMedium,
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 ),
               ),
 
               const SizedBox(height: 24),
-              FilledButton(
-                key: AwayPickerScreen.saveKey,
-                style: FilledButton.styleFrom(
-                  minimumSize: const Size.fromHeight(56),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: FilledButton(
+                  key: AwayPickerScreen.saveKey,
+                  style: FilledButton.styleFrom(
+                    minimumSize: const Size.fromHeight(56),
+                  ),
+                  onPressed: () => Navigator.of(context).pop(_selected),
+                  child: const Text(AwayCopy.save),
                 ),
-                onPressed: () => Navigator.of(context).pop(_selected),
-                child: const Text(AwayCopy.save),
               ),
               const SizedBox(height: 8),
               // A dismissal is a choice, not a fault, and it says nothing —
               // the same decision `screens.md` records for the Add someone
               // chooser. Present as a control as well as a back gesture,
               // because `guidelines.md` forbids a gesture being the only route.
-              TextButton(
-                key: AwayPickerScreen.cancelKey,
-                style: TextButton.styleFrom(
-                  minimumSize: const Size.fromHeight(48),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: TextButton(
+                  key: AwayPickerScreen.cancelKey,
+                  style: TextButton.styleFrom(
+                    minimumSize: const Size.fromHeight(48),
+                  ),
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text(AwayCopy.cancel),
                 ),
-                onPressed: () => Navigator.of(context).pop(),
-                child: const Text(AwayCopy.cancel),
               ),
             ],
           ),

@@ -178,6 +178,24 @@ describe('away — attribution (ADR-0003)', () => {
     await assertFails(setDoc(awayRef(dbAs(ANA)), awayDoc({ setByName: 7 })));
   });
 
+  it('denies a WHITESPACE-ONLY setByName', async () => {
+    // `size() >= 1` alone admitted "   ", which trims to nothing on the client
+    // and renders as the unattributed string on every surface. That is ADR-0003
+    // rule 2's whole point defeated by three spaces: no client may silently
+    // turn off §17's control by writing a name that names nobody. Omitting the
+    // field was already denied; this is the same thing wearing a character.
+    await assertFails(setDoc(awayRef(dbAs(ANA)), awayDoc({ setByName: '   ' })));
+    await assertFails(
+      setDoc(awayRef(dbAs(ANA)), awayDoc({ setByName: '\t\n ' })),
+    );
+  });
+
+  it('ALLOWS a name with surrounding whitespace, trimmed to something real', async () => {
+    // The denial above must not become a denial of ordinary names — the bound
+    // is on what is left after trimming, not on the raw string.
+    await assertSucceeds(setDoc(awayRef(dbAs(ANA)), awayDoc({ setByName: '  Ana  ' })));
+  });
+
   it('denies a backdated setAt or updatedAt', async () => {
     const old = Timestamp.fromDate(new Date('2020-01-01T00:00:00Z'));
     await assertFails(setDoc(awayRef(dbAs(ANA)), awayDoc({ setAt: old })));
@@ -238,11 +256,89 @@ describe('away — update, and the truncation that cancels one', () => {
     );
   });
 
-  it('denies mutating from on update', async () => {
+  it('denies mutating from while the period is IN PROGRESS', async () => {
+    // ADR-0001 decision 6, and the reason is scoped: truncating an in-progress
+    // period rewrites a document whose `from` is already past, so `from` must
+    // not move underneath it. `inProgress` runs to +10, so it is in force.
     await assertFails(
       setDoc(awayRef(dbAs(ANA)), {
         ...inProgress,
         from: dayKey(0),
+        setAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      }),
+    );
+  });
+
+  it('ALLOWS a new from once the stored period has ENDED — away is settable ' +
+      'more than once in a lifetime', async () => {
+    // The defect this pair exists for. Nothing deletes the document when a
+    // period runs its course, so a flat `from == resource.data.from` meant away
+    // could be set ONCE per person and then never again — every later attempt
+    // refused, on both sides, for ever, while §12 says "to go longer, set it
+    // again". `from` is frozen for the life of a PERIOD, not of a person.
+    await seedDoc(testEnv, ['users', MUM, 'shared', 'away'], {
+      from: dayKey(-20),
+      through: dayKey(-10),
+      setBy: ANA,
+      setByName: 'Ana',
+      setAt: Timestamp.now(),
+      updatedAt: Timestamp.now(),
+    });
+
+    await assertSucceeds(
+      setDoc(awayRef(dbAs(ANA)), {
+        from: dayKey(0),
+        through: dayKey(5),
+        setBy: ANA,
+        setByName: 'Ana',
+        setAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      }),
+    );
+  });
+
+  it('a new period after an ended one is still not RETROACTIVE', async () => {
+    // The freeze is what used to stop a `from` in the past; lifting it for an
+    // ended period must not lift §12's no-retroactive rule with it, or the days
+    // between the two periods could be silently un-covered.
+    await seedDoc(testEnv, ['users', MUM, 'shared', 'away'], {
+      from: dayKey(-20),
+      through: dayKey(-10),
+      setBy: ANA,
+      setByName: 'Ana',
+      setAt: Timestamp.now(),
+      updatedAt: Timestamp.now(),
+    });
+
+    await assertFails(
+      setDoc(awayRef(dbAs(ANA)), {
+        from: dayKey(-5),
+        through: dayKey(5),
+        setBy: ANA,
+        setByName: 'Ana',
+        setAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      }),
+    );
+  });
+
+  it('a new period after an ended one is still capped', async () => {
+    await seedDoc(testEnv, ['users', MUM, 'shared', 'away'], {
+      from: dayKey(-20),
+      through: dayKey(-10),
+      setBy: ANA,
+      setByName: 'Ana',
+      setAt: Timestamp.now(),
+      updatedAt: Timestamp.now(),
+    });
+
+    await assertFails(
+      setDoc(awayRef(dbAs(ANA)), {
+        from: dayKey(0),
+        through: dayKey(90),
+        setBy: ANA,
+        setByName: 'Ana',
         setAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       }),

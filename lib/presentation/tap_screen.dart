@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:timezone/timezone.dart' as tz;
 
@@ -152,14 +153,14 @@ class _TapScreenState extends ConsumerState<TapScreen>
       body: SafeArea(
         child: switch (state) {
           AsyncData(:final value) => TapBody(
-              state: value,
-              watcherListReachable: widget.watcherListReachable,
-            ),
+            state: value,
+            watcherListReachable: widget.watcherListReachable,
+          ),
           AsyncError(:final error) => _Failure(error: error),
           _ => Semantics(
-              label: TapCopy.loadingLabel,
-              child: const Center(child: CircularProgressIndicator()),
-            ),
+            label: TapCopy.loadingLabel,
+            child: const Center(child: CircularProgressIndicator()),
+          ),
         },
       ),
     );
@@ -230,13 +231,21 @@ class TapBody extends ConsumerWidget {
                       ),
                     ),
                   ),
-                  const Positioned(top: 0, right: 0, child: DebugHarnessButton()),
+                  const Positioned(
+                    top: 0,
+                    right: 0,
+                    child: DebugHarnessButton(),
+                  ),
                   // **Top-LEFT, opposite the debug button**, and inside the
                   // target area's Stack rather than the band below, which is
                   // what "a top action button" means and what keeps it far
                   // from both the tap target and the Away control.
                   if (watcherListReachable)
-                    const Positioned(top: 0, left: 0, child: WatcherListButton()),
+                    const Positioned(
+                      top: 0,
+                      left: 0,
+                      child: WatcherListButton(),
+                    ),
                 ],
               ),
             ),
@@ -307,7 +316,16 @@ String awayLineFor(WatchedState state) {
   // Non-null by construction at the one call site, which renders this only
   // under `state.isAway`. Stated rather than assumed so the function is total.
   if (away == null) return '';
-  final lastDay = AwayCopy.dayAndDate(away.period.through);
+  // **The HONOURED `through`, not the stored one.** `state.isAway` decides
+  // through `covers`, which clamps to the sanity bound — so rendering the raw
+  // value would tell her *"You're away until Saturday 22 August 2036"* for a
+  // document the app stops honouring on day 61, and on day 61 her family starts
+  // being warned while this line still names the old date.
+  // `WarningPolicy.warningBody` already renders `honoured` for exactly this
+  // reason, and says so.
+  final lastDay = AwayCopy.dayAndDate(
+    away.period.clampedToSanityBound().through,
+  );
   final setByName = state.awaySetByName;
   return setByName == null
       ? TapCopy.away(lastDay)
@@ -332,83 +350,97 @@ class _BottomBand extends StatelessWidget {
     // Scrollable inside its own band. At the largest font scale the content can
     // exceed the reserved height; scrolling is how that stays reachable without
     // ever encroaching on the target.
-    return SingleChildScrollView(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(24, 0, 24, 16),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // In the reserved band, not floating over the target area.
-            // Positioned at the top of the Stack it grew *downward into the
-            // circle* at the largest font scale — unreadable, and absorbing her
-            // taps, because a paragraph hit-tests true. Here it is directly
-            // beneath the target, so it is still the first thing under her
-            // eyes, and the band is scrollable so it can never encroach.
-            if (!state.notificationsEnabled)
-              const Padding(
-                padding: EdgeInsets.only(bottom: 12),
-                child: _NotificationsOffBanner(),
-              ),
-            if (state.tapFailed)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: Text(
-                  TapCopy.tapFailed,
-                  textAlign: TextAlign.center,
-                  style: theme.textTheme.titleMedium
-                      ?.copyWith(color: theme.colorScheme.error),
+    //
+    // **The thumb is always visible, and that is a Phase 6 requirement rather
+    // than decoration.** The band is 36% of the screen, and the away state adds
+    // the tallest element on it — two sentences at `headlineSmall`. At the
+    // largest system font scale that pushes *I'm away* / *I'm not away* below
+    // the fold, and it is the one control a person needs in order to act on
+    // reading that somebody else marked them away. A hidden scroll is a
+    // discovery problem for exactly the reader this app is built for; a visible
+    // thumb is the signal that there is more, and `guidelines.md` forbids a
+    // gesture being the only route to an action.
+    return Scrollbar(
+      thumbVisibility: true,
+      child: SingleChildScrollView(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(24, 0, 24, 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // In the reserved band, not floating over the target area.
+              // Positioned at the top of the Stack it grew *downward into the
+              // circle* at the largest font scale — unreadable, and absorbing her
+              // taps, because a paragraph hit-tests true. Here it is directly
+              // beneath the target, so it is still the first thing under her
+              // eyes, and the band is scrollable so it can never encroach.
+              if (!state.notificationsEnabled)
+                const Padding(
+                  padding: EdgeInsets.only(bottom: 12),
+                  child: _NotificationsOffBanner(),
                 ),
-              ),
-            // **Above the tap confirmation, and that is the ordering.** It is
-            // the frame for everything else on the screen: it says why nothing
-            // is reminding her today, and the audience line below still says
-            // who would be told if she taps anyway — which §12 allows and
-            // calls harmless and reassuring.
-            if (state.isAway)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 12),
-                child: Text(
-                  _awayLine(state),
-                  key: awayLineKey,
+              if (state.tapFailed)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Text(
+                    TapCopy.tapFailed,
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      color: theme.colorScheme.error,
+                    ),
+                  ),
+                ),
+              // **Above the tap confirmation, and that is the ordering.** It is
+              // the frame for everything else on the screen: it says why nothing
+              // is reminding her today, and the audience line below still says
+              // who would be told if she taps anyway — which §12 allows and
+              // calls harmless and reassuring.
+              if (state.isAway)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: Text(
+                    _awayLine(state),
+                    key: awayLineKey,
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.headlineSmall,
+                  ),
+                ),
+              if (tappedAt != null)
+                Text(
+                  TapCopy.alreadyTapped(tappedAt!),
                   textAlign: TextAlign.center,
                   style: theme.textTheme.headlineSmall,
                 ),
-              ),
-            if (tappedAt != null)
-              Text(
-                TapCopy.alreadyTapped(tappedAt!),
-                textAlign: TextAlign.center,
-                style: theme.textTheme.headlineSmall,
-              ),
-            const SizedBox(height: 12),
-            _AudienceLine(state: state),
+              const SizedBox(height: 12),
+              _AudienceLine(state: state),
 
-            // **The way back into pairing.** Without it, someone who skipped
-            // onboarding's first question lands here reading "No one is set up
-            // to know you're OK" with nothing to press, and a second watcher
-            // could never be added at all. It is also what makes that line
-            // honest: it used to end "Ask a family member to help you add
-            // someone", which is the dead-end wording and is only honest while
-            // there is nothing left to press.
-            const SizedBox(height: 12),
-            const AddSomeoneButton(),
+              // **The way back into pairing.** Without it, someone who skipped
+              // onboarding's first question lands here reading "No one is set up
+              // to know you're OK" with nothing to press, and a second watcher
+              // could never be added at all. It is also what makes that line
+              // honest: it used to end "Ask a family member to help you add
+              // someone", which is the dead-end wording and is only honest while
+              // there is nothing left to press.
+              const SizedBox(height: 12),
+              const AddSomeoneButton(),
 
-            // Away is present, secondary, and **not adjacent** to the tap
-            // target — a full text block sits between them, so a mis-tap on the
-            // primary action cannot mark someone away.
-            //
-            // **The rule below it is the Phase 6 requirement**, not decoration.
-            // This screen now has two secondary controls of equal weight, and
-            // `guidelines.md`'s mis-tap reasoning is about distance from the
-            // *tap target*, which says nothing about a nearer neighbour of the
-            // same weight. `screens.md`: give Away visible separation in the
-            // same change that enables it, because shipping the look-alike pair
-            // and fixing it later cannot be undone for whoever already used it.
-            const SizedBox(height: 20),
-            const Divider(indent: 32, endIndent: 32, height: 1),
-            const SizedBox(height: 20),
-            _AwayAction(state: state),
-          ],
+              // Away is present, secondary, and **not adjacent** to the tap
+              // target — a full text block sits between them, so a mis-tap on the
+              // primary action cannot mark someone away.
+              //
+              // **The rule below it is the Phase 6 requirement**, not decoration.
+              // This screen now has two secondary controls of equal weight, and
+              // `guidelines.md`'s mis-tap reasoning is about distance from the
+              // *tap target*, which says nothing about a nearer neighbour of the
+              // same weight. `screens.md`: give Away visible separation in the
+              // same change that enables it, because shipping the look-alike pair
+              // and fixing it later cannot be undone for whoever already used it.
+              const SizedBox(height: 20),
+              const Divider(indent: 32, endIndent: 32, height: 1),
+              const SizedBox(height: 20),
+              _AwayAction(state: state),
+            ],
+          ),
         ),
       ),
     );
@@ -572,49 +604,50 @@ class AddSomeoneButton extends ConsumerWidget {
   /// for. `guidelines.md`'s floor is the largest system font scale with no
   /// clipping, and every other surface here obeys it deliberately.
   @visibleForTesting
-  static Future<bool?> chooseRole(BuildContext context) =>
-      showModalBottomSheet<bool>(
-        context: context,
-        // Lets the sheet grow past 9/16 before the scroll view has to engage.
-        isScrollControlled: true,
-        builder: (sheetContext) => SafeArea(
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const SizedBox(height: 8),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(24, 16, 24, 8),
-                  child: Text(
-                    OnboardingCopy.addSomeone,
-                    style: Theme.of(sheetContext).textTheme.headlineSmall,
-                  ),
-                ),
-                // The order is onboarding's order: the watched question first,
-                // because this control lives on the watched person's screen.
-                ListTile(
-                  key: watchedChoiceKey,
-                  // 48dp floor, as everywhere else on this screen. A ListTile's
-                  // default height already clears it; the constraint is stated so
-                  // a later density change cannot quietly drop below it.
-                  minTileHeight: 56,
-                  leading: const Icon(Icons.person_add_alt),
-                  title: Text(OnboardingCopy.addSomeoneToWatchMe),
-                  onTap: () => Navigator.of(sheetContext).pop(true),
-                ),
-                ListTile(
-                  key: watcherChoiceKey,
-                  minTileHeight: 56,
-                  leading: const Icon(Icons.people_outline),
-                  title: Text(OnboardingCopy.addSomeoneIWatch),
-                  onTap: () => Navigator.of(sheetContext).pop(false),
-                ),
-                const SizedBox(height: 16),
-              ],
+  static Future<bool?> chooseRole(
+    BuildContext context,
+  ) => showModalBottomSheet<bool>(
+    context: context,
+    // Lets the sheet grow past 9/16 before the scroll view has to engage.
+    isScrollControlled: true,
+    builder: (sheetContext) => SafeArea(
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 8),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(24, 16, 24, 8),
+              child: Text(
+                OnboardingCopy.addSomeone,
+                style: Theme.of(sheetContext).textTheme.headlineSmall,
+              ),
             ),
-          ),
+            // The order is onboarding's order: the watched question first,
+            // because this control lives on the watched person's screen.
+            ListTile(
+              key: watchedChoiceKey,
+              // 48dp floor, as everywhere else on this screen. A ListTile's
+              // default height already clears it; the constraint is stated so
+              // a later density change cannot quietly drop below it.
+              minTileHeight: 56,
+              leading: const Icon(Icons.person_add_alt),
+              title: Text(OnboardingCopy.addSomeoneToWatchMe),
+              onTap: () => Navigator.of(sheetContext).pop(true),
+            ),
+            ListTile(
+              key: watcherChoiceKey,
+              minTileHeight: 56,
+              leading: const Icon(Icons.people_outline),
+              title: Text(OnboardingCopy.addSomeoneIWatch),
+              onTap: () => Navigator.of(sheetContext).pop(false),
+            ),
+            const SizedBox(height: 16),
+          ],
         ),
-      );
+      ),
+    ),
+  );
 
   /// The answer, as the screen it opens.
   ///
@@ -630,93 +663,91 @@ class AddSomeoneButton extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) => TextButton.icon(
-        key: buttonKey,
-        onPressed: () async {
-          // **Both roles, from the one control.** This used to open
-          // `ShareCodeScreen` and nothing else, while the only route to
-          // `EnterCodeScreen` was the watcher list — which is reachable from
-          // here only by somebody who is *already* a watcher. Anybody who
-          // skipped onboarding's second question was therefore shut out of that
-          // role for good, with nothing on any screen to press.
-          final wantsToBeWatched = await chooseRole(context);
-          if (wantsToBeWatched == null) return;
-          if (!context.mounted) return;
+    key: buttonKey,
+    onPressed: () async {
+      // **Both roles, from the one control.** This used to open
+      // `ShareCodeScreen` and nothing else, while the only route to
+      // `EnterCodeScreen` was the watcher list — which is reachable from
+      // here only by somebody who is *already* a watcher. Anybody who
+      // skipped onboarding's second question was therefore shut out of that
+      // role for good, with nothing on any screen to press.
+      final wantsToBeWatched = await chooseRole(context);
+      if (wantsToBeWatched == null) return;
+      if (!context.mounted) return;
 
-          await Navigator.of(context).push<bool>(
-            MaterialPageRoute(
-              builder: (_) => pairingScreenFor(wantsToBeWatched),
-            ),
-          );
-          if (!context.mounted) return;
-
-          // **Reconcile on the way back, whatever the screen returned.** The
-          // audience line is rendered from `WatchedState`, and a pairing that
-          // completed while that screen was up has changed it. §3's rule is that
-          // nothing patches state incrementally, so this re-reads rather than
-          // adding the new name to a list.
-          //
-          // `userInitiated` is left at its default true: she pressed the button
-          // that opened this, so a refresh is the answer she asked for.
-          await ref.read(watchedStateProvider.notifier).refresh();
-          if (!context.mounted) return;
-
-          // **The watcher branch needs its own repair, and this used to say it
-          // did not.** The comment here read *"the watcher side is reconciled by
-          // the list it can now reach"*. Both halves were false, and together
-          // they are the failure `main.dart` has warned about for three phases —
-          // a watcher whose warning alarm was never armed.
-          //
-          // The list is **not** reachable. `TapScreen.watcherListReachable`
-          // comes from `HomeRoute.decide` through `homeRouteProvider`, which
-          // watches `linkRolesProvider` — and nothing on this path invalidates
-          // it. `EnterCodeScreen` calls `recordPairing`, which goes to `_persist`
-          // and deliberately does **not** tell the router (correct for its
-          // original mid-flow purpose; wrong for a re-entry from a main screen).
-          // So the provider keeps its cached `watcher: false`, the button never
-          // renders, and the user is a watcher with no control anywhere that
-          // reaches the list until the process is cold-started.
-          //
-          // And nothing armed the alarm. `refresh()` above reconciles the
-          // **watched** side; the link just created is a **watcher** link, whose
-          // warning alarm is armed by `WatcherReconcileService`. Pair today, the
-          // watched person does not tap, this app is not reopened — and
-          // tomorrow's warning was never scheduled. FCM does not save it either:
-          // `onCheckInCreated` fires when the watched person *taps*, which is
-          // exactly the case with nothing to warn about.
-          //
-          // Same repair as `OnboardingController._armWatcherSideIfNobodyElseWill`,
-          // whose docstring says why *"most people reopen before tomorrow
-          // morning"* is not the standard a dead man's switch is held to.
-          if (!wantsToBeWatched) {
-            // Makes the list reachable: the route is recomputed from the links,
-            // which now include one where this user is the watcher. Safe **at
-            // this call site specifically** — no onboarding flow is running, so
-            // this cannot re-open the summary-screen defect `_persist` avoids.
-            ref.invalidate(linkRolesProvider);
-
-            final services = ref.read(appServicesProvider);
-            try {
-              // `watcherListShowing: false` — the Tap screen is showing, not the
-              // list. Passing true here would be the lost-warning shape measured
-              // on the POCO F3: `redundant` consumes the day without posting,
-              // with nobody reading the row it deferred to.
-              await services
-                  .watcherReconcile(watcherListShowing: false)
-                  .reconcile(selfUid: services.selfUid);
-            } on Object {
-              // Swallowed like its twin: this is a repair behind a screen the
-              // user is already on, and it must never replace it with an error
-              // about work they did not ask for. The next resume runs it again.
-            }
-          }
-        },
-        icon: const Icon(Icons.person_add_alt),
-        label: const Text(OnboardingCopy.addSomeone),
-        style: ButtonStyle(
-          // `guidelines.md`: 48dp floor for secondary controls, no exceptions.
-          minimumSize: WidgetStateProperty.all(const Size(0, 48)),
-        ),
+      await Navigator.of(context).push<bool>(
+        MaterialPageRoute(builder: (_) => pairingScreenFor(wantsToBeWatched)),
       );
+      if (!context.mounted) return;
+
+      // **Reconcile on the way back, whatever the screen returned.** The
+      // audience line is rendered from `WatchedState`, and a pairing that
+      // completed while that screen was up has changed it. §3's rule is that
+      // nothing patches state incrementally, so this re-reads rather than
+      // adding the new name to a list.
+      //
+      // `userInitiated` is left at its default true: she pressed the button
+      // that opened this, so a refresh is the answer she asked for.
+      await ref.read(watchedStateProvider.notifier).refresh();
+      if (!context.mounted) return;
+
+      // **The watcher branch needs its own repair, and this used to say it
+      // did not.** The comment here read *"the watcher side is reconciled by
+      // the list it can now reach"*. Both halves were false, and together
+      // they are the failure `main.dart` has warned about for three phases —
+      // a watcher whose warning alarm was never armed.
+      //
+      // The list is **not** reachable. `TapScreen.watcherListReachable`
+      // comes from `HomeRoute.decide` through `homeRouteProvider`, which
+      // watches `linkRolesProvider` — and nothing on this path invalidates
+      // it. `EnterCodeScreen` calls `recordPairing`, which goes to `_persist`
+      // and deliberately does **not** tell the router (correct for its
+      // original mid-flow purpose; wrong for a re-entry from a main screen).
+      // So the provider keeps its cached `watcher: false`, the button never
+      // renders, and the user is a watcher with no control anywhere that
+      // reaches the list until the process is cold-started.
+      //
+      // And nothing armed the alarm. `refresh()` above reconciles the
+      // **watched** side; the link just created is a **watcher** link, whose
+      // warning alarm is armed by `WatcherReconcileService`. Pair today, the
+      // watched person does not tap, this app is not reopened — and
+      // tomorrow's warning was never scheduled. FCM does not save it either:
+      // `onCheckInCreated` fires when the watched person *taps*, which is
+      // exactly the case with nothing to warn about.
+      //
+      // Same repair as `OnboardingController._armWatcherSideIfNobodyElseWill`,
+      // whose docstring says why *"most people reopen before tomorrow
+      // morning"* is not the standard a dead man's switch is held to.
+      if (!wantsToBeWatched) {
+        // Makes the list reachable: the route is recomputed from the links,
+        // which now include one where this user is the watcher. Safe **at
+        // this call site specifically** — no onboarding flow is running, so
+        // this cannot re-open the summary-screen defect `_persist` avoids.
+        ref.invalidate(linkRolesProvider);
+
+        final services = ref.read(appServicesProvider);
+        try {
+          // `watcherListShowing: false` — the Tap screen is showing, not the
+          // list. Passing true here would be the lost-warning shape measured
+          // on the POCO F3: `redundant` consumes the day without posting,
+          // with nobody reading the row it deferred to.
+          await services
+              .watcherReconcile(watcherListShowing: false)
+              .reconcile(selfUid: services.selfUid);
+        } on Object {
+          // Swallowed like its twin: this is a repair behind a screen the
+          // user is already on, and it must never replace it with an error
+          // about work they did not ask for. The next resume runs it again.
+        }
+      }
+    },
+    icon: const Icon(Icons.person_add_alt),
+    label: const Text(OnboardingCopy.addSomeone),
+    style: ButtonStyle(
+      // `guidelines.md`: 48dp floor for secondary controls, no exceptions.
+      minimumSize: WidgetStateProperty.all(const Size(0, 48)),
+    ),
+  );
 }
 
 /// The **top action button** to the watcher list, for somebody who is both.
@@ -731,20 +762,19 @@ class WatcherListButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => IconButton(
-        key: buttonKey,
-        onPressed: () => Navigator.of(context).push(
-          MaterialPageRoute<void>(builder: (_) => const WatcherScreen()),
-        ),
-        icon: const Icon(Icons.people_outline),
-        // Labelled, because an unlabelled icon button is a control a
-        // screen-reader user cannot identify at all — and this one is the whole
-        // of their route to the other half of the app.
-        //
-        // `WatcherCopy.openLabel`, not `WatcherCopy.title`: the title is
-        // approved as a **heading**, and read out as a control's name it
-        // announces a place rather than an action. See that field.
-        tooltip: WatcherCopy.openLabel,
-      );
+    key: buttonKey,
+    onPressed: () => Navigator.of(context)
+        .push(MaterialPageRoute<void>(builder: (_) => const WatcherScreen())),
+    icon: const Icon(Icons.people_outline),
+    // Labelled, because an unlabelled icon button is a control a
+    // screen-reader user cannot identify at all — and this one is the whole
+    // of their route to the other half of the app.
+    //
+    // `WatcherCopy.openLabel`, not `WatcherCopy.title`: the title is
+    // approved as a **heading**, and read out as a control's name it
+    // announces a place rather than an action. See that field.
+    tooltip: WatcherCopy.openLabel,
+  );
 }
 
 class _AudienceLine extends StatelessWidget {
@@ -799,8 +829,9 @@ class _NotificationsOffBanner extends ConsumerWidget {
           Text(
             TapCopy.notificationsOff,
             textAlign: TextAlign.center,
-            style: theme.textTheme.titleMedium
-                ?.copyWith(color: theme.colorScheme.onErrorContainer),
+            style: theme.textTheme.titleMedium?.copyWith(
+              color: theme.colorScheme.onErrorContainer,
+            ),
           ),
           TextButton(
             onPressed: () =>
@@ -829,7 +860,7 @@ class _NotificationsOffBanner extends ConsumerWidget {
   }
 }
 
-/// Present, secondary, and inert until Phase 6.
+/// Present, secondary, and live since Phase 6.
 /// The Away control, and what it says when a write does not simply land.
 ///
 /// ## Visible separation, in the same change that enables it
@@ -889,16 +920,34 @@ class _AwayActionState extends ConsumerState<_AwayAction> {
       _busy = true;
       _message = null;
     });
-    final outcome = await action();
+    // **Guarded, or one throw disables this control for the rest of the
+    // session** — `_busy` would stay true with nothing said, on the control an
+    // 80-year-old needs in order to act on reading that somebody marked her
+    // away. `serverFault` is the honest mapping: the app cannot act on what
+    // came back, and it claims nothing about either side.
+    AwayOutcome outcome;
+    try {
+      outcome = await action();
+    } on Object {
+      outcome = const AwayOutcome.refused(AwayRefusal.serverFault);
+    }
     if (!mounted) return;
+    final message = AwayCopy.awayMessageFor(outcome);
     setState(() {
       _busy = false;
-      _message = switch (outcome) {
-        AwaySet() => AwayCopy.saved,
-        AwayQueued() => AwayCopy.queued,
-        AwayRefused(:final refusal) => AwayCopy.refusal(refusal),
-      };
+      _message = message;
     });
+    // **Spoken, because nothing re-reads a changed widget.** `screens.md`
+    // records this rule for the pairing screens in as many words: a blind
+    // reader presses the button and otherwise hears nothing at all, and the
+    // obvious response is to press again.
+    if (message != null) {
+      SemanticsService.sendAnnouncement(
+        View.of(context),
+        message,
+        Directionality.of(context),
+      );
+    }
   }
 
   Future<void> _setAway() async {
@@ -930,8 +979,8 @@ class _AwayActionState extends ConsumerState<_AwayAction> {
           onPressed: _busy
               ? null
               : () => away
-                  ? _run(ref.read(watchedStateProvider.notifier).endAway)
-                  : _setAway(),
+                    ? _run(ref.read(watchedStateProvider.notifier).endAway)
+                    : _setAway(),
           style: TextButton.styleFrom(
             minimumSize: const Size(88, 48),
             padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
@@ -970,33 +1019,32 @@ class _Failure extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) => Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              // Says what happened and what to do — never a code, never
-              // "something went wrong". Reserved for the INITIAL load: a failed
-              // tap keeps the screen and shows one line, because replacing the
-              // whole screen at the moment she taps is the worst possible time
-              // to take her one action away.
-              Text(
-                TapCopy.couldNotStart,
-                textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.titleLarge,
-              ),
-              const SizedBox(height: 24),
-              FilledButton(
-                onPressed: () =>
-                    ref.read(watchedStateProvider.notifier).refresh(),
-                style: FilledButton.styleFrom(minimumSize: const Size(88, 56)),
-                child: const Text(TapCopy.retry),
-              ),
-              const SizedBox(height: 24),
-              if (kDebugMode)
-                Text('$error', style: Theme.of(context).textTheme.bodySmall),
-            ],
+    child: Padding(
+      padding: const EdgeInsets.all(24),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          // Says what happened and what to do — never a code, never
+          // "something went wrong". Reserved for the INITIAL load: a failed
+          // tap keeps the screen and shows one line, because replacing the
+          // whole screen at the moment she taps is the worst possible time
+          // to take her one action away.
+          Text(
+            TapCopy.couldNotStart,
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.titleLarge,
           ),
-        ),
-      );
+          const SizedBox(height: 24),
+          FilledButton(
+            onPressed: () => ref.read(watchedStateProvider.notifier).refresh(),
+            style: FilledButton.styleFrom(minimumSize: const Size(88, 56)),
+            child: const Text(TapCopy.retry),
+          ),
+          const SizedBox(height: 24),
+          if (kDebugMode)
+            Text('$error', style: Theme.of(context).textTheme.bodySmall),
+        ],
+      ),
+    ),
+  );
 }

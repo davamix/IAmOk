@@ -1,6 +1,7 @@
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 
+import '../data/away_repository.dart';
 import '../data/debug_backend_override.dart';
 import '../data/firebase_bootstrap.dart';
 import '../data/firestore_check_in_reader.dart';
@@ -199,6 +200,22 @@ Future<void> _reconcileWatchedSide(
     // never touches it, and passing a repository this side would never call
     // would be an invitation for a later change to call it. A check-in written
     // by a background isolate is a check-in nobody made.
+    //
+    // **`away` IS passed, and its absence was the defect this comment's
+    // neighbour hid.** `onAwayChanged` fans out to the watched person's own
+    // device precisely so her REMINDERS change, and without the repository
+    // `_refreshedAway` skips the read and reconciles against the very cache the
+    // nudge came to replace — so the Function nudged correctly and the handler
+    // it woke could not act. A watcher marks her away from another phone, hers
+    // stays in her pocket, and she is reminded at 12:00, 18:00 and 21:00
+    // through the holiday. The cancellation direction is worse and is the
+    // silent one: away cancelled remotely, her phone stays suppressed, and
+    // nothing on it says why.
+    //
+    // Null when nobody is signed in, mirroring `AppServices` — there is no
+    // `users/{uid}/shared/away` to read, and the cached period is still
+    // honoured because expiry is arithmetic (§12).
+    away: selfUid == LocalStore.signedOutUid ? null : AwayRepository(),
     selfUid: selfUid,
     lockOwner: 'fcm',
   );

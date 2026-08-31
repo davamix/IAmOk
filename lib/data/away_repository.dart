@@ -72,12 +72,34 @@ class AwayRepository {
   ///   that was cancelled.
   /// - It **never throws**. This runs on a path a bare isolate reaches, where a
   ///   throw is silence.
+  /// ## It is BOUNDED, and that is not optional
+  ///
+  /// This is awaited inside `reconcile()`, which `tap()` awaits — so before it
+  /// was bounded, an elderly person's one daily action waited on a
+  /// `Source.server` read with no deadline. `WatchedReconcileService.tap`
+  /// argues the same point about the check-in write five lines from where it
+  /// calls this: *"awaiting that on a phone with no signal would hang the tap
+  /// — the one action this app asks of an elderly person, on the screen whose
+  /// entire job is to work every morning."* A phone with bars and no route —
+  /// a captive portal, a dead backhaul — leaves the SDK sitting on the gRPC
+  /// stream rather than failing fast.
+  ///
+  /// The timeout is free of correctness cost because it reports
+  /// **unreachable**, which retains the cache. That is the direction
+  /// `_refreshedAway` argues for on this side anyway: keeping a period the
+  /// server might have dropped costs a family a warning, while dropping one
+  /// the server still holds nags an elderly person through a holiday.
   Future<AwayRead> read(String watchedUid) async {
     try {
-      final snapshot =
-          await _doc(watchedUid).get(const GetOptions(source: Source.server));
-      if (snapshot.metadata.isFromCache) return const AwayRead.unreachable();
-      return AwayRead.succeeded(decode(snapshot.data()));
+      final snapshot = await _doc(watchedUid)
+          .get(const GetOptions(source: Source.server))
+          .timeout(confirmWithin);
+      return readFrom(
+        isFromCache: snapshot.metadata.isFromCache,
+        data: snapshot.data(),
+      );
+    } on TimeoutException {
+      return const AwayRead.unreachable(UnreachableCause.timeout);
     } on FirebaseException catch (e) {
       return classifyRead(e);
     } on Object {
@@ -113,13 +135,30 @@ class AwayRepository {
       return const AwayOutcome.refused(AwayRefusal.notSignedIn);
     }
 
+    // **An away period that has ENDED is not an existing period.**
+    //
+    // Nothing deletes the document when a period runs its course — deliberately,
+    // because the days already spent away must stay covered (ADR-0001 applied to
+    // the cache). So the stored record outlives the holiday, and treating it as
+    // `existing` freezes `from` at a date now weeks in the past, which
+    // `validateUpdate` then refuses for ever: away worked **once per person and
+    // then went permanently dead**, on both sides, with copy blaming the
+    // reader's choice of day.
+    //
+    // ADR-0001 decision 6 froze `from` for the life of a **period**, not for the
+    // life of a person — its reason is that truncating an in-progress period
+    // rewrites a document whose `from` is already past, and an ended period is
+    // not in progress. `firestore.rules` carries the same distinction now.
+    final inForce =
+        existing != null && !existing.hasExpiredOn(today) ? existing : null;
+
     // The client's own check, run **before** anything is sent. It is not the
     // control — the rules are — but it is what stops an ordinary mistake
     // becoming a `permission-denied`, which ADR-0004 maps to *refused* and which
     // this app's own copy layer treats as a claim about lost access.
-    final rejection = existing == null
+    final rejection = inForce == null
         ? AwayRules.validateCreate(period, today)
-        : AwayRules.validateUpdate(period, existing, today);
+        : AwayRules.validateUpdate(period, inForce, today);
     if (rejection != null) {
       return const AwayOutcome.refused(AwayRefusal.rejectedPeriod);
     }
@@ -138,10 +177,30 @@ class AwayRepository {
       'from': period.from.toString(),
       'through': period.through.toString(),
       'setBy': setBy,
-      'setByName': setByName,
+      // **Bounded here, not only on read.** `AwayRules.nameMinLength` /
+      // `nameMaxLength` mirror the rules clause, and a client that writes
+      // outside it gets `permission-denied` — which ADR-0004 maps to *refused*
+      // and which this app's copy renders as a claim about lost access. A
+      // display name is user-controlled: `''` and a 200-character rename are
+      // both reachable, and neither is a fault the reader can act on.
+      'setByName': boundedName(setByName),
       'setAt': FieldValue.serverTimestamp(),
       'updatedAt': FieldValue.serverTimestamp(),
     }));
+  }
+
+  /// Trims a display name into what the rules will accept.
+  ///
+  /// Returns [fallback] when nothing usable is left, because `setByName` is
+  /// **required** by the rules — omitting it is a denied write, not a quieter
+  /// one. The fallback is a caller's decision rather than a literal here: see
+  /// `AwayCopy.unnamedWriter`.
+  @visibleForTesting
+  static String boundedName(String raw, {String fallback = 'Someone'}) {
+    final trimmed = raw.trim();
+    if (trimmed.length < AwayRules.nameMinLength) return fallback;
+    if (trimmed.length <= AwayRules.nameMaxLength) return trimmed;
+    return trimmed.substring(0, AwayRules.nameMaxLength);
   }
 
   /// Removes the document — the **only** case §12 allows a delete.
@@ -157,8 +216,17 @@ class AwayRepository {
   /// So this method takes no period and validates nothing: the arithmetic that
   /// decides between truncate and delete is [AwayPeriod.cancelOn]'s, and having
   /// a second opinion about it here is how the two would come to disagree.
-  Future<AwayOutcome> cancel({required String watchedUid}) =>
-      send(_doc(watchedUid).delete());
+  Future<AwayOutcome> cancel({required String watchedUid}) {
+    // **Guarded before the path is built**, not inside [send]. `_doc('')`
+    // resolves to `users//shared/away`, which Firestore rejects as an invalid
+    // path by **throwing at construction** — outside `send`'s try, so it would
+    // escape into the caller and leave the away control disabled for the rest
+    // of the session with nothing said.
+    if (watchedUid.isEmpty) {
+      return Future.value(const AwayOutcome.refused(AwayRefusal.notSignedIn));
+    }
+    return send(_doc(watchedUid).delete());
+  }
 
   /// Awaits [write] only as long as [confirmWithin], then calls it queued.
   ///
@@ -184,6 +252,29 @@ class AwayRepository {
       return const AwayOutcome.refused(AwayRefusal.serverFault);
     }
   }
+
+  /// Classifies a snapshot: **a cache hit is never a success.**
+  ///
+  /// `@visibleForTesting` and separate from [read] because this one line is the
+  /// whole of ADR-0001's founding defect, in the silent direction, and it was
+  /// reachable from no test. Firestore's offline persistence is on by default
+  /// and `get()` does not throw when offline — it serves the local cache — so a
+  /// cache hit reported as success would let a period Firestore no longer holds
+  /// go on suppressing this person's reminders indefinitely: she is not
+  /// reminded, she does not tap, and her family is warned about a holiday that
+  /// was cancelled.
+  ///
+  /// Two guards for one hazard, deliberately. `Source.server` states the intent
+  /// to the SDK; this is what actually holds if a future SDK decides
+  /// `Source.server` may fall back.
+  @visibleForTesting
+  static AwayRead readFrom({
+    required bool isFromCache,
+    Map<String, dynamic>? data,
+  }) =>
+      isFromCache
+          ? const AwayRead.unreachable()
+          : AwayRead.succeeded(decode(data));
 
   /// Maps a Firestore error code onto a refusal.
   ///

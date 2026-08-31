@@ -101,15 +101,48 @@ class AwayRecord {
 
   /// The name to render, or null when no surface may name anybody.
   ///
-  /// [forUid] is the reader. Their **own** name is suppressed, because every
-  /// string that uses this reads *"X marked you away"* / *"set by X"* — and a
-  /// reader who is told they were marked away by themselves is being told
-  /// something in the wrong grammatical person. The caller renders the
-  /// unattributed string instead.
+  /// [forUid] is the reader. Three cases yield null, and the caller renders the
+  /// already-approved unattributed string for all of them:
+  ///
+  /// 1. **The reader set it themselves.** Every string that uses this reads
+  ///    *"X marked you away"* / *"set by X"*, and a reader told they were
+  ///    marked away by themselves is being addressed in the wrong grammatical
+  ///    person.
+  /// 2. **There is no [setBy].** A name with no uid behind it is a label with
+  ///    nothing to resolve a dispute through — the app has no evidence that
+  ///    *anybody* acted, so it may not say somebody did. It is also the case
+  ///    that can put her **own** name in front of *"marked you away"*, because
+  ///    case 1's guard keys on the uid the document lacks.
+  /// 3. **The name is [unnameable].** See below.
+  ///
+  /// This is the conservative direction throughout: naming nobody is honest,
+  /// and naming somebody the document cannot show acted is not.
   String? nameToShowFor(String? forUid) {
+    if (setBy == null) return null;
     if (forUid != null && wasSetBy(forUid)) return null;
+    if (isUnnameable) return null;
     return setByName;
   }
+
+  /// Whether the stored label is the placeholder written when the writer's
+  /// account had no usable display name.
+  ///
+  /// The rules require `setByName` to be present, so a writer with no name must
+  /// still put *something* there — but *"Someone marked you away until Saturday
+  /// 22"* names a **role**, which `guidelines.md` forbids, and is ADR-0003's
+  /// *"?? marked you away"* wearing a word. Suppressing it here is what keeps
+  /// the approved unattributed line reachable for the one case it describes:
+  /// nobody can be named.
+  ///
+  /// A real person called this would be suppressed too. That is the right way
+  /// to be wrong: they lose an attribution, rather than every nameless writer
+  /// gaining a false one.
+  bool get isUnnameable => setByName == unnameable;
+
+  /// The placeholder. Duplicated from `AwayCopy.unnamedWriter` deliberately —
+  /// the domain may not import the copy layer, and this is the one string the
+  /// two must agree on. `away_record_test.dart` pins them together.
+  static const String unnameable = 'Someone';
 
   /// Trims, and rejects what the rules would reject anyway.
   ///

@@ -179,7 +179,13 @@ service cloud.firestore {
               && isDayKey(data.through)
               && data.setBy is string
               && data.setByName is string
-              && data.setByName.size() >= 1
+              // TRIMMED, because `size() >= 1` alone admits "   " — which
+              // renders as the unattributed string on every surface and so
+              // silently disables ADR-0003 rule 2's whole point: no client may
+              // turn off section 17's control by writing a name that names
+              // nobody. Omitting the field is already denied; three spaces
+              // achieved the same thing.
+              && data.setByName.trim().size() >= 1
               && data.setByName.size() <= 100
               && data.setAt == request.time
               && data.updatedAt == request.time;
@@ -254,12 +260,42 @@ service cloud.firestore {
                       && awayWithinCap(request.resource.data)
                       && awayNotRetroactive(request.resource.data);
 
+        // `from` IS FROZEN FOR THE LIFE OF A PERIOD, NOT OF A PERSON.
+        //
+        // Nothing deletes this document when a period runs its course —
+        // deliberately, because the days already spent away must stay covered
+        // (ADR-0001). So the record outlives the holiday, and a flat
+        // `from == resource.data.from` meant away could be set ONCE per person
+        // and then never again: every later attempt refused, on both sides,
+        // for ever. Section 12 says "to go longer, set it again", and the
+        // guidelines say a determined person "can set it twice"; neither was
+        // reachable.
+        //
+        // ADR-0001 decision 6's reason is that truncating an IN-PROGRESS period
+        // rewrites a document whose `from` is already past. An ended period is
+        // not in progress, so the reason does not reach it.
+        //
+        // BIASED STRICT, against this file's usual grain, and deliberately.
+        // `through` is a local date and `todayStartUtc()` a UTC one, so this is
+        // inexact by up to a day either way. Too permissive would let a new
+        // `from` land while a period still has a day to run, un-covering days
+        // already spent away — the false claim to a family that ADR-0001 exists
+        // to prevent. Too strict costs a legitimate re-set a few hours' delay
+        // at a zone boundary, which is recoverable and says nothing false. The
+        // exact check is the client's, where the day is resolved in the watched
+        // person's own zone.
+        function awayPeriodEnded() {
+          return dayStart(resource.data.through) < todayStartUtc();
+        }
+
         allow update: if mayWriteAwayFor(uid)
                       && validAwayShape(request.resource.data)
                       && validAttribution(request.resource.data)
                       && orderedPeriod(request.resource.data)
                       && awayWithinCap(request.resource.data)
-                      && request.resource.data.from == resource.data.from;
+                      && (request.resource.data.from == resource.data.from
+                          || (awayPeriodEnded()
+                              && awayNotRetroactive(request.resource.data)));
 
         // Cancelling on the day the period starts deletes rather than truncates
         // — nothing has elapsed, and truncating would write

@@ -106,10 +106,24 @@ void main() {
       );
     });
 
-    test('a name with no uid behind it is still shown', () {
+    test('a name with NO uid behind it names nobody', () {
+      // Corrected at the Phase 6 gate: an unauthenticated label with no `setBy`
+      // is not evidence that anybody acted, and it is the case that could put
+      // her own name in front of "marked you away".
       expect(
         awayLineFor(state(away: record(setBy: null))),
-        TapCopy.awayBy('Ana', 'Saturday 22'),
+        TapCopy.away('Saturday 22'),
+      );
+    });
+
+    test('the placeholder for a nameless writer is suppressed', () {
+      // "Someone marked you away until Saturday 22" names a role, not a
+      // person. The approved unattributed line renders instead.
+      expect(
+        awayLineFor(
+          state(away: record(setByName: AwayCopy.unnamedWriter)),
+        ),
+        TapCopy.away('Saturday 22'),
       );
     });
 

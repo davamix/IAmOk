@@ -43,7 +43,11 @@ abstract final class AwayCopy {
   /// The picker's dismiss action. A dismissal is a choice, not a fault, and it
   /// says nothing to anybody — the same decision `screens.md` records by hand
   /// for the *Add someone* chooser and the Google account chooser.
-  static const String cancel = 'Not now';
+  ///
+  /// **"Go back", not "Not now".** On a screen about away *dates*, *"Not now"*
+  /// reads as plausibly *"I'm not away now"* or *"start later"* — a date
+  /// answer — rather than *"leave this screen"*.
+  static const String cancel = 'Go back';
 
   /// The picker's TalkBack label for the chosen day.
   ///
@@ -71,11 +75,18 @@ abstract final class AwayCopy {
   /// the connection returns. See [AwayOutcome] for why *"could not reach the
   /// server"* is a sentence this path can never truthfully say.
   ///
-  /// It says **saved** first, because that is the part the reader needs, and it
-  /// claims nothing about when — *"when this phone is back online"* is the only
-  /// honest bound, and it is true whether the delay is two seconds or two days.
+  /// It says **saved** first, because that is the part the reader needs.
+  ///
+  /// **It does not say "when this phone is back online", and that is the
+  /// point.** `send` reaches this purely from a timeout: a slow server, a
+  /// congested cell or a cold Firestore connection on a phone with five bars all
+  /// land here. Naming the radio would be the same claim about the **device**
+  /// that this type's docstring spends a paragraph refusing to make in the
+  /// negative — `guidelines.md`'s *"'your phone has been offline' is a claim
+  /// about the device that is false whenever the server was reached"*, said the
+  /// other way round. *"As soon as it can"* is true in both states.
   static const String queued =
-      'Saved. Your family will see this when this phone is back online.';
+      'Saved. Your family will see this as soon as this phone can send it.';
 
   /// What a refused away write says. One sentence per cause — the rule
   /// ADR-0004 sets out for the warnings, applied here: a refusal that names the
@@ -91,13 +102,22 @@ abstract final class AwayCopy {
         // and confirming it. So it names the bound rather than blaming the
         // reader for a day the screen offered them.
         AwayRefusal.rejectedPeriod =>
-          'That day does not work. Choose a day in the next month.',
+          'That day does not work. Choose a day within the next month.',
         // The server answered, and said no. A claim about **access**, never
         // about the device: the phone demonstrably reached the backend, because
         // it got an answer. ADR-0004, one layer down.
+        // **It does not claim the app has permanently lost access**, because
+        // Firestore returns `permission-denied` for a *shape* violation as
+        // readily as for an authorisation one — and these rules validate shape
+        // aggressively. Reachable whenever the cached period is stale: a
+        // reinstall, *Wipe store*, a second device, or two parties writing
+        // seconds apart. Claiming lost access there would be ADR-0004's false
+        // claim arriving through the copy layer, about an app that has lost
+        // nothing. It names a next human, which `WatcherCopy.accessLostRemedy`
+        // sets the precedent for and `guidelines.md` requires of every error.
         AwayRefusal.notPermitted =>
-          'That could not be saved. I Am Ok is no longer allowed to change '
-              'this.',
+          'That could not be saved. Try again, and ask a family member if it '
+              'keeps happening.',
         // `PairingRefusal.serverFault`'s sentence, **verbatim**, because it is
         // the same claim about the same situation and the Phase 5 gate approved
         // exactly these words for it. A sibling sentence tuned in isolation
@@ -107,6 +127,37 @@ abstract final class AwayCopy {
         AwayRefusal.notSignedIn =>
           'You are not signed in. Sign in and try again.',
       };
+
+  /// The sentence an away write's outcome earns, or null when it says nothing.
+  ///
+  /// **One copy of this switch, and that is the point.** It was written out
+  /// twice — once per screen — which is the defect `WatchedRowKind` was
+  /// extracted to stop, recorded in this repo's own words: *two copies of a
+  /// decision are two chances to make it*. Swapping two of these tells somebody
+  /// their family was told when they were not, on the write whose whole
+  /// justification is that it works on a plane.
+  ///
+  /// Null for [AwaySet] alone — see [saved].
+  static String? awayMessageFor(AwayOutcome outcome) => switch (outcome) {
+        AwaySet() => saved,
+        AwayQueued() => queued,
+        AwayRefused(:final refusal) => AwayCopy.refusal(refusal),
+      };
+
+  /// What is written to `setByName` when the writer's account has no usable
+  /// display name.
+  ///
+  /// The rules **require** the field (1–100 characters after trimming), so it
+  /// cannot simply be omitted — but this value must never reach a reader.
+  /// *"Someone marked you away until Saturday 22"* names a role rather than a
+  /// person, which `guidelines.md` forbids, and it is ADR-0003's *"?? marked
+  /// you away"* wearing a word: it makes the approved unattributed line
+  /// unreachable for anything this app writes.
+  ///
+  /// `AwayRecord.nameToShowFor` suppresses it, so every surface falls back to
+  /// the string that names nobody — which is the honest answer, because nobody
+  /// can be named.
+  static const String unnamedWriter = 'Someone';
 
   // ------------------------------------------------------------------- dates
 

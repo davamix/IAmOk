@@ -192,6 +192,22 @@ export const onCheckInCreated = onDocumentCreated(
  * durable before this runs, and it is the thing every device decides from.
  */
 export const onAwayChanged = onDocumentWritten(
+  // **The global `maxInstances: 10` is CHOSEN here, not inherited by
+  // omission.** `redeemInvite` overrides it to `concurrency: 1,
+  // maxInstances: 3` and `OPEN-QUESTIONS.md` #11 records that cap as a
+  // security control — a rate term the guessing argument was missing.
+  // Nothing of that applies here, and harmonising the two would throttle a
+  // fan-out for a reason that is not true of it.
+  //
+  // This cap is only a cost and concurrency bound, and throttling it is safe
+  // precisely because of the property below: expiry is arithmetic on every
+  // device, so dropping every message this sends changes no answer. Invocation
+  // rate per watched person is anyway bounded by Firestore's sustained
+  // per-document write rate, since there is exactly one away document each.
+  //
+  // What it does NOT bound is volume — `threat-model.md` carries that, beside
+  // the same gap on `onCheckInCreated`, and notes that this one is wider
+  // because any accepted watcher can drive it.
   'users/{uid}/shared/away',
   async (event) => {
     const watchedUid = event.params.uid;

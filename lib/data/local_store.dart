@@ -203,7 +203,7 @@ class LocalStore {
             // re-install v4 replays this step against a table that already has
             // the column. A bare ALTER TABLE would throw `duplicate column
             // name`, `openDatabase` would throw with it, and `LocalStore.open()`
-            // is unguarded in both entry points — the app could not open its
+            // is unguarded in all three entry points — the app could not open its
             // store at all and the only repair would be a reinstall, which
             // destroys `warnings_shown`.
             case 4:
@@ -1161,10 +1161,16 @@ class LocalStore {
   /// would retroactively un-cover days already spent away, which is ADR-0001's
   /// argument for truncating rather than deleting, applied to the cache.
   ///
-  /// Returns null when there is no row, and also when the stored pair cannot
-  /// form a valid period — `tryCreate`, not the constructor, for the same reason
-  /// as [watcherCache] and `Link.tryWatchedZone`: this is read inside an alarm
+  /// Returns null when there is no row, and when the stored pair cannot form a
+  /// valid period — `tryCreate`, not the constructor, for the same reason as
+  /// [watcherCache] and `Link.tryWatchedZone`: this is read inside an alarm
   /// isolate where a throw is silence.
+  ///
+  /// **It is not throw-proof, and the guarantee is narrower than it reads.**
+  /// `tryCreate` guards the ordering only; `DayKey.parse` throws on a malformed
+  /// day label and the `!` throws on a NULL column. Both are unreachable while
+  /// [setSelfAway] is the only writer, and [watcherCache] has had the identical
+  /// exposure since before this phase — so it is stated rather than fixed.
   Future<AwayRecord?> selfAway() async {
     final rows = await _db.query('self_away', where: 'id = 0');
     if (rows.isEmpty) return null;

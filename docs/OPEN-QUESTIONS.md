@@ -111,6 +111,14 @@ through the copy layer. The live-radio measurement will be the first run to exer
 cold radio; register this install's debug token first (confirmed **not** registered) or it measures a
 retry loop.
 
+> **There are TWO call sites since Phase 6, not one**, and this entry named one until the gate
+> caught it. `FirestoreCheckInReader._mentionsAppCheck` is the watcher's read;
+> `AwayRepository._mentionsAppCheck` is the watched person's own away read, added when this phase
+> gave the client a second Firestore path — and Firestore-level enforcement affects both. Verifying
+> one and enforcing on the strength of it leaves the other falling through to a claim about a device
+> that is online. **Either verify both, or hoist the predicate into one shared classifier** — the
+> second is cheaper and is what makes this entry's own instruction unambiguous.
+
 **Blocker when:** before enforcement, absolutely. Not before.
 
 ## 6. Delete protection and point-in-time recovery are both OFF
@@ -202,11 +210,18 @@ returns a uid, so the blast radius stops there"*. Both halves were wrong.
 > **Updated at the Phase 6 gate, 2026-08-27.** The away half now has surfaces, and they cut both
 > ways. A stranger with a guessed link can reach the away write from a **screen** rather than only
 > from an API call — which is what this entry warned about — and at the same time the watched
-> person's own Tap screen now reads *"X marked you away until Saturday 22"*, naming the writer, on
-> the screen she opens every morning. §17's mitigation is *`setByName` on every surface, and anyone
-> can cancel*; before this phase the first half had no surface on the watched side at all. It is
-> still not automatic, and it still depends on her reading the line — but *"nothing anywhere says
-> this happened"* is no longer true, which was the sharper half of the risk.
+> person's own Tap screen now reads *"X marked you away until Saturday 22"* on the screen she opens
+> every morning.
+>
+> **What that line shows is the label the writer chose, and ADR-0003 says it is not
+> authenticated.** The detection it buys is *"somebody marked you away"*, not *"this person did"* —
+> an attacker holding a guessed link picks the string, and can write a plausible relative's name.
+> `setBy` is the identity that survives a dispute, and nothing renders it; there is no path from a
+> uid to a real name on that screen, and §7 deliberately keeps one from existing.
+>
+> So *"nothing anywhere says this happened"* is no longer true, which was the sharper half of the
+> risk, and *"and it names who did it"* was never true. Both are stated because the mitigation
+> argument rests on the second one.
 
 **A cheap counter was considered and not built.** It is a Firestore document per uid on the pairing
 path, with contention and its own failure modes, for a threat the concurrency cap now bounds.

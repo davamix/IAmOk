@@ -13,7 +13,15 @@
 /// future the SDK hands back completes only once the **server** has it. So a
 /// write that has not completed is in exactly one of two states, and **the
 /// client cannot tell them apart**: still in flight, or queued behind a dead
-/// radio. Both end the same way. The SDK will deliver it.
+/// radio — and the SDK will deliver it in both.
+///
+/// **The exception, stated because an absolute claim is what would stop anybody
+/// noticing it:** a write the server later *rejects* — a revoked link, or App
+/// Check once enforced — is rolled back after [queued] has already been
+/// reported, and nothing surfaces the reversal. The next reconcile's read is
+/// what repairs the screen. That is a real gap, and it does not change the
+/// decision below, because the alternative is a sentence that is false far more
+/// often.
 ///
 /// That makes *"could not reach the server"* a sentence this path can never
 /// truthfully say. Saying it would tell somebody their family had not been told,

@@ -263,6 +263,10 @@ abstract final class WarningPolicy {
   /// non-negotiable). **Phase 6 filled it in** — `WatcherReconciler` passes
   /// `cache.away?.period`, the **period only**: attribution is a display label
   /// ADR-0003 says cannot be authenticated, and no warning decision may see it.
+  ///
+  /// It is also the first phase in which this function's step 5 is live against
+  /// a real away period rather than always-null, which is why the Phase 6 gate
+  /// put it on the mutation list.
   static WarningDecision decide({
     required DateTime now,
     required tz.Location watchedZone,

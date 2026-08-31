@@ -249,6 +249,37 @@ abstract final class AwayRules {
   static const int nameMinLength = 1;
   static const int nameMaxLength = 100;
 
+  /// The stored period a write must validate **against**, or null.
+  ///
+  /// **This is the create-versus-update decision, and it is a policy question
+  /// rather than a data-layer detail** — which is why it lives here as six
+  /// pure lines rather than inline in a repository where nothing could reach
+  /// it. It was inline, and it was wrong: away could be set once per person
+  /// and then never again.
+  ///
+  /// Nothing deletes the away document when a period runs its course —
+  /// deliberately, because the days already spent away must stay covered
+  /// ([ADR-0001][] applied to the cache). So the record outlives the holiday,
+  /// and treating it as the existing period freezes [AwayPeriod.from] at a date
+  /// now weeks in the past, which [validateUpdate] then refuses for ever.
+  ///
+  /// ADR-0001 decision 6 froze `from` for the life of a **period**, not of a
+  /// person. Its reason is that truncating an *in-progress* period rewrites a
+  /// document whose `from` is already past — and an ended period is not in
+  /// progress, so the reason does not reach it. `firestore.rules` carries the
+  /// same distinction, biased strict where this one is exact, because only the
+  /// client knows the day in the watched person's own zone.
+  ///
+  /// [today] is inclusive of `through`: a period whose last away day is today
+  /// is still in force, because `through` is the last away day and not the day
+  /// of return.
+  ///
+  /// [ADR-0001]: ../../../docs/architecture/decisions/0001-away-cache-precedence.md
+  static AwayPeriod? periodInForce(AwayPeriod? stored, DayKey today) {
+    if (stored == null) return null;
+    return stored.hasExpiredOn(today) ? null : stored;
+  }
+
   /// Validates a create. Returns null when the write is allowed.
   static AwayRejection? validateCreate(AwayPeriod period, DayKey today) {
     if (period.from < today) return AwayRejection.retroactiveFrom;

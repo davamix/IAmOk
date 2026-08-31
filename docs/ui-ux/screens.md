@@ -367,6 +367,18 @@ target*, which is still satisfied; what it does not consider is a nearer neighbo
 > reader takes at a glance; a gap is one they have to measure. Both controls stay text buttons — the
 > equal weight is fine once there is a structural break between them — and the 48dp floor is
 > asserted at every font scale.
+>
+> **The divider is the weakest of three signals, and the strongest was never written down.** Pressing
+> *I'm away* opens a **full screen with its own Save button**, so a mis-tap in the dangerous direction
+> already has an inherent confirmation and costs one back gesture. *Add someone* is also a
+> `TextButton.icon` while *I'm away* is a bare `TextButton`, so the pair are not in fact look-alikes.
+> Recorded because the separation should not rest on the hairline alone.
+>
+> **The band scrolls, and its thumb is now always visible.** The away state adds the tallest element
+> on a band that is 36% of the screen — two sentences at `headlineSmall` — which at the largest font
+> scale pushes the Away control below the fold. That is the one control a person needs in order to
+> act on reading that somebody else marked them away, so a hidden scroll is a discovery problem for
+> exactly the reader this app is for.
 
 **The control that opens the watcher list is labelled *"See who you look after"***, which is not the
 list's title. A title says what a screen **is**; a control's label says what pressing it **does**, and
@@ -605,10 +617,10 @@ write path say is **drafted, not approved**, and is listed here so approval has 
 |---|---|
 | Picker title | *"Choose the last day you are away"* — names the one thing this screen collects. `from` is always today, so a title offering a range would promise a choice the screen cannot make |
 | Confirm | *"Save"* |
-| Dismiss | *"Not now"* |
-| Write queued offline | *"Saved. Your family will see this when this phone is back online."* |
-| Refused — the period | *"That day does not work. Choose a day in the next month."* |
-| Refused — the server said no | *"That could not be saved. I Am Ok is no longer allowed to change this."* |
+| Dismiss | *"Go back"* — **amended at the gate**; on a screen about away *dates*, *"Not now"* reads as *"I'm not away now"* or *"start later"* rather than *"leave this screen"* |
+| Write queued offline | *"Saved. Your family will see this as soon as this phone can send it."* — **amended at the gate**, see below |
+| Refused — the period | *"That day does not work. Choose a day within the next month."* — *within*, so it cannot be read as *"during next month"* |
+| Refused — the server said no | *"That could not be saved. Try again, and ask a family member if it keeps happening."* — **amended at the gate**, see below |
 | Refused — a server fault | *"That did not work just now. Try again in a moment."* — **`PairingRefusal.serverFault`'s approved sentence, verbatim** |
 | Refused — not signed in | *"You are not signed in. Sign in and try again."* — the pairing screens' sentence, verbatim |
 | Watched screen, somebody else set it | *"Ana marked you away until Saturday 22. Your family isn't expecting a check-in."* — **approved 2026-08-27**, see *The away line names who set it* below |
@@ -623,6 +635,34 @@ write path say is **drafted, not approved**, and is listed here so approval has 
 > with the write landing. Saying *"could not reach the server"* would tell somebody their family had
 > not been told about a write that arrives ninety seconds later, and the obvious response is to set
 > the period again. **`queued` is the honest name for the state that actually exists.**
+
+> **And then the queued sentence said it anyway, in the affirmative.** It read *"Saved. Your family
+> will see this when this phone is back online."* — which asserts the phone is **offline**, on a path
+> reached purely from a six-second timeout: a slow server, a congested cell, or a cold Firestore
+> connection on a phone with five bars all land there. That is `guidelines.md`'s *"'your phone has
+> been offline' is a claim about the **device** that is false whenever the server was reached"*, said
+> the other way round, one paragraph after refusing to say it. Amended at the gate to *"as soon as
+> this phone can send it"*, which is true in both states.
+
+> **The refused-by-the-server sentence claimed a permanence it cannot know.** It read *"I Am Ok is no
+> longer allowed to change this"* — but Firestore returns `permission-denied` for a **shape**
+> violation as readily as an authorisation one, and these rules validate shape aggressively, so it is
+> reachable whenever the cached period is stale: a reinstall, *Wipe store*, a second device, or two
+> parties writing seconds apart. It also named no next step, which `guidelines.md`'s Floors require of
+> every error. Amended at the gate.
+
+### Owed decisions this phase opened and did not close
+
+Recorded rather than left implicit, because in each case the **code has already decided** and an
+absence here would read as a free choice.
+
+| | |
+|---|---|
+| **Extending a period in force** | §12 says away may be *set, extend or cancel*, and `AwayRules.validateUpdate` exists for it — but both surfaces flip their control to *end* while a period is in force, so the picker is unreachable and extending is **not possible in v1**. The documented workaround is destructive: end the period (which truncates to yesterday, re-attributed to whoever pressed it) and set it again from a date nobody has written down. Either offer both actions while away, or record the limitation in §12. |
+| **The watcher row's cancel has no confirmation, and its argument is different** | The Tap screen's *"I'm not away"* decision (below) rests on *the failure is loud and setting it again is two taps*. Neither holds on the watcher row: cancelling **truncates**, so a mis-tap on day 3 of a 14-day hospital stay destroys the remaining 11 days; what is loud is a warning waking the rest of the family about somebody who is genuinely away, and none of them mis-tapped. |
+| **Nothing is said when a write lands** | `AwayCopy.saved` is null. Defensible on the Tap screen, whose own away line is a better confirmation than a toast because it is still there tomorrow. On the **watcher row** the only feedback is a status line changing under a reader who may not be looking at it. |
+| **The writer nobody can name** | An account with no display name writes `AwayCopy.unnamedWriter` (`"Someone"`), because the rules require the field. It is suppressed at render so the approved unattributed line shows instead. A real person actually called this loses their attribution — the right way to be wrong, but a decision. |
+| **The spoken outcome strings** | The write outcome is now announced on both surfaces (`SemanticsService.sendAnnouncement`), reusing the rendered sentence. This file's own rule is that spoken labels are approved copy like any other. |
 
 ### The away line names who set it — **decided 2026-08-27 · OWNER**
 

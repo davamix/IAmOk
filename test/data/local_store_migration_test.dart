@@ -194,9 +194,15 @@ void main() {
     final store = await LocalStore.open(path: path);
     addTearDown(store.close);
 
-    expect(await store.watcherCache('mum_ana'), isA<WatcherCache>(),
+    // **Assert the data, not the type.** `watcherCache` never returns null, so
+    // `isA<WatcherCache>()` was barely more than "no exception thrown" — and
+    // what the replay must not do is lose the row it is replaying over.
+    final cache = await store.watcherCache('mum_ana');
+    expect(cache.away!.period.from, day('2026-08-15'),
         reason: 'replaying v6 against a table that already has the columns '
-            'must be a no-op, not a crash');
+            'must be a no-op, not a crash and not a wipe');
+    expect(cache.away!.period.through, day('2026-08-22'));
+    expect(cache.lastConfirmedDay, day('2026-08-14'));
   });
 
   test('a fresh install and an upgraded one hold the SAME shape', () async {
@@ -210,13 +216,42 @@ void main() {
     final fresh = await LocalStore.open(path: freshPath);
     addTearDown(fresh.close);
 
-    Future<List<String>> columnsOf(LocalStore store) async {
-      final rows = await store.database.rawQuery(
-        'PRAGMA table_info(watcher_cache)',
+    // **Every table and every column, not one table's columns** — a future
+    // step that forgot an entire table would pass the narrower check, and the
+    // migration is the copy that drifts because it is the path no fresh install
+    // ever runs.
+    //
+    // **Compared by SHAPE and not by `sqlite_master.sql`.** The stored text
+    // differs legitimately: a fresh install holds the `CREATE TABLE` from
+    // `_schema`, while an upgraded one holds the older statement with
+    // `ALTER TABLE … ADD COLUMN` appended. Comparing the raw SQL asserts
+    // formatting, which is how this test failed the first time it was written.
+    Future<Map<String, List<String>>> shapeOf(LocalStore store) async {
+      final tables = await store.database.rawQuery(
+        "SELECT name FROM sqlite_master WHERE type = 'table' "
+        "AND name NOT LIKE 'sqlite_%' ORDER BY name",
       );
-      return [for (final row in rows) row['name']! as String]..sort();
+      final shape = <String, List<String>>{};
+      for (final table in tables) {
+        final name = table['name']! as String;
+        final columns =
+            await store.database.rawQuery('PRAGMA table_info($name)');
+        shape[name] = [
+          for (final column in columns)
+            '${column['name']} ${column['type']}',
+        ]..sort();
+      }
+      return shape;
     }
 
-    expect(await columnsOf(upgraded), await columnsOf(fresh));
+    final upgradedShape = await shapeOf(upgraded);
+    final freshShape = await shapeOf(fresh);
+
+    expect(upgradedShape.keys, freshShape.keys,
+        reason: 'a step that forgot a whole table would pass a check that '
+            'compared only one table');
+    for (final table in freshShape.keys) {
+      expect(upgradedShape[table], freshShape[table], reason: 'table $table');
+    }
   });
 }

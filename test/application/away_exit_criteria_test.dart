@@ -60,10 +60,17 @@ class _RecordingScheduler implements AlarmScheduler {
 
 /// An [AwayRepository] that answers as told, and counts what it was asked.
 ///
-/// It **extends** the real class rather than implementing an interface, so the
-/// production constructor, the field set and the validation path are the ones
-/// under test — only the two SDK calls are replaced. A hand-written double with
-/// its own `write` would prove the test's own arithmetic and nothing else.
+/// **Both methods are fully overridden, so this is a hand-written double and
+/// nothing of the production `write` runs here** — not its `setBy.isEmpty`
+/// guard, not `boundedName`, not the `serverTimestamp()` field set. It extends
+/// the real class only to satisfy the type.
+///
+/// That is stated because the docstring here used to claim the opposite, and
+/// the claim decides how the exit-criterion result should be read: **clause 1
+/// is driven end to end on the READ and RECONCILE half**, which is the half the
+/// criterion turns on, and the write half is a re-implementation. The write
+/// path's own decisions are covered in `test/data/away_write_path_test.dart`,
+/// against the real code.
 class _FakeAway extends AwayRepository {
   _FakeAway();
 
@@ -490,8 +497,14 @@ void main() {
 
       final state = await watched().reconcile(selfUid: mum);
 
+      // **A fact about the RUN, not about the fixture.** This asserted
+      // `away.nextRead` — which is what `setUp` assigned — so it could not tell
+      // "every read failed" from "no read was attempted", and deleting the read
+      // from `_refreshedAway` entirely would have left it green.
+      expect(away.reads, greaterThan(0),
+          reason: 'the reconcile really did ask, and really was refused');
       expect(away.nextRead, isA<AwayReadUnreachable>(),
-          reason: 'the guard on this test: no read has succeeded');
+          reason: 'and every answer it got was a failure');
       expect(state.isAway, isFalse, reason: 'the 23rd is the first day back');
       expect(await store.selfAway(), isNotNull,
           reason: 'the ROW is not deleted — the days spent away stay covered, '
@@ -548,7 +561,12 @@ void main() {
       final firstDayBack = (await watcher().reconcile(selfUid: ana)).people.single;
 
       expect(firstDayBack.decision.day, day('2026-08-23'));
-      expect(firstDayBack.decision.isWarning, isTrue,
+      // **Which warning, not merely that one fired.** `isWarning` also accepts
+      // `warnUnverifiableAway` — which would name the away period in the body
+      // for a day that period does not cover — and `warnAccessLost`, which
+      // claims the app has lost access. Three different claims about a person,
+      // and only one of them is true here.
+      expect(firstDayBack.decision.outcome, WarningOutcome.warnOffline,
           reason: 'the away period ended by arithmetic, with nothing '
               'transmitted and nothing read — the whole of clause 3');
       expect(firstDayBack.rowKind, isNot(WatchedRowKind.away),

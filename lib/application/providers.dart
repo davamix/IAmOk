@@ -857,7 +857,12 @@ class WatchedStateNotifier extends AsyncNotifier<WatchedState> {
     }
   }
 
-  /// Sets or extends this person's own away period, then reconciles.
+  /// Sets this person's own away period, then reconciles.
+  ///
+  /// **Not "or extends", in v1.** The control flips to *end* while a period is
+  /// in force, so this is only ever reached with no period covering today. §12
+  /// says away may be extended and `AwayRules.validateUpdate` exists for it;
+  /// the surface is owed and recorded in `screens.md`.
   ///
   /// **Reconciles rather than patching the state in place** (§3). The reconcile
   /// re-reads the document from Firestore, so what the screen ends up showing is

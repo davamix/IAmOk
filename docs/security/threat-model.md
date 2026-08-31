@@ -179,10 +179,31 @@ design decision, not an oversight — requiring approval would break the feature
 case, when someone is in hospital and least able to answer a prompt.
 
 **Controls, all visibility rather than prevention:** `setByName` is denormalized onto the away
-document so every surface can say *who* set it; anyone can cancel; a 31-day cap forces deliberate
-renewal; and an "ends tomorrow" notice goes to all watchers, scheduled locally from `through` so it
-needs no server. The residual risk is accepted and recorded in
+document so every surface can say *who* set it; anyone can cancel; and a 31-day cap forces
+deliberate renewal. The residual risk is accepted and recorded in
 [ARCHITECTURE.md](../architecture/ARCHITECTURE.md) §17.
+
+> **Re-measured against the code at the Phase 6 gate, 2026-08-27, and this row overstated itself in
+> two ways.**
+>
+> **The "ends tomorrow" notice is not built.** §12 specifies it and `AwayPeriod.endsTomorrowOn`
+> exists with a passing test and **no caller anywhere in `lib/`**. It is owed, not shipped — listed
+> in `phases/phase-6-summary.md` under *Still owed* with the other three away transition
+> notifications. It is the most cosmetic of the four: the reminders resume by arithmetic whether or
+> not anybody is warned they are about to.
+>
+> **"A 31-day cap forces deliberate renewal" was unreachable until the same gate.** Nothing deletes
+> the away document when a period ends, and `from` was immutable on update — so away could be set
+> once per person and then never again, and the cap was a hard stop rather than a renewal prompt.
+> `from` is now frozen for the life of a *period* rather than of a person, in both the client and the
+> rules, which is what makes this sentence true.
+>
+> **What did land, and is the half that matters here:** `setByName` now has a surface on the
+> **watched** side — the Tap screen reads *"Ana marked you away until Saturday 22"* — where before
+> this phase the control had no surface at all on the side of the person best placed to notice. But
+> see ADR-0003 and `OPEN-QUESTIONS.md` #11: that name is a **label the writer chose**, not an
+> authenticated identity, so the detection it buys is *"somebody marked you away"* rather than
+> *"this person did"*.
 
 ### T7 — Stale FCM tokens leaking pushes to a reassigned device
 
@@ -341,7 +362,9 @@ added.
     reaches at least an internal test track. This is a structural gate, not a "wait for metrics"
     one, and it puts enforcement at Phase 8 or later.
   - **The refusal-to-copy mapping must be verified against a real rejection on hardware.**
-    `FirestoreCheckInReader._mentionsAppCheck` matches an English substring, and anything
+    `FirestoreCheckInReader._mentionsAppCheck` **and**
+  `AwayRepository._mentionsAppCheck` — two call sites since Phase 6, and both must be verified;
+  `OPEN-QUESTIONS.md` #5 carries the detail matches an English substring, and anything
     unrecognised falls through to *unreachable* — whose approved string claims **this phone has
     been offline**, which is false when the server was reached and refused. Enforcing before that
     is checked turns one config change into every watcher in the fleet reading a false statement
@@ -352,3 +375,12 @@ added.
   at the project's Function and FCM budget. Confidentiality-neutral — only consenting watchers are
   reachable — and `maxInstances: 10` bounds concurrency but not volume. Same family as T3's owed
   rate limiting; raised 2026-08-21 by the Phase 4 security review and deliberately not fixed there.
+- **No volume bound on `onAwayChanged` either, and it is wider in two ways** — added at the Phase 6
+  gate. `users/{uid}/shared/away` is writable by the watched person **and by any accepted watcher**,
+  so the actor is no longer only the account owner; and the fan-out goes to **every party**, so the
+  targets include people who did nothing. Combined with #11's guessed-link scenario — which Phase 6
+  made reachable from a screen — a stranger can drive Function invocations and FCM sends at a
+  family's phones. Confidentiality is unchanged: the `status` filter and the link-id check keep only
+  accepted parties reachable, and the payload carries no dates. The collapse key bounds what an
+  offline device *displays*, not what is sent or billed. Cost and nuisance, pre-deploy, and it does
+  not change the deploy decision — but it belongs beside its sibling rather than being rediscovered.

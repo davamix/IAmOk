@@ -151,11 +151,11 @@ Consequences that shape the design:
 ┌─ Presentation ──────────────────────────────────────────────┐
 │  TapScreen (watched main)      WatcherScreen (watcher main)  │
 │  Home (routes on HomeRoute)    OnboardingScreen              │
-│  ShareCodeScreen  EnterCodeScreen   HealthPanel  AwayScreen  │
+│  ShareCodeScreen  EnterCodeScreen   HealthPanel  AwayPicker  │
 │  DebugHarness                                                │
 ├─ Application (Riverpod) ────────────────────────────────────┤
 │  CheckInController  WatchListController  OnboardingController│
-│  AwayController     SystemHealthController                   │
+│  SystemHealthController                                      │
 ├─ Domain — pure Dart, no Flutter, no Firebase ───────────────┤
 │  DayKey          day boundary arithmetic in a given tz       │
 │  AwayPeriod      from/through, containment, validity         │
@@ -201,7 +201,7 @@ thing some readers get.
 | `UserRepository` | Data | `users/{uid}` doc; timezone; FCM token subcollection | UI |
 | `LinkRepository` | Data | Read links for either role; revoke; per-link warning time | UI |
 | `CheckInRepository` | Data | Write today's check-in; read a watched person's days | UI, Alarm |
-| `AwayRepository` | Data | Read / set / cancel the away period for a watched user | UI, FCM, Alarm |
+| `AwayRepository` | Data | Read / set / cancel the away period for a watched user | UI, FCM |
 | `InviteService` | Data | Call `createInvite`; call `redeemInvite` ([ADR-0011](decisions/0011-creating-an-invite-is-a-function-too.md)). **Both are callables** — it holds no Firestore reference, because §8 makes `invites/{code}` unwritable as well as unreadable by every client. This row said *"create invite"* until Phase 5, which read as a client write and is one no client may perform. | UI |
 | `LocalStore` | Data | SQLite. Per-link `lastConfirmedDate`, `warningsShownFor` (day → **which** warning is standing, [ADR-0004](decisions/0004-refused-is-not-unreachable.md)), `correctionsOwedFor` (days whose warning has been **disproved and taken down** but whose retraction has not been spoken — a separate fact from the one above, and separate because that one is the sole input to the row's warned state, [ADR-0010](decisions/0010-a-push-may-not-post-a-warning-early.md)), `lastDecidedDay` ([ADR-0009](decisions/0009-decide-about-every-completed-day.md)'s catch-up pointer), `activeFrom`, `watchedTimezone`, cached `awayPeriod`, `accessLostSince` + `accessLostCause` + `accessLostNotifiedOn`; plus `deviceTimezone`, `pendingAlarms`, `lastReconcileAt` (a **timestamp** — §10 renders "offline since 10:14"), and the `reconcileLock` lease ([ADR-0006](decisions/0006-reconcile-is-serialised-on-disk.md)); plus three device-health settings that §13's panel reads in Phase 7 and `dump` shows meanwhile — `warningAlarmsExact` (the exact-alarm degradation actually happened), `linkReconcileFailed` (a link this app silently stopped checking), and `uses24HourClock` (a device fact a bare isolate cannot ask for, cached exactly as `deviceTimezone` is) | **All three** |
 | `AlarmScheduler` | Platform | Schedule / cancel / enumerate **reminder** alarms | UI, **FCM** |
@@ -780,6 +780,18 @@ these can be ordinary notifications rather than silent ones:
 The last one needs no server: every device already knows `through`, so it is a locally scheduled
 notification. It exists so the resumption of warnings is never a surprise.
 
+> **None of the four is built as of the Phase 6 gate, 2026-08-27.** Phase 6 delivered the away
+> document, the fan-out, both surfaces and the picker; PLAN.md's deliverable list for that phase does
+> not name these, and the exit criteria do not turn on them — the nudge drives a reconcile, which
+> updates both surfaces silently and correctly. `AwayPeriod.endsTomorrowOn` exists, is tested, and has
+> no caller. Recorded in `phases/phase-6-summary.md` under *Still owed*; this table is a
+> specification, not a description of what ships today.
+>
+> The **cancellation** notice is the one worth separating from the other three. Once a period is
+> truncated or deleted, `setByName` is gone and there is nothing left to name — so a watcher can
+> silently end somebody's away period and no surface can ever say who did. That is a §17 gap rather
+> than a nicety.
+
 ### Rules
 
 - **Cap: 31 days.** `through` may be at most **30 days after** `from`, which is 31 days counting the
@@ -803,9 +815,17 @@ notification. It exists so the resumption of warnings is never a surprise.
   cancel(a, day) = null                       if day <= a.from
                  = {a.from, day - 1}          otherwise
   ```
-- **`from` is immutable once written.** It follows from the rule above: truncating an in-progress
-  period rewrites a document whose `from` is already in the past, so §8's `from >= today` can only
-  be a *create* rule. On update, `from` must equal what is already stored.
+- **`from` is immutable for the life of a period** — not for the life of a person. It follows from
+  the rule above: truncating an in-progress period rewrites a document whose `from` is already in
+  the past, so §8's `from >= today` can only be a *create* rule. While a period is **in force**,
+  `from` must equal what is already stored.
+
+  > **The scope was implicit and was read as "for ever", which broke the feature.** Nothing deletes
+  > this document when a period ends, so the record outlives the holiday — and freezing `from`
+  > against it meant *"to go longer, set it again"*, three lines up, was unreachable: away could be
+  > set once per person and then never again. Corrected at the Phase 6 gate in both the client
+  > (`AwayRules.periodInForce`) and the rules. Once `through` is past, a fresh non-retroactive `from`
+  > is allowed; the no-retroactive rule is unchanged.
 - **Last write wins.** Two people setting away simultaneously is a single-document conflict at
   family scale. `setByName` makes the outcome legible.
 - **UI: a calendar picker, with the selected day labelled unambiguously** — *"Last day away:

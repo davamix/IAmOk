@@ -253,15 +253,33 @@ abstract final class WatcherCopy {
 
   // ---------------------------------------------------------- spoken labels
 
-  /// The away row — *"Away until Sat 22 Aug — set by Ana"*.
+  /// The away row when the document names **nobody** — *"Away until Sat 22
+  /// Aug"*.
   ///
   /// **In the app, never as a notification** (§12's effects table). It is
   /// status, not news: the news was the `onAwayChanged` nudge, and repeating it
   /// every time the list opens is the kind of daily reassurance
   /// `guidelines.md`'s *quiet confirm, loud miss* rule exists to keep out.
   ///
+  /// Reached by ADR-0003's *Absence* case — an older build or an admin write —
+  /// and by a writer whose account has no usable display name. It names nobody
+  /// rather than *"set by ??"*, which would advertise the gap without telling
+  /// the reader anything, and the away period itself is still shown, because
+  /// dropping it would warn a family about days somebody really did mark away.
+  ///
+  /// A **subtraction** from [awayUntilBy] rather than a rewording — the same
+  /// move `nobodyYet` and this class's own `nobody` made in Phase 5, so the two
+  /// states cannot describe the same thing differently.
+  ///
+  /// **These two docstrings were swapped**, each sitting over the other's
+  /// function, on the one field this project treats as load-bearing for §17.
+  /// The code was always right.
+  static String awayUntil(String date) => 'Away until $date';
+
+  /// The away row with attribution — *"Away until Sat 22 Aug — set by Ana"*.
+  ///
   /// It names who set it, which is the rule `screens.md` states for **every**
-  /// surface that displays an away period and the mitigation §17 records for
+  /// surface that displays an away period, and the mitigation §17 records for
   /// *one watcher silences the whole family*. `setByName` is denormalised onto
   /// the away document precisely so this line is renderable **offline** — links
   /// are `(watched, watcher)` pairs, so a watcher has no path from a peer
@@ -269,21 +287,9 @@ abstract final class WatcherCopy {
   /// other users' documents (ADR-0003).
   ///
   /// **The name is a label and is not authenticated.** Nothing here may imply
-  /// otherwise; the uid underneath is what makes a forgery recoverable.
-  static String awayUntil(String date) => 'Away until $date';
-
-  /// The same row when the document carries no usable name.
-  ///
-  /// ADR-0003's *Absence* case — an older build or an admin write. It names
-  /// nobody rather than *"set by ??"*, which would advertise the gap without
-  /// telling the reader anything, and the away period itself is still shown
-  /// because dropping it would warn a family about days somebody really did
-  /// mark away.
-  ///
-  /// A **subtraction** from the attributed line, which is the same move
-  /// `nobodyYet` and this class's own `nobody` made in Phase 5: one clause
-  /// removed, nothing reworded, so the two states cannot describe the same
-  /// thing differently.
+  /// otherwise; the uid underneath is what makes a forgery recoverable, and
+  /// what this line buys a reader is *"somebody marked her away"* rather than
+  /// *"this person did"*.
   static String awayUntilBy(String date, String setByName) =>
       '${awayUntil(date)} — set by $setByName';
 

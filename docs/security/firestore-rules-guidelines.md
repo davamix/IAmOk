@@ -53,7 +53,7 @@ From [ARCHITECTURE.md](../architecture/ARCHITECTURE.md) §8, as amended by
 | `through >= from` | ✓ | ✓ |
 | `through <= request.time + 32d` — the cap, **deliberately slack**; see below | ✓ | ✓ |
 | `from >= today` — no retroactive away | ✓ | — |
-| `from` unchanged from the stored value | — | ✓ |
+| `from` unchanged from the stored value — **while the stored period is still in force** | — | ✓ |
 | delete allowed | — | ✓ (cancelling before any day has elapsed) |
 
 > **`from >= today` is a create-only rule, and this is load-bearing.** Cancellation truncates
@@ -61,6 +61,29 @@ From [ARCHITECTURE.md](../architecture/ARCHITECTURE.md) §8, as amended by
 > past. A blanket `from >= today` would reject exactly the write that keeps a cancelled away from
 > retroactively un-covering the days already spent away. Enforcing immutability on update is what
 > replaces it.
+
+> **`from` is frozen for the life of a PERIOD, not of a person — corrected at the Phase 6 gate.**
+> Nothing deletes this document when a period runs its course, so the record outlives the holiday.
+> A flat `from == resource.data.from` therefore meant away could be set **once per person and then
+> never again**: every later attempt refused, on both sides, for ever — while the paragraph below
+> says a determined person "can set it twice" and §12 says "to go longer, set it again". Neither was
+> reachable.
+>
+> The clause now admits a fresh, non-retroactive `from` once the stored `through` is behind today:
+>
+> ```
+> request.resource.data.from == resource.data.from
+>   || (dayStart(resource.data.through) < todayStartUtc()
+>       && awayNotRetroactive(request.resource.data))
+> ```
+>
+> **Biased strict, against this file's usual grain, and that is deliberate.** `through` is a local
+> date and `todayStartUtc()` a UTC one, so the comparison is inexact by up to a day. Too permissive
+> would let a new `from` land while a period still has a day to run, un-covering days already spent
+> away — the false claim to a family ADR-0001 exists to prevent. Too strict costs a legitimate re-set
+> a few hours at a zone boundary, which is recoverable and says nothing false. Everywhere else in
+> this file the slack goes the other way; this is the one clause where rejecting is the safer error,
+> and `AwayRules.periodInForce` is the exact check, in the watched person's own zone.
 
 > **The cap is against `request.time`, not against `from`.** Identical only while `from` is always
 > today, which is true in v1. §12 keeps `from` as a real field so future-dated away becomes a UI
@@ -90,7 +113,9 @@ last.
 
 The 31-day cap is a **guardrail, not a security boundary**. Someone determined to stay away for 60
 days can set it twice, and that is the intended behaviour — the cap exists to force a deliberate
-renewal so an away period cannot silently outlive its purpose.
+renewal so an away period cannot silently outlive its purpose. *(Unreachable until the Phase 6 gate,
+for the reason in the block above: setting it a second time was refused. The renewal the cap exists
+to force is now actually possible.)*
 
 > ### The rules cannot enforce this cap exactly, and must not try
 >

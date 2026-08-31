@@ -178,7 +178,8 @@ before the run rather than after, so the checklist is not shaped by what happene
       `AwayOutcome.queued` makes.
 - [ ] The **v5 → v6 migration on a real store**, the way the v4 → v5 one was run: install the
       previous build, pair, let a watcher cache exist, then install this build over it and pull the
-      database. `LocalStore.open()` is unguarded in both background entry points, so a migration that
+      database. `LocalStore.open()` is unguarded at all three call sites — `main.dart`, the alarm
+      handler and the FCM handler — so a migration that
       throws is an app that cannot open its own store.
 
 **Two of these need a second device, and they are listed again under *Owed on a second device*
@@ -187,6 +188,17 @@ the app being opened" check **must run on the POCO**, because it is watched-side
 real OEM hardware. Roles live on links (§1), so the POCO plays the *watched* person for that one
 test, and **the role swap has to be recorded in the result** or the run reads as contradicting the
 device table.
+
+**Not a device check, but owed before the first deploy and found at the gate:**
+
+- [ ] **`onAwayChanged`'s trigger wiring has never been executed by anything.** The fan-out is tested
+      against the real emulated Firestore, but nothing dispatches a real event at the
+      `onDocumentWritten` registration — `tools/functions-test.ps1`'s probe covers `onCheckInCreated`
+      only. What is therefore unrun is `event.params.uid` and the **delete adapter**,
+      `after?.exists === true ? after.data() : undefined`, which is the **cancellation** path — the
+      one the function's own docstring calls the one that matters most. Owed: a third run in that
+      script, asserting two `onAwayChanged: fanned out` lines, one `cleared:false` and one
+      `cleared:true`, because a count alone would pass if the delete had silently done nothing.
 
 **Cannot be driven in a session, and that is stated rather than quietly skipped:**
 

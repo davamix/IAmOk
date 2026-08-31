@@ -336,11 +336,19 @@ void main() {
     'lib/platform/alarm_scheduler.dart',
     'lib/platform/permission_service.dart',
     // Phase 6. The watched side now refreshes its own away period from
-    // Firestore inside `reconcile()`, and BOTH background entry points run that
-    // reconcile — the boot path and the FCM handler, the latter because
-    // `onAwayChanged` fans out to the watched person's own device and their
-    // reminders are what has to change. Same shape as the two Firestore
-    // dependencies above it: `cloud_firestore` and nothing with a widget tree.
+    // Firestore inside `reconcile()`, so this file entered the closure.
+    //
+    // **What the guard caught was an IMPORT, not a call**, and the comment here
+    // said otherwise until the gate. The closure is computed over what is
+    // *reachable*: `watched_reconcile_service.dart` imports this, so it appears
+    // whether or not any background entry point ever constructs one. The FCM
+    // handler did not, which is a defect no import check could have found —
+    // `push_handler_test.dart` asserts the construction separately, and says
+    // that it is a source lint.
+    //
+    // Same shape as the two Firestore dependencies above it: `cloud_firestore`,
+    // `package:flutter/foundation.dart` for `@visibleForTesting`, and nothing
+    // with a widget tree.
     'lib/data/away_repository.dart',
   ];
 

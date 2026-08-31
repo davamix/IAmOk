@@ -69,6 +69,37 @@ void main() {
     expect(source, contains('WatchedReconcileService('));
   });
 
+  test('the watched side is given an AWAY REPOSITORY', () {
+    // **The test above passed while this was false**, which is why it is here.
+    // `WatchedReconcileService(` was constructed on this path all along — with
+    // no `away:`, so `_refreshedAway` skipped the read entirely and the
+    // reconcile decided reminders from the very cache the nudge came to
+    // replace.
+    //
+    // What that cost: `onAwayChanged` fans out to the watched person's own
+    // device precisely so her REMINDERS change. A watcher marks her away from
+    // another phone, hers stays in her pocket, the push arrives, and she is
+    // reminded at 12:00, 18:00 and 21:00 through the holiday until she happens
+    // to open the app. The cancellation direction is the silent one: away
+    // cancelled remotely, her phone stays suppressed, nothing says why.
+    //
+    // A source lint, and labelled as one — the same shape and the same honesty
+    // as `Home.build`'s. It proves the argument is passed, not that the read
+    // happens; what makes the read matter is covered in
+    // `away_exit_criteria_test.dart`.
+    final watched = source.substring(source.indexOf('WatchedReconcileService('));
+    expect(watched, contains('away:'),
+        reason: 'without it the nudge wakes a handler that cannot act on it');
+    expect(watched, contains('AwayRepository()'));
+  });
+
+  test('and the away repository is null when nobody is signed in', () {
+    // Mirrors `AppServices`: there is no `users/{uid}/shared/away` to read, and
+    // the cached period is still honoured because expiry is arithmetic (§12).
+    final watched = source.substring(source.indexOf('WatchedReconcileService('));
+    expect(watched, contains('LocalStore.signedOutUid ? null : AwayRepository()'));
+  });
+
   test('it tells the delivery derivation the app is NOT in front of anybody', () {
     // **A one-word slip here reproduces the worst defect Phase 3 found.**
     // `NotificationDelivery.from` turns `appInForeground: true` into

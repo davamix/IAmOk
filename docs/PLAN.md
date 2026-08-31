@@ -362,9 +362,30 @@ watcher list showing Mum. **The AVD also tapped**, which closes the half Phase 4
 
 ## Phase 6 — Away mode
 
-> **BUILT against the emulator suite, 2026-08-27. Not signed off** — the five reviewers have not run
-> and **nothing in this phase has been on a handset**. Start from
+> **BUILT and REVIEWED against the emulator suite, 2026-08-27. Not signed off** — **nothing in this
+> phase has been on a handset**, and the drafted picker and refusal copy is owed the owner's
+> approval. Start from [phases/phase-6-handover.md](phases/phase-6-handover.md) — what is left and
+> in what order — then read *The gate review* in
 > [phases/phase-6-summary.md](phases/phase-6-summary.md).
+>
+> **The gate found that the feature did not work.** Three of the five reviewers independently found
+> that away could be set **once per person and then never again**: nothing deletes the away document
+> when a period *ends*, `from` was immutable on update, and both call sites passed the stale cached
+> period as `existing` — so every later attempt was refused, client-side *and* by the rules, with copy
+> blaming the reader's choice of day. Three documents said it worked, including §12's *"to go longer,
+> set it again"*. The fix is a scope correction rather than a new rule: ADR-0001 decision 6 froze
+> `from` for the life of a **period**, not of a person, and both the client and the rules now carry
+> that distinction. Both new rules tests were verified by reverting the clause.
+>
+> **Two more defects that produce silence.** `onAwayChanged` could not change a **closed** watched
+> device — `push_handler.dart` never passed `away:`, so the FCM reconcile decided reminders from the
+> very cache the nudge came to replace. And `AwayRepository.read` had no timeout while being awaited
+> inside `tap()`, which is the hang that file argues against five lines above it.
+>
+> **Eleven claims had stopped being true**, most of them written in the same commits that made them
+> false — including `AwayCopy.queued` saying *"when this phone is back online"* one file after
+> `AwayOutcome` spends a paragraph refusing to say *"could not reach the server"*, and a test guard
+> that asserted what `setUp` had assigned rather than what the run did.
 >
 > **The owner decision this phase opened with is taken**: the away line names who set it **when it
 > wasn't you** — `TapCopy.awayBy` for a watcher's action, and the already-approved `TapCopy.away`

@@ -20,6 +20,20 @@ import 'package:i_am_ok/presentation/tap_screen.dart';
 /// getting that branch wrong is not a copy slip: it either tells somebody they
 /// marked themselves away when a watcher did, or leaves §17's mitigation with no
 /// surface at all.
+/// Whether the calendar is offering [label] as a choice.
+///
+/// A day past `lastDate` is still RENDERED — greyed and inert — so presence
+/// proves nothing about the bound. `InkResponse.onTap` is what the picker nulls
+/// out for an unselectable day.
+bool _dayIsSelectable(WidgetTester tester, String label) {
+  final cell = find.ancestor(
+    of: find.text(label),
+    matching: find.byType(InkResponse),
+  );
+  if (cell.evaluate().isEmpty) return false;
+  return tester.widget<InkResponse>(cell.first).onTap != null;
+}
+
 void main() {
   TimeZones.ensureInitialized();
   final madrid = TimeZones.location('Europe/Madrid');
@@ -228,11 +242,43 @@ void main() {
     testWidgets('the Away control clears the 48dp floor at every font scale',
         (tester) async {
       for (final scale in [1.0, 1.5, 2.0]) {
-        await pumpTap(tester, state(), textScale: scale);
+        await pumpTap(tester, state(away: record()), textScale: scale);
         final size = tester.getSize(find.byKey(awayActionKey));
         expect(size.height, greaterThanOrEqualTo(48),
             reason: 'at scale $scale');
       }
+    });
+
+    testWidgets('and it is REACHABLE at the largest scale in the away state',
+        (tester) async {
+      // `getSize` above returns the laid-out size of a widget that may be
+      // entirely outside the viewport, so it measures the wrong property on its
+      // own — and it pumped the non-away state, where the tallest element on
+      // the band is absent. This is the assertion that has teeth: the away
+      // state on a small screen at scale 2.0, where the away line is two
+      // sentences of `headlineSmall` and pushes the control off the bottom of a
+      // 36%-of-screen band.
+      //
+      // It is the one control a person needs in order to act on reading that
+      // somebody else marked them away, so a hidden scroll is a discovery
+      // problem for exactly the reader this app is built for.
+      await pumpTap(
+        tester,
+        state(away: record()),
+        textScale: 2,
+        surface: const Size(320, 640),
+      );
+
+      expect(find.byType(Scrollbar), findsWidgets,
+          reason: 'a visible thumb is what says there is more below');
+      await tester.ensureVisible(find.byKey(awayActionKey));
+      await tester.pumpAndSettle();
+
+      final rect = tester.getRect(find.byKey(awayActionKey));
+      final view = tester.view.physicalSize / tester.view.devicePixelRatio;
+      expect(rect.top, lessThan(view.height));
+      expect(rect.bottom, greaterThan(0));
+      expect(tester.takeException(), isNull);
     });
   });
 
@@ -365,13 +411,17 @@ void main() {
         reason: 'the screen cannot offer a day its own validation refuses',
       );
 
+      // The widget half asserts SELECTABILITY, not presence. `tester.widget`
+      // throws when the finder misses, so an `isNotNull` on it can never fail —
+      // it would pass against a picker with `lastDate` a year out.
       await pumpPicker(tester);
-      // Nothing in October is reachable from the opening month, and the day
-      // after the cap is not selectable in September either.
       await tester.tap(find.byTooltip('Next month'));
       await tester.pumpAndSettle();
-      final seventeenth = tester.widget<Text>(find.text('17'));
-      expect(seventeenth, isNotNull);
+
+      // 16 September is the last selectable day; the 17th is one past the cap.
+      expect(_dayIsSelectable(tester, '16'), isTrue);
+      expect(_dayIsSelectable(tester, '17'), isFalse,
+          reason: 'one day past the cap must be offered to nobody');
     });
 
     testWidgets('an out-of-range stored period does not crash the screen',

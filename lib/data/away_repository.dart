@@ -135,22 +135,11 @@ class AwayRepository {
       return const AwayOutcome.refused(AwayRefusal.notSignedIn);
     }
 
-    // **An away period that has ENDED is not an existing period.**
-    //
-    // Nothing deletes the document when a period runs its course — deliberately,
-    // because the days already spent away must stay covered (ADR-0001 applied to
-    // the cache). So the stored record outlives the holiday, and treating it as
-    // `existing` freezes `from` at a date now weeks in the past, which
-    // `validateUpdate` then refuses for ever: away worked **once per person and
-    // then went permanently dead**, on both sides, with copy blaming the
-    // reader's choice of day.
-    //
-    // ADR-0001 decision 6 froze `from` for the life of a **period**, not for the
-    // life of a person — its reason is that truncating an in-progress period
-    // rewrites a document whose `from` is already past, and an ended period is
-    // not in progress. `firestore.rules` carries the same distinction now.
-    final inForce =
-        existing != null && !existing.hasExpiredOn(today) ? existing : null;
+    // **An away period that has ENDED is not an existing period.** The
+    // reasoning is `AwayRules.periodInForce`'s, and it is there rather than
+    // here because it is a policy question — it was inline, and it was the
+    // defect that made away settable once per person and then never again.
+    final inForce = AwayRules.periodInForce(existing, today);
 
     // The client's own check, run **before** anything is sent. It is not the
     // control — the rules are — but it is what stops an ordinary mistake

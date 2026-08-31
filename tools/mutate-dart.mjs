@@ -24,12 +24,19 @@
 // away decision on both sides runs through. `AwayRecord` and the watched
 // reconcile's away half joined it.
 //
+// **The WATCHER side came off the list at the same gate**, and that was a
+// correction rather than an extension: Phase 6's first pass mutated the watched
+// side, whose failure is a person nagged through a holiday — loud — while the
+// silent failure lives in `WarningPolicy` step 5, which decides whether a
+// family hears anything at all and had no mutation coverage of any kind.
+//
 // Still not mutated, and named so nobody mistakes the number for coverage:
-// `DayKey`, `ReminderPolicy`, `WarningPolicy`, either reconciler, the
-// false-warning correction path, `AlarmIds` (whose per-process stability is a
-// `CLAUDE.md` constraint and the premise the correction path rests on), the
-// `onCheckInCreated` fan-out, and `firestore.rules` — which has 75 tests and no
-// mutation coverage at all.
+// `DayKey`, `ReminderPolicy`, either reconciler, the false-warning correction
+// path, `AlarmIds` (whose per-process stability is a `CLAUDE.md` constraint and
+// the premise the correction path rests on), the `onCheckInCreated` fan-out,
+// and `firestore.rules` — which has 80 tests and no mutation coverage from this
+// harness, though the two clauses Phase 6 changed were each verified by hand by
+// reverting them and watching the new tests fail.
 //
 // Those are most of the pure functions `docs/testing/strategy.md` says the risk
 // lives in. Extending the lists there is worth more than adding another Phase 5
@@ -376,6 +383,117 @@ const groups = [
           'The `away` parameter has been threaded through every policy since ' +
           'Phase 1 for this line. Passing null re-arms all three reminders on ' +
           'every away day, which is the visible half of the feature.',
+      },
+    ],
+  },
+  // ------------------------------------------------ the WATCHER side, at last
+  //
+  // Added at the Phase 6 gate, and the reason is a correction to this file's
+  // own reasoning. Phase 6 mutated `AwayPeriod`, `AwayRules`, `AwayRecord` and
+  // the WATCHED reconcile — and the watched side's failure is a person being
+  // nagged through a holiday, which is loud. **The silent failure is here**,
+  // in the function that decides whether a family hears anything at all, and it
+  // had no mutation coverage of any kind.
+  {
+    file: 'lib/domain/policy/warning_policy.dart',
+    mutations: [
+      {
+        name: 'step 5: the two-day staleness bound becomes a month',
+        from: 'gap <= staleAwayAfterDays',
+        to: 'gap <= 30',
+        why:
+          "ADR-0001's bound, gone. A cached away period would buy UNLIMITED " +
+          'silence — the device stops being able to re-verify and goes on ' +
+          'saying nothing, with no notification and no error, which is the ' +
+          'exact defect the ADR was written for.',
+      },
+      {
+        name: 'step 5: a backwards clock silences the watcher',
+        from: 'gap >= 0',
+        to: 'gap >= -3650',
+        why:
+          'A device whose clock moved backwards would honour a cached away ' +
+          'on a verification that never happened. §11 surfaces skew rather ' +
+          'than trusting it, and CLAUDE.md already carries one constraint ' +
+          'paid for by a clock-derived value being wrong.',
+      },
+      {
+        name: 'step 5: the away period stops having to cover the day',
+        // Anchored on the `if (`, because the bare condition also appears in
+        // the access-lost branch three lines above — the runner refused to
+        // score it as ambiguous, which is what that guard is for.
+        from: 'if (honoured != null && honoured.covers(day)) {',
+        to: 'if (honoured != null) {',
+        why:
+          'EVERY day becomes an away day for as long as the document is ' +
+          'cached, including days long after `through`. Silence, on both ' +
+          'sides, for as long as the cache survives.',
+      },
+      {
+        name: 'step 5: the read-time sanity clamp is dropped',
+        // Anchored on the line above it, because the same statement appears in
+        // the access-lost branch — the runner refused this as ambiguous, which
+        // is the second time that guard earned its place in one session.
+        from:
+          'in the design would catch it.\n' +
+          '    final honoured = away?.clampedToSanityBound();',
+        to:
+          'in the design would catch it.\n' +
+          '    final honoured = away;',
+        why:
+          "The watcher-side twin of the clamp mutation on `covers`. Worth " +
+          'running even expecting it to be caught by the same tests: a ' +
+          'SURVIVOR here would be a real finding about double-clamping ' +
+          'rather than a gap, which is the case this list keeps learning to ' +
+          'tell apart.',
+      },
+    ],
+  },
+  {
+    file: 'lib/domain/reconcile/watcher_cache.dart',
+    mutations: [
+      // **ADR-0001's gate itself cannot be mutated here, and that is a fact
+      // about the code rather than a gap in this list.**
+      //
+      // `if (read is! ReadSucceeded) return this;` is what NARROWS THE TYPE —
+      // every line below it reads `read.checkInDays` and `read.away`, which do
+      // not exist on `FirestoreRead`. So every mutation of that guard stops the
+      // file compiling, and the runner correctly refuses to score it: a
+      // mutation the compiler rejects proves nothing about the tests, because
+      // the tests never ran. Phase 5 hit the identical shape three times and
+      // its note is a few hundred lines above.
+      //
+      // The property is not unguarded: the compiler enforces it, and the
+      // WATCHED-side twin — `if (read.succeeded) await store.setSelfAway(…)` —
+      // is mutated in this file and caught, because there the gate is a plain
+      // boolean rather than a promotion.
+      //
+      // So this entry covers a different real hazard in the same function.
+      {
+        name: 'applyRead: lastConfirmedDay stops being monotonic',
+        from: 'if (confirmed == null || day > confirmed) confirmed = day;',
+        to: 'if (confirmed == null || day < confirmed) confirmed = day;',
+        why:
+          'A read of a narrow window would walk `lastConfirmedDay` BACKWARDS ' +
+          'and re-open a day already settled — so a family gets a second ' +
+          'warning about a day they have already read and acted on, which §10 ' +
+          'rates a small version of the worst thing this app can do. The ' +
+          'comment above the line is the only thing that had been holding it.',
+      },
+    ],
+  },
+  {
+    file: 'lib/data/local_store.dart',
+    mutations: [
+      {
+        name: 'setSelfAway: clearing the away row becomes a no-op',
+        from: "await _db.delete('self_away', where: 'id = 0');",
+        to: "await _db.query('self_away', where: 'id = 0');",
+        why:
+          'A cancellation would never land locally: her reminders never ' +
+          'return, nothing errors, and the only signal is their absence. ' +
+          'This is the single assignment that makes an away period cancelled ' +
+          "from a WATCHER'S phone visible on hers.",
       },
     ],
   },

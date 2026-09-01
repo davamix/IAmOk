@@ -727,8 +727,14 @@ needed **no rules change and no migration**: `users/{uid}` is already self-write
 bound at 1–100 characters, and the typed name is a setting rather than a column. The trap was
 `refreshProfile`, which rewrites the profile on every launch and would have replaced a typed name
 with the placeholder within minutes; `AppServices.profileDisplayName()` now owns one precedence rule
-for both. Still owed: the owner's approval of the exact strings, and a repair path for links already
-accepted carrying the placeholder — which may have nothing to repair.
+for both. **The copy is approved the same day, with one amendment**: the body's *"from your Google
+account"* is cut, because the reader cannot act on where the name failed to come from. **Nothing is
+owed** — no repair path for links accepted before their owner was named, because no real user data
+exists and no link created from here on can carry the placeholder; and no render-time fallback,
+because the source fix makes `Someone` unreachable through the app. The constant stays only as a
+legality backstop, since the rules require a non-empty `displayName`.
+
+**All four of the second gate's decisions are now taken, and Phase 6 owes nothing but Doze.**
 
 | | The call | Why it is not mechanical |
 |---|---|---|

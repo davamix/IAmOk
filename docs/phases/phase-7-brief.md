@@ -87,7 +87,7 @@ and a handful of observations that land squarely in this phase's surfaces. The f
 |---|---|
 | `awayPeriodEnded()` is permissive west of UTC | Rules-only. Decide it before any deploy, not before any screen |
 | `allow delete` is unconditional | Rules-only, but the **access matrix** in `firestore-rules-guidelines.md` currently disagrees with the file. Fix the disagreement before the health panel cites either |
-| **`pickerTitleFor` has no fallback** and can render *"Choose the last day Someone is away"* | **This is a Phase 7 problem too.** Four `?? 'Someone'` sites feed every name surface, and `#8`'s "surfaces for fields already stored" means more of them. A health panel row per person will name people the same way |
+| ~~`pickerTitleFor` has no fallback~~ | **Closed 2026-09-01, at the source.** A person whose Google account has no display name is now asked for one before `users/{uid}` is written, so no link can carry `Someone`. Phase 7 inherits **no work** here — but it inherits the rule: a name reaching a surface comes from `link.watchedName`, and the health panel's per-person rows will name people the same way |
 | The queued-cache rule is not in ARCHITECTURE.md | Write it before the panel reads `self_away`, or the panel will be the second reader of a rule the design does not state |
 
 **Two things this phase's own layout will meet:**

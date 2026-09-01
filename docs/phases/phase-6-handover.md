@@ -200,20 +200,22 @@ symptom. Built the same day. Two traps were real and are closed:
   at 1–100 characters after trimming, and the name is a **setting**, not a column, so
   `schemaVersion` is untouched.
 
-**What is still owed, and it is small:**
+**The copy is approved, 2026-09-01, with one amendment** — a cut. The body's *"from your Google
+account"* is gone: the reader cannot act on where the name failed to come from, and what is left is
+a sentence somebody would say out loud. Recorded in `screens.md` under *Asking for a name*.
 
-1. **The owner's approval of the exact strings.** They are drafted to the owner's own direction and
-   recorded in `screens.md` under *Asking for a name*; the inventory row says approval is owed.
-2. **A link already accepted keeps the name it was denormalised with**, so an account paired before
-   it was named still reads as *"Someone"* on the other phone. Repairing those needs a per-watcher
-   **local nickname** — a settings entry keyed by link id, preferred in `WatchedPersonState.name`,
-   with no migration and no rules change — or a re-sync path, which would need a new callable because
-   `users/{uid}` is self-read-only and links are function-written. The nickname belongs in **Phase 7**,
-   where the watcher row is already being worked on. **It may have nothing to repair**: no link
-   created from now on can carry the placeholder, so the exposure is accounts that onboarded before
-   today, which today means the emulator rig.
-3. **The render-time fallback was not built**, because the source fix makes it unreachable for new
-   users. It remains the cheap floor if 2 is ever wanted without the nickname.
+**Nothing is owed.** Two things were considered and both are closed rather than deferred:
+
+- **A link accepted before its owner was named keeps that name**, because `redeemInvite` denormalises
+  it. **No repair path is owed** — no real user data exists, every account so far is on the emulator
+  rig, and no link created from here on can carry the placeholder. If it is ever wanted, the cheap
+  shape is a per-watcher local nickname keyed by link id in the settings table: no migration, no
+  rules change.
+- **The render-time fallback was not built**, and is not needed. The source fix makes `Someone`
+  unreachable through the app: the only two ways a name reaches `users/{uid}` are the Google account
+  and this field, and the field refuses an empty one. The constant stays as a **legality backstop**,
+  because the rules require a non-empty `displayName` and writing nothing would be a
+  `permission-denied` on the document that makes pairing possible.
 
 ### 1. The device run — DONE, 2026-09-01, on two AVDs and then on the POCO
 

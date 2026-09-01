@@ -97,13 +97,18 @@ abstract final class OnboardingCopy {
   /// interrupts somebody.
   ///
   /// *"This phone"* is the house voice for a statement about the device
-  /// (`profileFailed`, `WatcherCopy.couldNotCheck`), and naming **Google** is
-  /// contextual rather than jargon: they pressed *Sign in with Google* one screen
-  /// ago. The second sentence says why it is worth typing — the name is not for
-  /// this phone, it is what other people will read.
+  /// (`profileFailed`, `WatcherCopy.couldNotCheck`). The second sentence says why
+  /// it is worth typing: the name is not for this phone, it is what other people
+  /// will read.
+  ///
+  /// **It deliberately does not say where the name failed to come from.** The
+  /// draft read *"could not get your name from your Google account"*, and the
+  /// owner cut that clause on 2026-09-01. It is the right cut: the reader cannot
+  /// act on it, *account* is the app's word rather than theirs, and the sentence
+  /// it leaves is one somebody would actually say out loud — which is this
+  /// file's own test for copy.
   static const String nameBlurb =
-      'This phone could not get your name from your Google account. Type the '
-      'name your family will see.';
+      'This phone could not get your name. Type the name your family will see.';
 
   /// The field's own label, and its screen-reader label with it.
   static const String nameFieldLabel = 'Your name';

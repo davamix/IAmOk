@@ -69,7 +69,7 @@ pushes only when asked.
 | `tsc --noEmit` | clean at the pinned Node 22 types |
 | Debug APK | builds |
 | Secrets guard | clean — 25 ignored, 6 deliberately tracked |
-| Dart mutations | **31 caught, 0 survived, 0 did not compile**, 10 passing controls |
+| Dart mutations | **34 caught, 0 survived, 0 did not compile**, 13 passing controls |
 | Device | **every Phase 6 row run 2026-09-01 — two API 36 AVDs, then the POCO F3 for the OEM half** |
 
 **All three exit criteria are met in tests** — `test/application/away_exit_criteria_test.dart`,
@@ -79,8 +79,9 @@ of them on the POCO with aeroplane mode on and the harness walking the clock acr
 
 ### The mutation harness, and what it cost to get a number
 
-**31 mutations, 31 caught, 0 survived, 0 `DID NOT COMPILE`**, ten passing no-op controls, run
-2026-09-01 on a clean tree. Seventeen of the 31 are away surfaces. Re-run with:
+**34 mutations, 34 caught, 0 survived, 0 `DID NOT COMPILE`**, thirteen passing no-op controls,
+**re-run 2026-09-01 after the owner's decisions were applied**, on a clean tree. Twenty of the 34
+are away surfaces. Re-run with:
 
 ```powershell
 node tools/mutate-dart.mjs
@@ -111,11 +112,25 @@ down than when its numbers are:
 lines back to their original form. The Phase 5 gate found a mutated build in the tree with
 `git status` clean.
 
-> **Worth doing.** `mutate-runner.mjs` refuses an ambiguous `from` **when it reaches that
-> mutation** — up to twenty minutes in. Validating every `from` in the list *before the control runs*
-> turns that into a two-second failure. Six lines: for each mutation, read its file, count
-> occurrences, throw naming the file and the string unless it is exactly one. It changes no verdict;
-> it only moves when the existing guard fires.
+**Three mutations were added with the owner's decisions**, because that code is silent-direction by
+construction — if any of it stops working the phone quietly returns to saying *"Saved."* and then
+contradicting itself, which is the state the device run measured:
+
+| | What goes silently wrong |
+|---|---|
+| `_cacheQueued`: the negation dropped | Everything *but* a queued write is cached, so the one case that needed it is the one that loses it |
+| `endAway`: `null` where `truncated` belongs | A queued shortening reads locally as a cancellation, and the days already spent away stop being covered |
+| The away row discards the dialog's answer | The confirmation appears and *Go back* ends the period anyway — worse than no dialog, because it teaches the reader to press through |
+
+All three were caught, which is what says the sixteen new tests are load-bearing rather than
+decorative.
+
+> **DONE, 2026-09-01.** `mutate-runner.mjs` refused an ambiguous `from` **when it reached that
+> mutation** — up to twenty minutes in, twice at the gate. `validateAnchors(groups)` now runs
+> **before anything else** in `mutate-dart.mjs` and throws naming every anchor that does not match
+> exactly once. It changes no verdict; it moves when the existing guard fires, from twenty minutes
+> to two seconds. Proved in both directions before it was committed: real anchors pass, and a
+> missing one (0×) and an ambiguous one (12×) are both named in the same throw.
 
 ---
 

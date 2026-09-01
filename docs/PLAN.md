@@ -409,8 +409,8 @@ watcher list showing Mum. **The AVD also tapped**, which closes the half Phase 4
 > `PairingRefusal.serverFault`.
 >
 > **`AwayPeriod` came off the mutation harness's "not mutated" list**, where it had sat for five
-> phases as a type nothing read. **31 Dart mutations, 31 caught, 0 survived, 0 failed to compile,
-> ten passing controls. 1 354 Dart tests**, 102 Functions tests, 80 rules tests, analyze clean, debug
+> phases as a type nothing read. **34 Dart mutations, 34 caught, 0 survived, 0 failed to compile,
+> thirteen passing controls. 1 370 Dart tests**, 102 Functions tests, 80 rules tests, analyze clean, debug
 > APK builds. *(This paragraph read 25 / 1 322 until 2026-09-01 — the gate's own commits moved both
 > numbers and did not move this line.)*
 >

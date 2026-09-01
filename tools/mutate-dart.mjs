@@ -48,7 +48,7 @@
 // the loop under test did not ride on. Only the third — `recordPairing`'s
 // monotonicity guard — was a real gap, and it is pinned below.
 
-import { mutate, report, run } from './mutate-runner.mjs';
+import { mutate, report, run, validateAnchors } from './mutate-runner.mjs';
 
 const suite = async () => run('flutter', ['test']);
 
@@ -497,7 +497,59 @@ const groups = [
       },
     ],
   },
+  {
+    // Added 2026-09-01, with the owner's decision that a QUEUED away write is
+    // cached on the phone that wrote it. Both mutations below are the silent
+    // direction: the phone quietly goes back to saying *"Saved."* and then
+    // contradicting itself, which is the state the device run measured and the
+    // decision exists to end. Nothing errors in either case.
+    file: 'lib/application/providers.dart',
+    mutations: [
+      {
+        name: '_cacheQueued: everything BUT a queued write is cached',
+        from: 'if (outcome is! AwayQueued) return;',
+        to: 'if (outcome is AwayQueued) return;',
+        why:
+          'The negation dropped. A confirmed write is cached — harmless, the ' +
+          'reconcile reads it back anyway — and the QUEUED one is not, which ' +
+          'is the only case that needed it: the write that has not landed, on ' +
+          'the one device `onAwayChanged` deliberately skips.',
+      },
+      {
+        name: 'endAway: a queued truncation clears the row instead',
+        from: 'await _cacheQueued(outcome, truncated);',
+        to: 'await _cacheQueued(outcome, null);',
+        why:
+          'Passes null where the truncated period belongs, so a queued ' +
+          '*shortening* reads locally as a cancellation. The days already ' +
+          'spent away stop being covered on this phone — ADR-0001 decision ' +
+          "5's argument, lost at the one call site that carries it.",
+      },
+    ],
+  },
+  {
+    file: 'lib/presentation/watcher_screen.dart',
+    mutations: [
+      {
+        name: 'the away row ends the period whatever the dialog answered',
+        from: 'if (!await _confirmEnd(person.name)) return;',
+        to: 'await _confirmEnd(person.name);',
+        why:
+          'The confirmation still appears and its answer is discarded, which ' +
+          'is worse than having none: the reader is taught the dialog is ' +
+          'decorative and then loses the eleven days it was there to protect. ' +
+          'The owner asked for this control on 2026-09-01 precisely because ' +
+          'ending TRUNCATES.',
+      },
+    ],
+  },
 ];
+
+// **Before anything runs**, and it is two seconds. `mutate` refuses an ambiguous
+// anchor when it REACHES that mutation, which on this list is up to twenty
+// minutes in — twice at the Phase 6 gate, on two `WarningPolicy` strings, each
+// costing a whole run to find out.
+validateAnchors(groups);
 
 const all = [];
 for (const group of groups) {

@@ -292,14 +292,26 @@ produced a number.
 
 ### Results
 
-**2026-09-01: 31 mutations, 31 caught, 0 survived, 0 `DID NOT COMPILE`**, with **ten** passing no-op
-controls — one per file, each of which has to pass before anything in that group is scored. That is
-the number *with* the compile gate the Phase 5 gate review added, which is the only version worth
-quoting.
+**2026-09-01: 34 mutations, 34 caught, 0 survived, 0 `DID NOT COMPILE`**, with **thirteen** passing
+no-op controls — one per file, each of which has to pass before anything in that group is scored.
+That is the number *with* the compile gate the Phase 5 gate review added, which is the only version
+worth quoting.
 
-**Seventeen of the 31 are away surfaces**: six on `AwayPeriod`/`AwayRules`, three on `AwayRecord`,
-two on the watched reconcile, four on `WarningPolicy` step 5, one on `WatcherCache.applyRead` and one
-on `LocalStore.setSelfAway`.
+**Twenty of the 34 are away surfaces**: six on `AwayPeriod`/`AwayRules`, three on `AwayRecord`, two
+on the watched reconcile, four on `WarningPolicy` step 5, one on `WatcherCache.applyRead`, one on
+`LocalStore.setSelfAway`, and **three added with the owner's decisions** — two on the queued-write
+cache and one on the watcher row's confirmation.
+
+**The run was repeated from scratch after those decisions were applied**, which is the point of
+having it: the three new mutations are silent-direction by construction — a queued write that stops
+being cached, a truncation that reads locally as a cancellation, and a confirmation whose answer is
+discarded — and all three were caught, which is what says the sixteen new tests are load-bearing.
+
+**And the fail-fast check the handover called for is now in the harness.** `validateAnchors(groups)`
+runs before the first control and throws naming every anchor that does not match its file exactly
+once. The runner already refused an ambiguous anchor; it did so twenty minutes in, twice, at this
+gate. Proved in both directions before committing — real anchors pass, a missing one (0×) and an
+ambiguous one (12×) are named together in one throw.
 
 > **One mutation had to be rewritten, and why is worth keeping.** ADR-0001's gate on the watcher side
 > — `if (read is! ReadSucceeded) return this;` — **cannot be mutated at all**: it is what narrows the
@@ -341,7 +353,7 @@ with `git status` clean.
 | Functions | **102 passing** (83 before) — the runner globs `test/*.test.js`, and its own count is what says the new suite ran |
 | `tsc --noEmit` | clean, at the pinned Node 22 types |
 | Rules | **80 tests** (75 before). `firestore.rules` CHANGED this phase — see the gate review — and is **not deployed** |
-| Dart mutations | **31 caught, 0 survived, 0 did not compile**, 10 passing controls |
+| Dart mutations | **34 caught, 0 survived, 0 did not compile**, 13 passing controls |
 | Debug APK | builds — three of them, from two trees, for the device run |
 | Device | **run 2026-09-01 on two API 36 AVDs. Every Phase 6 row answered; the POCO refused to be installed to** — see *The device run* below |
 

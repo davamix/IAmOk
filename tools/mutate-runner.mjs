@@ -175,6 +175,42 @@ export function classify({ text }, { green, red }) {
  * once** in the file — an ambiguous match is a mutation that might be editing
  * something other than the line it names, so it is refused before anything runs.
  */
+/**
+ * Every anchor in every group matches **exactly once**, checked before anything
+ * runs.
+ *
+ * [mutate] already refuses an ambiguous `from` rather than editing a line it
+ * might be misidentifying — but it does so **when it reaches that mutation**,
+ * which on a full Dart run is up to twenty minutes in, after the control and
+ * everything above it have been paid for. That happened twice at the Phase 6
+ * gate, on two `WarningPolicy` strings, and each cost a whole run to discover.
+ *
+ * This changes no verdict. It moves *when* the existing guard fires, from
+ * twenty minutes to two seconds, which is the difference between a typo costing
+ * an afternoon and costing nothing.
+ *
+ * Normalised the same way [mutate] normalises: a CRLF working tree would
+ * otherwise report every multi-line anchor as missing.
+ */
+export function validateAnchors(groups) {
+  const bad = [];
+  for (const group of groups) {
+    const text = readFileSync(group.file, 'utf8').replace(/\r\n/g, '\n');
+    for (const mutation of group.mutations) {
+      const count = text.split(mutation.from).length - 1;
+      if (count !== 1) {
+        bad.push(`  ${group.file}: ${count}x — ${mutation.name}\n    ${mutation.from}`);
+      }
+    }
+  }
+  if (bad.length > 0) {
+    throw new Error(
+      `${bad.length} mutation(s) name an anchor that does not appear exactly ` +
+        `once in their file. Nothing has been run.\n${bad.join('\n')}`,
+    );
+  }
+}
+
 export async function mutate({ file, mutations, suite, compile }) {
   // **Normalised to LF on the way in.** Git for Windows defaults to
   // `core.autocrlf=true` and this repo has no `.gitattributes`, so a fresh clone

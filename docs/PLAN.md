@@ -362,10 +362,11 @@ watcher list showing Mum. **The AVD also tapped**, which closes the half Phase 4
 
 ## Phase 6 — Away mode
 
-> **BUILT and REVIEWED against the emulator suite, 2026-08-27. Not signed off** — **nothing in this
-> phase has been on a handset**, and the drafted picker and refusal copy is owed the owner's
-> approval. Start from [phases/phase-6-handover.md](phases/phase-6-handover.md) — what is left and
-> in what order — then read *The gate review* in
+> **BUILT and REVIEWED against the emulator suite, 2026-08-27; RUN ON DEVICES 2026-09-01 — two API
+> 36 AVDs and then the POCO F3. Not signed off** — the drafted picker and refusal copy is owed the
+> owner's approval, seven decisions are open, and **Doze is the one device question the run did not
+> close**. Start from [phases/phase-6-handover.md](phases/phase-6-handover.md) — what is left and
+> in what order — then read *The gate review* and *The device run* in
 > [phases/phase-6-summary.md](phases/phase-6-summary.md).
 >
 > **The gate found that the feature did not work.** Three of the five reviewers independently found
@@ -408,13 +409,21 @@ watcher list showing Mum. **The AVD also tapped**, which closes the half Phase 4
 > `PairingRefusal.serverFault`.
 >
 > **`AwayPeriod` came off the mutation harness's "not mutated" list**, where it had sat for five
-> phases as a type nothing read. 25 Dart mutations, 25 caught, 0 survived, 0 failed to compile, eight
-> passing controls. 1 322 Dart tests, 102 Functions tests, analyze clean, debug APK builds.
+> phases as a type nothing read. **31 Dart mutations, 31 caught, 0 survived, 0 failed to compile,
+> ten passing controls. 1 354 Dart tests**, 102 Functions tests, 80 rules tests, analyze clean, debug
+> APK builds. *(This paragraph read 25 / 1 322 until 2026-09-01 — the gate's own commits moved both
+> numbers and did not move this line.)*
 >
-> **Owed:** the device run (including the Phase 5 gate's unarmed-warning check, which is still
-> outstanding), all five reviewers, owner approval of the drafted picker and refusal copy, and §12's
-> four away **transition notifications**, which are specified and deliberately not built — PLAN.md's
-> deliverable list does not name them and the exit criteria do not turn on them.
+> **The device run is done**, 2026-09-01: every checklist row in `testing/device-matrix.md`,
+> including the Phase 5 gate's unarmed-warning check, on two AVDs and then the OEM half on the POCO.
+> It proved the closed-app nudge in both directions, both cancel shapes, §17's attribution line on a
+> handset, and the v5 → v6 migration on a real store — and found that an away period set **offline**
+> reports *"Saved."* and changes nothing on the setter's own phone until an unrelated reconcile runs.
+>
+> **Owed:** owner approval of the drafted picker and refusal copy plus **seven** open decisions in
+> `ui-ux/screens.md`; §12's four away **transition notifications**, which are specified and
+> deliberately not built — this deliverable list does not name them and the exit criteria do not turn
+> on them; and **Doze**, plus the third exit criterion below.
 
 **Deliverables** — `users/{uid}/shared/away`, rules validation (31-day cap — **deliberately slack in the rules, see `security/firestore-rules-guidelines.md`; the exact check is `AwayRules`**, no retroactive,
 `through >= from`), the `onAwayChanged` fan-out, the Away button on the Tap screen (which becomes
@@ -427,9 +436,12 @@ and *"Back on Sunday 23"*.
 both; and a device that was offline for the whole period still ends away on the right day.~~ **All
 three met in tests, 2026-08-27** (`test/application/away_exit_criteria_test.dart`), driven end to end
 through both reconcilers and built around **ending** rather than starting, because away is the first
-feature here whose failure mode is silence. **Not met on a device.** The third clause in particular
-cannot be driven in a session — it needs a phone to sit offline across a period boundary — so what a
-device would add there is confidence that nothing *else* expires the cache.
+feature here whose failure mode is silence. **The first two are now met on devices as well,
+2026-09-01** — away set from either side silenced both, and cancelling from either side restored
+both, on two AVDs and on the POCO, with the alarms read from `dumpsys` rather than from the app's own
+record. **The third is still not**: it needs a phone to sit offline across a period boundary, and
+what a device would add there is confidence that nothing *else* expires the cache. The debug
+harness's forced date is the intended route and shortens it from days to minutes; it was not run.
 
 ---
 

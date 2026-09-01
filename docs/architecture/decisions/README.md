@@ -17,6 +17,7 @@
 | [0009](0009-decide-about-every-completed-day.md) | Decide about every completed day, not only the most recent | Accepted | ARCHITECTURE.md §10 · `ui-ux/screens.md` |
 | [0010](0010-a-push-may-not-post-a-warning-early.md) | A push may not post a warning before `warningLocalTime` | Accepted | ARCHITECTURE.md §10 · `ui-ux/screens.md` · `testing/device-matrix.md` |
 | [0011](0011-creating-an-invite-is-a-function-too.md) | Creating an invite is a Function too | Accepted | ARCHITECTURE.md §6, §9, §15 |
+| [0012](0012-a-queued-away-write-is-cached-on-the-phone-that-wrote-it.md) | A queued away write is cached on the phone that wrote it, and only there | Accepted | ARCHITECTURE.md §3, §12 · ADR-0001 · `ui-ux/screens.md` |
 
 ## What belongs here
 

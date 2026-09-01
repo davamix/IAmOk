@@ -707,7 +707,19 @@ asserted the way **back** was present at all. `actionsOverflowButtonSpacing: 12`
 asserts both actions and measures the gap. Reverting the property fails it, which also settles
 empirically that the dialog really does stack at that size.
 
-### Held for the owner — four, unapplied
+### Held for the owner — four raised, **three decided the same day**
+
+**Decided 2026-09-01, after the table below was written:** the timezone bias is corrected **in the
+comment rather than in the code** (the permissive case cannot occur at a non-negative UTC offset, so
+it is unreachable in the zone this app ships to, and the one-day slack that would close it turns a
+two-hour refusal window in Madrid into twenty-six); `allow delete` **stays open** and the invariant is
+recorded as **client-enforced** (guarding it would make a malformed document unrepairable and gains
+nobody anything); and the queued-cache rule became
+**[ADR-0012](../architecture/decisions/0012-a-queued-away-write-is-cached-on-the-phone-that-wrote-it.md)**,
+with §3's tier block and a new §12 subsection pointing at it. **`pickerTitleFor` remains open**, with
+a third option on the table — asking the person to type a name rather than falling back at render
+time. The handover carries the trace of where `'Someone'` actually comes from, because it is not
+obvious and it is not a name picked from a list.
 
 | | The call | Why it is not mechanical |
 |---|---|---|

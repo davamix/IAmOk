@@ -54,7 +54,7 @@ From [ARCHITECTURE.md](../architecture/ARCHITECTURE.md) §8, as amended by
 | `through <= request.time + 32d` — the cap, **deliberately slack**; see below | ✓ | ✓ |
 | `from >= today` — no retroactive away | ✓ | — |
 | `from` unchanged from the stored value — **while the stored period is still in force** | — | ✓ |
-| delete allowed | — | ✓ (cancelling before any day has elapsed) |
+| delete allowed | — | ✓ **unconditionally** — see below. The parenthetical *"cancelling before any day has elapsed"* described the **client**, not the rule |
 
 > **`from >= today` is a create-only rule, and this is load-bearing.** Cancellation truncates
 > rather than deletes (§12), which rewrites an in-progress period whose `from` is already in the
@@ -77,13 +77,36 @@ From [ARCHITECTURE.md](../architecture/ARCHITECTURE.md) §8, as amended by
 >       && awayNotRetroactive(request.resource.data))
 > ```
 >
-> **Biased strict, against this file's usual grain, and that is deliberate.** `through` is a local
-> date and `todayStartUtc()` a UTC one, so the comparison is inexact by up to a day. Too permissive
-> would let a new `from` land while a period still has a day to run, un-covering days already spent
-> away — the false claim to a family ADR-0001 exists to prevent. Too strict costs a legitimate re-set
-> a few hours at a zone boundary, which is recoverable and says nothing false. Everywhere else in
-> this file the slack goes the other way; this is the one clause where rejecting is the safer error,
-> and `AwayRules.periodInForce` is the exact check, in the watched person's own zone.
+> **Inexact by up to a day, and which way it errs depends on the zone.** `through` is a day label in
+> the watched person's zone and `todayStartUtc()` is a UTC date. This block said the comparison was
+> *"biased strict"* — that it could only ever refuse a legitimate write. **The Phase 6 close-out gate
+> corrected that: it holds for non-negative UTC offsets only.**
+>
+> - **Positive offset** (Europe/Madrid, where this app actually ships). UTC runs behind local, so a
+>   period that ended yesterday locally still reads as in force for the first one to two hours of the
+>   local day: a legitimate re-set is refused, recoverably, and says nothing false. Here
+>   `utc_today > through` implies `local_today > through`, so the permissive error below **cannot
+>   occur** and the clause genuinely is strict.
+> - **Negative offset** (the Americas). UTC runs ahead, so a period whose last day is **today** can
+>   read as ended for the last hours of the local day, and a fresh non-retroactive `from` may land
+>   while the stored period still has a day to run — un-covering days already spent away, which is
+>   the false claim to a family ADR-0001 exists to prevent.
+>
+> **Not reachable from this app**: `AwayRules.periodInForce` resolves the day in the watched person's
+> own zone and refuses first, so the permissive case needs a client driving the SDK directly. It is
+> left as-is rather than widened by the one-day slack used elsewhere in this file, because that would
+> take the strict cost in the shipping zone from about two hours to about twenty-six and buy nothing
+> there. **Revisit if this app ever serves a negative UTC offset.**
+
+> **`allow delete` is unconditional, so the clause above is not an invariant.** No shape, no state,
+> no time — *"a new `from` may not land while a period still has a day to run"* is reachable by
+> **delete then create**, in every timezone, by the watched person and by every accepted watcher.
+> Left open deliberately: a party who can do it can already delete the document outright, which
+> un-covers everything, and guarding it on `from` would make a **malformed stored document
+> unrepairable** — `dayStart()` errors on a bad day key, so the update branch and a guarded delete
+> would both deny with no client path left to clear it. **The invariant is therefore
+> client-enforced**, by `AwayRules.periodInForce`, and that check is not a duplicate of anything in
+> this file.
 
 > **The cap is against `request.time`, not against `from`.** Identical only while `from` is always
 > today, which is true in v1. §12 keeps `from` as a real field so future-dated away becomes a UI

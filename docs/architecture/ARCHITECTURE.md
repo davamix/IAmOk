@@ -61,6 +61,15 @@ This is the spine of the whole design. Three tiers, with strict precedence:
                       cannot reach the network.
 ```
 
+**Tier 3 is not purely a mirror of tier 1, and the one exception is written down.**
+[ADR-0012](decisions/0012-a-queued-away-write-is-cached-on-the-phone-that-wrote-it.md): a **queued**
+away write is cached into the watched person's own `self_away` row on the phone that wrote it, so the
+screen stops contradicting its own *"Saved."* on a device with no signal. It is bounded by ADR-0001 —
+the first read that *succeeds* overwrites it, including with nothing — and it is confined to the
+**watched** side, because the same shortcut on the watcher side would silence somebody about another
+person for up to a month. Anything reading `self_away` must treat it as *what this phone believes,
+until the next successful read*, rather than as *what the server said*.
+
 **FCM is not load-bearing.** If every push were dropped, the system stays correct — it just
 gets slower, because the watcher reconciles from Firestore on app open and again at alarm
 time. FCM earns its place for exactly one reason: it is the only way to refresh tier 3 while
@@ -845,6 +854,26 @@ notification. It exists so the resumption of warnings is never a surprise.
 - **UI: a calendar picker, with the selected day labelled unambiguously** — *"Last day away:
   Saturday 22"* and *"Back on Sunday 23"*. "Until" alone is ambiguous about whether the chosen
   day still needs a tap.
+
+### A write that could not be confirmed is cached on the phone that wrote it
+
+[ADR-0012](decisions/0012-a-queued-away-write-is-cached-on-the-phone-that-wrote-it.md), and it is the
+one place tier 3 holds something tier 1 does not. Measured in aeroplane mode on 2026-09-01: an away
+period set offline reported *"Saved."* while `self_away` stayed empty, the away line never appeared,
+and the reminders for the away days stayed armed — because this side takes its away row from a
+**read-back**, and `onAwayChanged` deliberately skips whoever set the period, so the one device
+certain not to be told is the one that wrote it.
+
+A **queued** outcome — and only a queued one; a refusal and a confirmed write both cache nothing —
+now writes the period into the watched person's own `self_away` row, and the reconcile re-derives the
+reminders from it. **Bounded by ADR-0001**: the first read that *succeeds* overwrites it with
+whatever Firestore holds, including with nothing.
+
+**The watcher side does not do this and must not.** There the cache is about somebody else, so an
+optimistic row for a write the server refused would silence that watcher for up to a month with
+nothing said — the failure this section calls the one the app cannot detect in itself. On the watched
+side being wrong stops *her own* reminders, which is the loud direction. The asymmetry is the
+decision; the ADR carries the reasoning.
 
 ### Designed-in, not yet exposed
 

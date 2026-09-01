@@ -155,14 +155,52 @@ reached, the dialog's zero-gap actions, the untested rules boundary, the cold-st
 `redeemInvite` cap assertion, the stale present-tense sentence, and the Tap screen's live region —
 each one verified by reverting it and watching the new assertion fail.
 
-**Four are held for the owner and are the only work owed before Phase 7:**
+**Three of the four were decided the same day. One is still open.**
 
-| | The call |
-|---|---|
-| `awayPeriodEnded()` is **permissive west of UTC**, the one direction its comment says it is not | Add a day of slack in the strict direction, or correct the comment and `firestore-rules-guidelines.md` — they assert a guarantee the file does not make |
-| `allow delete` is **unconditional**, so delete-then-create reaches the state the new clause forbids | Guard it (a malformed document then becomes unrepairable), or record the invariant as client-enforced in both the rules comment and the access matrix |
-| `AwayCopy.pickerTitleFor` has **no fallback** and can render *"Choose the last day Someone is away"* | Approve a title for a person the app cannot name. There is no approved string for it, and accepting the placeholder would sit against the decision taken on 2026-09-01 to suppress it |
-| The **queued-cache rule is not in ARCHITECTURE.md** | A paragraph in §12, or ADR-0012. Every decision of comparable weight got an ADR |
+| | Decided | Where it landed |
+|---|---|---|
+| `awayPeriodEnded()` is **permissive west of UTC**, the one direction its comment says it is not | **Correct the claim, not the code.** The permissive case cannot occur at a non-negative UTC offset, so it is unreachable in the zone this app ships to; the one-day slack that would close it turns a ~2-hour refusal window in Madrid into ~26 hours and buys nothing there | The `awayPeriodEnded` comment in `firestore.rules`, and the matching block in `firestore-rules-guidelines.md`. Both now state which direction each offset errs in, and carry **revisit if this app ever serves a negative UTC offset** |
+| `allow delete` is **unconditional**, so delete-then-create reaches the state the new clause forbids | **Leave it open and say so.** Guarding it gains nobody anything — a party who can do it can already delete outright — and makes a malformed stored document **unrepairable**, because `dayStart()` errors on a bad day key and both verbs would then deny | The `allow delete` comment, and the access-matrix row, which said *"cancelling before any day has elapsed"* — a description of the **client**, not of the rule. The invariant is recorded as **client-enforced**, by `AwayRules.periodInForce` |
+| The **queued-cache rule is not in ARCHITECTURE.md** | **ADR-0012**, not a paragraph — the bound, the asymmetry and *why the watcher side must not* are reasoning a future reader needs | `decisions/0012-…md`, the decisions index, §3's tier block and a new §12 subsection |
+| **OPEN — `AwayCopy.pickerTitleFor` has no fallback** and can render *"Choose the last day Someone is away"* | Owner is weighing a **third** option: prompt the person to type a name when their account has none, rather than falling back at render time | Nothing yet. See *What "Someone" actually is* below |
+
+#### What "Someone" actually is, because the chain is not obvious
+
+It is **not** a name picked from a list. It is the fallback written into a person's **own profile**
+when their Google account has no display name, after which it is copied onto every link:
+
+1. `auth_repository.dart:96` — `displayName => _auth.currentUser?.displayName`, the **Google
+   account's** name, which can be null.
+2. `onboarding_screen.dart:100` and `providers.dart:252` — the app writes
+   `users/{uid}.displayName = auth.displayName ?? 'Someone'`. **This is where the literal string is
+   minted.**
+3. `functions/src/invites.ts:450` — `redeemInvite` denormalises `watchedName: watchedProfile
+   .displayName` onto the link.
+4. `watcher_reconcile_service.dart:60` — `String get name => link.watchedName`, which is what reaches
+   `AwayCopy.pickerTitleFor`.
+
+**Rare in production** — Google Sign-In almost always carries a name — and **reliably reproducible on
+the emulator rig**, where an account created without `--dart-define=IAMOK_EMULATOR_NAME` has none.
+
+The sharper half does not depend on rarity: `AwayRecord.unnameable` is **the same string**, used as a
+sentinel meaning *nobody can be named*, and `nameToShowFor` suppresses it. That docstring already
+concedes the collision — *"A real person called this would be suppressed too. That is the right way
+to be wrong."* So the project has already decided how this string behaves on the **attribution**
+path. The picker title is where the same string leaks through **unsuppressed**, which makes the two
+inconsistent rather than wrong.
+
+**Three options, with what each costs:**
+
+- **Render-time fallback.** One sanitiser beside `isUnnameable`, applied where `link.watchedName`
+  becomes a rendered name, plus a neutral title. Needs one approved string. Cheapest; leaves the
+  sentinel in the database.
+- **Ask the person to type a name.** Fixes it at the source, and `users/{uid}` is **self-write with
+  `displayName` 1–100 chars**, so no rules change is needed. Two traps: `refreshProfile()` runs on
+  every launch and would **clobber** a typed name unless it learns to prefer a stored one, and a link
+  already accepted keeps its **denormalised** copy, so existing pairings need either a re-sync path
+  or a local override.
+- **Both**, with the typed name as the fix and the render-time fallback as the floor for links that
+  already carry the sentinel.
 
 ### 1. The device run — DONE, 2026-09-01, on two AVDs and then on the POCO
 

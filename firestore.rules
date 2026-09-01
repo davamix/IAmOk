@@ -275,15 +275,37 @@ service cloud.firestore {
         // rewrites a document whose `from` is already past. An ended period is
         // not in progress, so the reason does not reach it.
         //
-        // BIASED STRICT, against this file's usual grain, and deliberately.
-        // `through` is a local date and `todayStartUtc()` a UTC one, so this is
-        // inexact by up to a day either way. Too permissive would let a new
-        // `from` land while a period still has a day to run, un-covering days
-        // already spent away — the false claim to a family that ADR-0001 exists
-        // to prevent. Too strict costs a legitimate re-set a few hours' delay
-        // at a zone boundary, which is recoverable and says nothing false. The
-        // exact check is the client's, where the day is resolved in the watched
-        // person's own zone.
+        // INEXACT BY UP TO A DAY, AND WHICH WAY IT ERRS DEPENDS ON THE ZONE.
+        // `through` is a day label in the watched person's zone; `todayStartUtc()`
+        // is a UTC date. This comment claimed the comparison was "biased strict"
+        // — that it could only ever refuse a legitimate write, never admit a
+        // harmful one. That is true for **non-negative** UTC offsets only, and
+        // the Phase 6 close-out gate corrected it:
+        //
+        //   POSITIVE offset (Europe/Madrid, UTC+1/+2). UTC is behind local, so
+        //   `todayStartUtc()` is at most today. A period that ended yesterday
+        //   locally still reads as in force for the first 1-2 hours of the local
+        //   day, and a legitimate re-set is refused — `permission-denied` on an
+        //   action the client permitted. Recoverable by waiting, and it says
+        //   nothing false. `utc_today > through` also implies
+        //   `local_today > through`, so for these zones the permissive error
+        //   below CANNOT occur and this clause really is strict.
+        //
+        //   NEGATIVE offset (the Americas). UTC runs ahead of local, so a period
+        //   whose last day is TODAY can read as ended for the last hours of the
+        //   local day. A new, non-retroactive `from` may then land while the
+        //   stored period still has a day to run, un-covering days already spent
+        //   away — the false claim to a family ADR-0001 exists to prevent.
+        //
+        // The permissive case is NOT reachable from this app: `AwayRules
+        // .periodInForce` resolves the day in the watched person's own zone and
+        // refuses first, so producing it needs a client driving the SDK directly.
+        // It is left as-is rather than widened by a day because the fix — the
+        // one-day slack this file uses elsewhere — would turn the strict cost in
+        // the zone this app actually ships to from about two hours into about
+        // twenty-six, buying nothing there. REVISIT IF THIS APP EVER SERVES A
+        // NEGATIVE UTC OFFSET: at that point the slack is worth its cost, or the
+        // watched person's zone has to reach this rule.
         function awayPeriodEnded() {
           return dayStart(resource.data.through) < todayStartUtc();
         }
@@ -300,6 +322,27 @@ service cloud.firestore {
         // Cancelling on the day the period starts deletes rather than truncates
         // — nothing has elapsed, and truncating would write
         // `through = from - 1` and violate `through >= from` (§12).
+        //
+        // UNCONDITIONAL, AND THAT MEANS THE CLAUSE ABOVE IS NOT AN INVARIANT.
+        // No shape, no state, no time — so "a new `from` may not land while a
+        // period still has a day to run" is reachable by DELETE THEN CREATE, in
+        // every timezone, at any point in a period, by the watched person and by
+        // every accepted watcher. Whatever `awayPeriodEnded()` refuses on the
+        // update verb, this pair of verbs allows.
+        //
+        // Left open deliberately, decided at the Phase 6 close-out gate. As an
+        // attack it gains nobody anything: a party who can do this can already
+        // delete the document outright, which un-covers everything. Guarding it
+        // on `from` would match the client — and would make a MALFORMED stored
+        // document unrepairable, because `dayStart()` errors on a bad day key and
+        // both the update branch and a guarded delete would then deny, leaving no
+        // client path to clear it. On a feature whose failure mode is silence,
+        // that trade is the wrong way round.
+        //
+        // SO THE INVARIANT IS CLIENT-ENFORCED. `AwayRules.periodInForce` is the
+        // only thing that actually holds it. Do not read the clause above as the
+        // rules backing it, and do not remove the client check on the strength of
+        // it — that check is not a duplicate.
         allow delete: if mayWriteAwayFor(uid);
       }
     }

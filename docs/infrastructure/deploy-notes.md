@@ -8,13 +8,14 @@ changed `firestore.rules` on 2026-08-31 and **that change is not deployed**. The
 `awayPeriodEnded()`. **No Functions are deployed**; `firebase functions:list` returns *No functions
 found*.
 
-> **What the missing clause costs, if a client reaches production before it lands.** The flat `from`
-> comparison is the **set-once defect** the Phase 6 gate found: a family that took a holiday in July
-> can never mark that person away again, from either phone. It arrives as `permission-denied` and is
-> surfaced as a refusal blaming the chosen day. **A plain `flutter build apk --debug` — the command
-> in `CLAUDE.md`'s own block — is a production client**: it carries no
-> `--dart-define=IAMOK_EMULATOR_HOST`, so it talks to `i-am-ok-c74ca`. Deploy the rules first, or
-> build with the emulator define.
+**This is the intended state until the final deployment.** The Firebase Local Emulator Suite is the
+working surface for the rest of the build, and the repo will stay ahead of live by design; the drift
+is not a defect and does not need closing now. What matters is the **ordering rule** below — rules
+before any client not pointed at the emulator — because until it is replaced the live ruleset still
+carries the **set-once defect** (a family that took a holiday in July can never mark that person away
+again, arriving as `permission-denied` and surfaced as a refusal blaming the chosen day). Note in
+passing that a plain `flutter build apk --debug` carries no `--dart-define=IAMOK_EMULATOR_HOST` and
+so talks to `i-am-ok-c74ca`.
 
 > **This header has now been wrong twice, in the same direction.** It said *"Nothing is deployed
 > yet"* until 2026-08-26, five days after the rules went live; it said *"byte-identical"* until

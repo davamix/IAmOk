@@ -1528,10 +1528,12 @@ write that says nothing when it succeeds.
 
 #### Three smaller things the run turned up
 
-**The picker title says *you* on the watcher's phone.** `AwayCopy.pickerTitle` — *"Choose the last
-day you are away"* — is used by both surfaces, and Ana sees it while choosing dates **for Mum**. The
-title is drafted, not approved (`screens.md`), so this is one concrete observation for that decision
-rather than a defect report.
+**The picker title said *you* on the watcher's phone.** `AwayCopy.pickerTitle` — *"Choose the last
+day you are away"* — was used by both surfaces, and Ana saw it while choosing dates **for Mum**.
+**Fixed the same day**: the owner approved the picker copy with this one amendment, and a watcher's
+phone now reads *"Choose the last day Mum is away"* (`AwayCopy.pickerTitleFor`). Worth keeping as a
+record of what a device finds that a widget test cannot — both surfaces rendered the shared string
+perfectly correctly, and nothing was red.
 
 **The pairing callables have no client-side time bound.** `invite_service.dart` contains no
 `timeout`, unlike `AwayRepository`, which bounds every call at six seconds and had that bound *added

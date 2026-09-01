@@ -145,10 +145,23 @@ deciders and could give two answers about whether someone's relative is all righ
 
 ## 8. Fields stored for a surface that does not exist yet
 
-`link_reconcile_failed`, `warning_alarms_exact`, `uses_24_hour_clock` and
-`WatchedPersonState.zoneUnknown` are written and read by nothing outside `dump`. §13's device-health
-panel consumes them in **Phase 7**. Carried deliberately from Phase 3; all have store round-trips and
-behavioural coverage.
+**Two of the four grew surfaces and this entry did not notice — corrected 2026-09-01.**
+
+| Field | State |
+|---|---|
+| `uses_24_hour_clock` | **Surfaced.** Every time on the watcher list renders in the device's own 12/24-hour setting; seen on hardware 2026-09-01 — *"10:43 am"* on the AVDs, *"11:37"* on the POCO |
+| `link_reconcile_failed` | **Surfaced.** `WatcherState.unreconciled` renders its own rows beneath the people, with *Try again* |
+| `warning_alarms_exact` | Written by the watcher reconcile, read by `dump()` alone |
+| `WatchedPersonState.zoneUnknown` | Carried through the service, rendered nowhere |
+
+The last two are what §13's device-health panel consumes in **Phase 7**. Carried deliberately from
+Phase 3; all four have store round-trips and behavioural coverage.
+
+**And one row of §13 is not "stored, awaiting a surface" at all:** *clock skew* has **no
+implementation**. `ClockService` has two members, neither of them skew, while ADR-0002 (twice),
+ARCHITECTURE §11 and the architecture skill all describe it as doing device-versus-server skew
+detection. The only skew *signal* that exists is `receivedAt` beside `deviceTappedAt` on a check-in,
+and nothing compares them. Found while writing the Phase 7 brief.
 
 **Blocker when:** Phase 7.
 

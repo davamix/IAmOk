@@ -16,42 +16,59 @@ then **The device run**, which is what the checklist rows were ticked from.
 
 ## Prompt to start the next session
 
-> I'm continuing **Phase 6 — away mode** of the I Am Ok project. Read
-> `docs/phases/phase-6-handover.md` first, then *The gate review* and *The device run* in
-> `docs/phases/phase-6-summary.md`. Two things are settled and must not be re-derived: the gate
-> scoped `from`'s immutability to a **period** rather than a person, in both
-> `AwayRules.periodInForce` and `firestore.rules`; and the away feature has now been **driven end to
-> end on two API 36 AVDs and then on the POCO F3** — picker, both surfaces, both cancel shapes, the
-> closed-app nudge in both directions, the offline queue and the v5 → v6 migration. The evidence is
-> in `docs/testing/device-matrix.md` under *The Phase 6 away run* and *…and then the POCO*. Do not
-> re-run those rows for their own sake.
+> I'm closing out **Phase 6 — away mode** of the I Am Ok project. Read
+> `docs/phases/phase-6-handover.md` first, then *The gate review*, *The device run* and *Still owed*
+> in `docs/phases/phase-6-summary.md`. `docs/OPEN-QUESTIONS.md`'s *Blocking-when* table is the list
+> of what is deliberately unsettled — read it rather than re-deriving any entry.
 >
-> **If the POCO refuses an install** with `INSTALL_FAILED_USER_RESTRICTED`, that is HyperOS's
-> *Install via USB* developer toggle, which it revokes on its own schedule. **A retry does not fix
-> it and adb cannot set it** — ask the owner for a physical tap (Developer options → Install via
-> USB; MIUI usually also wants a signed-in Mi account). That cost an hour on 2026-09-01 before the
-> run could touch the phone at all.
+> **The work of this session is the gate review over the close-out, and nothing else needs doing
+> first.** The five reviewers ran on **2026-08-27**. Everything after that date is unreviewed:
 >
-> **The owner's decisions are taken and applied** — the copy is approved, the picker title names the
-> person on a watcher's phone, ending a period from the watcher's row asks first, that row says when
-> a write lands, and a **queued** away write is now cached on the phone that wrote it. Do not
-> re-open them; the answers and the questions they answered are both in `docs/ui-ux/screens.md`.
-> **One thing is still recorded and undecided**: `invite_service.dart` has no client-side timeout,
-> so the pairing screens spin on the SDK's 60-second default.
+> - the device runs on two AVDs and the POCO F3, and their write-ups;
+> - **six `lib/` files changed on 2026-09-01** — `copy/away_copy.dart`, `copy/watcher_copy.dart`,
+>   `presentation/away_picker.dart`, `presentation/watcher_screen.dart`,
+>   `application/providers.dart`, and a docstring correction in `data/local_store.dart`;
+> - a **new seam in the composition root**: `AppServices.awayDocument` is injectable, and
+>   `watchedReconcile` now uses that instance rather than constructing its own;
+> - a **new dialog** on the watcher row, **two new copy strings**, and the **queued-write cache**,
+>   which is the only change with real teeth;
+> - 16 new tests, 3 new mutations, a new Functions probe, and changes to `tools/functions-test.ps1`
+>   and both mutation files.
 >
-> **Build against the local Firebase Emulator Suite**, as Phases 4, 5 and 6 did. A real Functions
-> deploy is neither needed nor wanted and would still fail — the four 2nd-gen APIs are still
-> missing, re-verified from the CLI on 2026-08-31. **Only one emulator script may run at a time**
-> (ports 8080 / 9099 / 5001). `emulator-data/` now holds the **2026-09-01** export with both users,
-> both links and the away document, exported with `firebase emulators:export emulator-data --force
-> --project i-am-ok-c74ca` against the **running hub** — which is how to keep state when the suite
-> was started detached and cannot receive a Ctrl-C. **Warm the Functions emulator with one `curl`
-> before driving a phone**: the first callable of a session can die of a cold-start timeout and it
-> looks exactly like an app fault.
+> **Run them one at a time** — parallel launches have twice exhausted the session limit — and
+> collect every finding before applying anything, which is how the 2026-08-27 gate was run.
 >
-> **What is left before sign-off is Doze on the handset** — everything else ran with the screen on —
-> and §12's four away transition notifications, which are specified and deliberately not built. The
-> **cancellation** notice among them is different in kind and is written up as a §17 gap.
+> **Phase 5's own sign-off says why this matters.** It was signed off only after the reviewers ran
+> **twice — once over the phase, once over the close-out itself** — and the second pass found four
+> more defects. Two were serious: a chooser added to *close* a dead end opened a second door into the
+> "watcher with no armed alarm" failure, and the flagship change's user-visible half had no test at
+> all, because both doubles replaced the method that spent the flag rather than the one that chose a
+> sentence. **This close-out is the same shape**: it touched the write path and added a surface.
+>
+> **Do not re-derive any of this — it is settled, tested and recorded:** `from`'s immutability is
+> scoped to a **period**, not a person (client and rules); every Phase 6 device-checklist row is
+> answered, including all three exit criteria on devices; all seven owner decisions are taken and
+> applied; and the mutation harness is **34 / 34 caught** with thirteen green controls.
+>
+> **The two things most worth a reviewer's attention**, because they are where a defect would hide:
+>
+> 1. **`WatchedNotifier._cacheQueued`** — a queued away write now goes into `self_away` on the phone
+>    that wrote it. It is bounded (the first read that *succeeds* overrules it), it is confined to
+>    the **watched** side on purpose, and its argument for not being *"reconcile, don't mutate"*
+>    being broken is written in its docstring. That argument is exactly what an architecture review
+>    should test rather than accept.
+> 2. **The watcher row's confirmation** — a new `AlertDialog`, `scrollable: true`, 48dp actions, and
+>    the only guard between a mis-tap and eleven days of cover disappearing.
+>
+> **Build against the local Firebase Emulator Suite** if anything needs running. A real Functions
+> deploy is neither needed nor wanted and would still fail — the four 2nd-gen APIs are still missing,
+> re-verified 2026-08-31. **Only one emulator script may run at a time** (ports 8080 / 9099 / 5001),
+> and `emulator-data/` holds the **2026-09-01 11:47** export with all three accounts and both links.
+> **Warm the Functions emulator with one `curl` before driving a phone** — the first callable of a
+> session can die of a cold-start timeout and it looks exactly like an app fault.
+>
+> **After the reviewers**, `docs/phases/phase-7-brief.md` is already written and is the next phase's
+> starting point; update it with anything the review turns up before Phase 7 begins.
 
 ---
 
@@ -135,6 +152,19 @@ decorative.
 ---
 
 ## What to do next, in order
+
+### 0. The gate review over the close-out — THE ONLY THING OWED BEFORE PHASE 7
+
+**All five reviewers, one at a time, over everything committed after 2026-08-27.** The prompt above
+lists what that is and where a defect would hide. Collect every finding before applying any of them.
+
+**Why it is numbered before work that is already done:** the sections below record a phase that is
+finished, and the reviewers have not seen any of it. Phase 5 was signed off only after a second pass
+over its own close-out, which found four more defects — one of them a fix that opened a second door
+into the failure it was closing.
+
+Everything else on this page is either **done** (§1–§3) or **deliberately deferred** (§4). Nothing
+in it needs doing before Phase 7 except this.
 
 ### 1. The device run — DONE, 2026-09-01, on two AVDs and then on the POCO
 

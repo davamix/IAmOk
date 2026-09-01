@@ -716,10 +716,19 @@ two-hour refusal window in Madrid into twenty-six); `allow delete` **stays open*
 recorded as **client-enforced** (guarding it would make a malformed document unrepairable and gains
 nobody anything); and the queued-cache rule became
 **[ADR-0012](../architecture/decisions/0012-a-queued-away-write-is-cached-on-the-phone-that-wrote-it.md)**,
-with §3's tier block and a new §12 subsection pointing at it. **`pickerTitleFor` remains open**, with
-a third option on the table — asking the person to type a name rather than falling back at render
-time. The handover carries the trace of where `'Someone'` actually comes from, because it is not
-obvious and it is not a name picked from a list.
+with §3's tier block and a new §12 subsection pointing at it.
+
+**And `pickerTitleFor` was answered with a third option the review had not proposed: ask the person
+to type a name.** That fixes the source rather than the symptom — `'Someone'` is not a name picked
+from a list, it is the fallback written into a person's **own profile** when their Google account has
+no display name, and then denormalised onto every link by `redeemInvite`. A new question after
+sign-in, shown only when the account has none, closes it for every pairing made from now on. It
+needed **no rules change and no migration**: `users/{uid}` is already self-write with `displayName`
+bound at 1–100 characters, and the typed name is a setting rather than a column. The trap was
+`refreshProfile`, which rewrites the profile on every launch and would have replaced a typed name
+with the placeholder within minutes; `AppServices.profileDisplayName()` now owns one precedence rule
+for both. Still owed: the owner's approval of the exact strings, and a repair path for links already
+accepted carrying the placeholder — which may have nothing to repair.
 
 | | The call | Why it is not mechanical |
 |---|---|---|

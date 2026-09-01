@@ -162,7 +162,7 @@ each one verified by reverting it and watching the new assertion fail.
 | `awayPeriodEnded()` is **permissive west of UTC**, the one direction its comment says it is not | **Correct the claim, not the code.** The permissive case cannot occur at a non-negative UTC offset, so it is unreachable in the zone this app ships to; the one-day slack that would close it turns a ~2-hour refusal window in Madrid into ~26 hours and buys nothing there | The `awayPeriodEnded` comment in `firestore.rules`, and the matching block in `firestore-rules-guidelines.md`. Both now state which direction each offset errs in, and carry **revisit if this app ever serves a negative UTC offset** |
 | `allow delete` is **unconditional**, so delete-then-create reaches the state the new clause forbids | **Leave it open and say so.** Guarding it gains nobody anything — a party who can do it can already delete outright — and makes a malformed stored document **unrepairable**, because `dayStart()` errors on a bad day key and both verbs would then deny | The `allow delete` comment, and the access-matrix row, which said *"cancelling before any day has elapsed"* — a description of the **client**, not of the rule. The invariant is recorded as **client-enforced**, by `AwayRules.periodInForce` |
 | The **queued-cache rule is not in ARCHITECTURE.md** | **ADR-0012**, not a paragraph — the bound, the asymmetry and *why the watcher side must not* are reasoning a future reader needs | `decisions/0012-…md`, the decisions index, §3's tier block and a new §12 subsection |
-| **OPEN — `AwayCopy.pickerTitleFor` has no fallback** and can render *"Choose the last day Someone is away"* | Owner is weighing a **third** option: prompt the person to type a name when their account has none, rather than falling back at render time | Nothing yet. See *What "Someone" actually is* below |
+| `AwayCopy.pickerTitleFor` has **no fallback** and can render *"Choose the last day Someone is away"* | **Ask the person to type a name**, rather than falling back at render time — the owner's third option, and it fixes the source instead of the symptom | A new question after sign-in, shown only when the account has no display name: `AskNameForm`, `AppServices.needsDisplayName`, `AppServices.profileDisplayName`, `LocalStore.chosenDisplayName`. **Copy drafted, exact strings still owed the owner's approval** |
 
 #### What "Someone" actually is, because the chain is not obvious
 
@@ -189,18 +189,31 @@ to be wrong."* So the project has already decided how this string behaves on the
 path. The picker title is where the same string leaks through **unsuppressed**, which makes the two
 inconsistent rather than wrong.
 
-**Three options, with what each costs:**
+**Decided 2026-09-01: ask the person to type a name**, which fixes the source rather than the
+symptom. Built the same day. Two traps were real and are closed:
 
-- **Render-time fallback.** One sanitiser beside `isUnnameable`, applied where `link.watchedName`
-  becomes a rendered name, plus a neutral title. Needs one approved string. Cheapest; leaves the
-  sentinel in the database.
-- **Ask the person to type a name.** Fixes it at the source, and `users/{uid}` is **self-write with
-  `displayName` 1–100 chars**, so no rules change is needed. Two traps: `refreshProfile()` runs on
-  every launch and would **clobber** a typed name unless it learns to prefer a stored one, and a link
-  already accepted keeps its **denormalised** copy, so existing pairings need either a re-sync path
-  or a local override.
-- **Both**, with the typed name as the fix and the render-time fallback as the floor for links that
-  already carry the sentinel.
+- **`refreshProfile()` runs on every launch** and would have overwritten a typed name with the
+  placeholder within minutes. `AppServices.profileDisplayName()` now owns one precedence rule —
+  stored name, then account name, then the placeholder — and both onboarding and every later launch
+  go through it. It is the assertion the whole feature rests on, and it is mutation-checked.
+- **No rules change and no migration.** `users/{uid}` is already self-write with `displayName` bound
+  at 1–100 characters after trimming, and the name is a **setting**, not a column, so
+  `schemaVersion` is untouched.
+
+**What is still owed, and it is small:**
+
+1. **The owner's approval of the exact strings.** They are drafted to the owner's own direction and
+   recorded in `screens.md` under *Asking for a name*; the inventory row says approval is owed.
+2. **A link already accepted keeps the name it was denormalised with**, so an account paired before
+   it was named still reads as *"Someone"* on the other phone. Repairing those needs a per-watcher
+   **local nickname** — a settings entry keyed by link id, preferred in `WatchedPersonState.name`,
+   with no migration and no rules change — or a re-sync path, which would need a new callable because
+   `users/{uid}` is self-read-only and links are function-written. The nickname belongs in **Phase 7**,
+   where the watcher row is already being worked on. **It may have nothing to repair**: no link
+   created from now on can carry the placeholder, so the exposure is accounts that onboarded before
+   today, which today means the emulator rig.
+3. **The render-time fallback was not built**, because the source fix makes it unreachable for new
+   users. It remains the cheap floor if 2 is ever wanted without the nickname.
 
 ### 1. The device run — DONE, 2026-09-01, on two AVDs and then on the POCO
 

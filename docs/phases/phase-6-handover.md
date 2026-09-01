@@ -1,88 +1,78 @@
 # Phase 6 — Away mode · handover
 
 **Written:** 2026-09-01, at the end of the build-and-review session.
-**Updated:** 2026-09-01, after the device run.
-**Status:** Built, all five reviewers run, every finding applied, **run on two AVDs and then on the
-POCO F3 — every Phase 6 checklist row answered, including the OEM half — and all seven owner
-decisions taken and applied, 2026-09-01.** **Not signed off**: Doze is unmeasured, and §12's four
-away transition notifications are specified and deliberately not built.
+**Updated:** 2026-09-01, after the device run, and again after the **second gate**.
+**Status:** Built, run on two AVDs and then on the POCO F3 — every Phase 6 checklist row answered,
+including the OEM half — all seven owner decisions taken and applied, and **the five reviewers run a
+second time, over the close-out itself, 2026-09-01.** Nine of that gate's findings are applied;
+**four are held for the owner** and are the only work owed before Phase 7. **Not signed off**: Doze
+is unmeasured, §12's four away transition notifications are specified and deliberately not built,
+and `firestore.rules` is **changed and undeployed**.
 
 This is the *what to do next* document. [phase-6-summary.md](phase-6-summary.md) is the *what
 happened* one and is longer; read its **The gate review** section before touching anything, because
-the gate found that the feature did not work and the fix changed both the client and the rules, and
-then **The device run**, which is what the checklist rows were ticked from.
+the first gate found that the feature did not work and the fix changed both the client and the rules,
+then **The device run**, which is what the checklist rows were ticked from, and then **The second
+gate**, which reviewed everything the first two produced and is where the four open decisions come
+from.
 
 ---
 
 ## Prompt to start the next session
 
-> I'm closing out **Phase 6 — away mode** of the I Am Ok project. Read
-> `docs/phases/phase-6-handover.md` first, then *The gate review*, *The device run* and *Still owed*
-> in `docs/phases/phase-6-summary.md`. `docs/OPEN-QUESTIONS.md`'s *Blocking-when* table is the list
-> of what is deliberately unsettled — read it rather than re-deriving any entry.
+> I'm finishing **Phase 6 — away mode** of the I Am Ok project. **The build, the device runs and
+> BOTH gates are done** — the five reviewers ran over the phase on 2026-08-27 and again over the
+> close-out on 2026-09-01, and nine of the second gate's findings are applied and verified by
+> reverting each one. Read this handover, then *The second gate* in `docs/phases/phase-6-summary.md`.
+> `docs/OPEN-QUESTIONS.md`'s *Blocking-when* table is the list of what is deliberately unsettled —
+> read it rather than re-deriving any entry.
 >
-> **The work of this session is the gate review over the close-out, and nothing else needs doing
-> first.** The five reviewers ran on **2026-08-27**. Everything after that date is unreviewed:
->
-> - the device runs on two AVDs and the POCO F3, and their write-ups;
-> - **six `lib/` files changed on 2026-09-01** — `copy/away_copy.dart`, `copy/watcher_copy.dart`,
->   `presentation/away_picker.dart`, `presentation/watcher_screen.dart`,
->   `application/providers.dart`, and a docstring correction in `data/local_store.dart`;
-> - a **new seam in the composition root**: `AppServices.awayDocument` is injectable, and
->   `watchedReconcile` now uses that instance rather than constructing its own;
-> - a **new dialog** on the watcher row, **two new copy strings**, and the **queued-write cache**,
->   which is the only change with real teeth;
-> - 16 new tests, 3 new mutations, a new Functions probe, and changes to `tools/functions-test.ps1`
->   and both mutation files.
->
-> **Run them one at a time** — parallel launches have twice exhausted the session limit — and
-> collect every finding before applying anything, which is how the 2026-08-27 gate was run.
->
-> **Phase 5's own sign-off says why this matters.** It was signed off only after the reviewers ran
-> **twice — once over the phase, once over the close-out itself** — and the second pass found four
-> more defects. Two were serious: a chooser added to *close* a dead end opened a second door into the
-> "watcher with no armed alarm" failure, and the flagship change's user-visible half had no test at
-> all, because both doubles replaced the method that spent the flag rather than the one that chose a
-> sentence. **This close-out is the same shape**: it touched the write path and added a surface.
+> **The work of this session is the four decisions the second gate left, and nothing else is owed
+> before Phase 7.** They are in §0 below with what each one costs. Two are about `firestore.rules`,
+> one is copy that does not exist yet, and one is a paragraph in ARCHITECTURE.md. **Do not decide
+> them alone** — this project's convention is that a decision is recorded beside the question it
+> answered.
 >
 > **Do not re-derive any of this — it is settled, tested and recorded:** `from`'s immutability is
-> scoped to a **period**, not a person (client and rules); every Phase 6 device-checklist row is
-> answered, including all three exit criteria on devices; all seven owner decisions are taken and
-> applied; and the mutation harness is **34 / 34 caught** with thirteen green controls.
+> scoped to a **period**, not a person; every Phase 6 device-checklist row is answered, including all
+> three exit criteria on hardware; all seven owner decisions are applied; the mutation harness is
+> **34 / 34** with thirteen green controls; and the second gate corrected two claims that had stopped
+> being true — the v1–v4 migration ladder **is** exercised, and `emulator-data/` holds **four**
+> accounts and four links.
 >
-> **The two things most worth a reviewer's attention**, because they are where a defect would hide:
->
-> 1. **`WatchedNotifier._cacheQueued`** — a queued away write now goes into `self_away` on the phone
->    that wrote it. It is bounded (the first read that *succeeds* overrules it), it is confined to
->    the **watched** side on purpose, and its argument for not being *"reconcile, don't mutate"*
->    being broken is written in its docstring. That argument is exactly what an architecture review
->    should test rather than accept.
-> 2. **The watcher row's confirmation** — a new `AlertDialog`, `scrollable: true`, 48dp actions, and
->    the only guard between a mis-tap and eleven days of cover disappearing.
+> **`firestore.rules` is changed and NOT deployed.** The live ruleset is Phase 4's and still carries
+> the set-once defect, so a client built without `--dart-define=IAMOK_EMULATOR_HOST` — which includes
+> a plain `flutter build apk --debug` — will be refused a second away period for ever.
+> `deploy-notes.md` claimed the opposite until 2026-09-01; it is now correct and is the file to trust.
 >
 > **Build against the local Firebase Emulator Suite** if anything needs running. A real Functions
 > deploy is neither needed nor wanted and would still fail — the four 2nd-gen APIs are still missing,
-> re-verified 2026-08-31. **Only one emulator script may run at a time** (ports 8080 / 9099 / 5001),
-> and `emulator-data/` holds the **2026-09-01 11:47** export with all three accounts and both links.
-> **Warm the Functions emulator with one `curl` before driving a phone** — the first callable of a
-> session can die of a cold-start timeout and it looks exactly like an app fault.
+> re-verified 2026-09-01. **Only one emulator script may run at a time** (ports 8080 / 9099 / 5001),
+> and `emulator-data/` holds the **2026-09-01 11:47** export. **Warm the Functions emulator with one
+> `curl` before driving a phone** — and note that `tools/functions-test.ps1` now fails with the cold
+> start *named* rather than blaming the trigger for it.
 >
-> **After the reviewers**, `docs/phases/phase-7-brief.md` is already written and is the next phase's
-> starting point; update it with anything the review turns up before Phase 7 begins.
+> **After the decisions**, `docs/phases/phase-7-brief.md` is the next phase's starting point and
+> already carries what this gate turned up — see *What Phase 6's second gate leaves on this desk*.
 
 ---
 
 ## Where things stand
 
-**Seven commits on `main`, `b79a7b6..HEAD`.** Nothing pushed — this project commits to `main` and
-pushes only when asked.
+**Everything after `b79a7b6` on `main` is Phase 6** — `git log b79a7b6..HEAD`. Nothing pushed; this
+project commits to `main` and pushes only when asked.
+
+> This line said **"Seven commits"** until the second gate, and there were sixteen. A count in prose
+> goes stale on the next commit, which is every time anybody works — so it is a range now, and the
+> command that answers it. Small, and the third claim in this document found false on 2026-09-01.
 
 | | |
 |---|---|
 | `flutter analyze` | clean |
-| `flutter test` | **1 370** (1 202 at the start of the phase; 1 354 before the owner's decisions were applied) |
-| Rules tests | **80** (75 before) |
-| Functions tests | **102** (83 before) |
+| `flutter test` | **1 380** (1 202 at the start of the phase; 1 354 before the owner's decisions; 1 370 before the second gate) |
+| Rules tests | **82** (75 at the start; 80 before the second gate) |
+| Functions tests | **102** (83 before), plus a **fourth run** — `deploy_options.mjs`, no emulator |
+| `firestore.rules` | **changed this phase and NOT deployed.** The live ruleset is Phase 4's and still has the set-once defect — see `deploy-notes.md`, corrected 2026-09-01 |
 | `tsc --noEmit` | clean at the pinned Node 22 types |
 | Debug APK | builds |
 | Secrets guard | clean — 25 ignored, 6 deliberately tracked |
@@ -153,18 +143,26 @@ decorative.
 
 ## What to do next, in order
 
-### 0. The gate review over the close-out — THE ONLY THING OWED BEFORE PHASE 7
+### 0. The gate review over the close-out — DONE 2026-09-01, and it found four that ship
 
-**All five reviewers, one at a time, over everything committed after 2026-08-27.** The prompt above
-lists what that is and where a defect would hide. Collect every finding before applying any of them.
+**All five reviewers ran, one at a time, over `5b131a4..HEAD`.** The full write-up is
+`phase-6-summary.md`'s *The second gate*. That range turned out wider than this page originally
+described: it includes **the first gate's own fix commit** (`024838c`, the `firestore.rules` scope
+correction, 2026-08-31), which no reviewer had ever seen.
 
-**Why it is numbered before work that is already done:** the sections below record a phase that is
-finished, and the reviewers have not seen any of it. Phase 5 was signed off only after a second pass
-over its own close-out, which found four more defects — one of them a fix that opened a second door
-into the failure it was closing.
+**Nine findings are applied** — the `deploy-notes.md` correction, two write paths that no test
+reached, the dialog's zero-gap actions, the untested rules boundary, the cold-start guard, the
+`redeemInvite` cap assertion, the stale present-tense sentence, and the Tap screen's live region —
+each one verified by reverting it and watching the new assertion fail.
 
-Everything else on this page is either **done** (§1–§3) or **deliberately deferred** (§4). Nothing
-in it needs doing before Phase 7 except this.
+**Four are held for the owner and are the only work owed before Phase 7:**
+
+| | The call |
+|---|---|
+| `awayPeriodEnded()` is **permissive west of UTC**, the one direction its comment says it is not | Add a day of slack in the strict direction, or correct the comment and `firestore-rules-guidelines.md` — they assert a guarantee the file does not make |
+| `allow delete` is **unconditional**, so delete-then-create reaches the state the new clause forbids | Guard it (a malformed document then becomes unrepairable), or record the invariant as client-enforced in both the rules comment and the access matrix |
+| `AwayCopy.pickerTitleFor` has **no fallback** and can render *"Choose the last day Someone is away"* | Approve a title for a person the app cannot name. There is no approved string for it, and accepting the placeholder would sit against the decision taken on 2026-09-01 to suppress it |
+| The **queued-cache rule is not in ARCHITECTURE.md** | A paragraph in §12, or ADR-0012. Every decision of comparable weight got an ADR |
 
 ### 1. The device run — DONE, 2026-09-01, on two AVDs and then on the POCO
 
@@ -298,8 +296,13 @@ function logged `cleared:true, parties:2, tokens:2`, with the create logging `sk
   `AwayRepository.classifyRead`, including the English-substring App Check match.
   `OPEN-QUESTIONS.md` #5 named one site and now names both; hoisting them into one classifier is the
   cheaper fix and is not done.
-- **The migration test covers v5 → v6 only.** The v1–v4 ladder is still unexercised against a real
-  file. No real user install exists, so the exposure is dev devices.
+- ~~**The migration test covers v5 → v6 only.** The v1–v4 ladder is still unexercised against a real
+  file.~~ **False, corrected at the second gate.** `test/data/local_store_lock_test.dart:298` is a
+  group called *migrating a real v1 store*: it seeds a genuine v1 file with a row in every table,
+  runs cases 2→6, and line 550 asserts *"v4 adds last_decided_day, and the v1 row survives it"*. What
+  is genuinely absent is a **shape** comparison for a v1-upgraded store — only v5 gets one — and the
+  shape check itself compares name and type only, dropping `notnull`, `dflt_value` and `pk`, so a
+  step that rebuilt a table without a `NOT NULL DEFAULT` or a cascade would pass it.
 - **`AwayPeriod.endsTomorrowOn`** has a passing test and **no caller anywhere in `lib/`**. It will
   read as coverage of a feature that does not exist until the "ends tomorrow" notice lands.
 
@@ -362,7 +365,11 @@ because two instances of one AVD require **every** instance to carry `-read-only
 already-running one did not. Keep it; a second identity is needed by every away row.
 
 **`emulator-data/` is the 2026-09-01 11:47 export and it DOES contain all of this** — Mum, Ana and
-Pop, both of Ana's links, and the away documents. Exported with `firebase emulators:export
+Pop, Ana's links, and the away documents. **It holds more than that, and the difference matters for
+Phase 7**: verified at the second gate, the export carries **four** auth accounts and **four** link
+documents, not three and two. The fourth account is a **stale Phase-4 Ana** (`watcher@example.test`,
+created 2026-08-21) and one of the links is a **self-link** on it, which `tools/seed-link.ps1` exists
+to make deliberately. A health panel driven off imported state will meet both. Exported with `firebase emulators:export
 emulator-data --force --project i-am-ok-c74ca` **against the running hub**, which is the way to keep
 state when the suite was started detached and so can never receive the Ctrl-C that `--export-on-exit`
 needs. Phase 5 lost its state exactly there. The second export printed *"Export complete"* and then

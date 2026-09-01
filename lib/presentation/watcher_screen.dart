@@ -776,6 +776,29 @@ class _AwayRowActionState extends ConsumerState<_AwayRowAction> {
   bool _busy = false;
   String? _message;
 
+  /// **Drops the last outcome once the period it described has moved.**
+  ///
+  /// `_message` is screen state about **one action**, and it was cleared only by
+  /// the next press. A resume, a pull-to-refresh or a foreground push rebuilds
+  /// this row with a fresh `WatchedPersonState` while the `State` — and the
+  /// message — survives, so the row could read *"Everything OK"* with
+  /// *"Saved. Mum is marked away."* still sitting under it after Mum or another
+  /// watcher ended the period. That sentence is **present tense**: it is a
+  /// status claim, standing under a row saying the opposite, which is exactly
+  /// what `guidelines.md`'s *state, not history* rule forbids.
+  ///
+  /// Compared **by value** — `AwayRecord`, `AwayPeriod` and `DayKey` all define
+  /// `==` — so an ordinary rebuild that changed nothing keeps the message. The
+  /// notifier's own `refresh()` lands during the `await` inside [_run], before
+  /// `_message` is assigned, so this cannot eat the sentence it just set.
+  @override
+  void didUpdateWidget(_AwayRowAction oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final moved = oldWidget.person.cache.away != widget.person.cache.away ||
+        oldWidget.person.isAwayToday != widget.person.isAwayToday;
+    if (moved && _message != null) setState(() => _message = null);
+  }
+
   /// Runs one away write and reports what came back.
   ///
   /// [saved] is what this row says when the write **succeeded**, and it is a
@@ -840,6 +863,17 @@ class _AwayRowActionState extends ConsumerState<_AwayRowAction> {
       context: context,
       builder: (context) => AlertDialog(
         scrollable: true,
+        // **The gap between the safe action and the destructive one.**
+        // `AlertDialog` lays its actions out in an `OverflowBar`, which stacks
+        // them vertically once they no longer fit side by side — and defaults
+        // `overflowSpacing` to **0**, so *End it* would sit flush against the
+        // bottom edge of *Go back*, with no gap, no divider and no colour
+        // between them. That happens at the largest font scale on the narrowest
+        // phone this app supports, which is exactly the reader this dialog was
+        // added for. Aiming for *Go back*, overshooting by a few pixels, and
+        // ending a fourteen-day hospital stay on day three is the mis-tap the
+        // confirmation exists to prevent, reintroduced by its own layout.
+        actionsOverflowButtonSpacing: 12,
         title: Text(WatcherCopy.endAwayConfirmTitle(watchedName)),
         content: Text(WatcherCopy.endAwayConfirmBody(watchedName)),
         actions: [

@@ -298,6 +298,65 @@ describe('away — update, and the truncation that cancels one', () => {
     );
   });
 
+  it('a period whose last day is TODAY is still in force — no new from',
+      async () => {
+    // **The boundary the whole clause turns on, and nothing exercised it.**
+    // `awayPeriodEnded()` is `dayStart(through) < todayStartUtc()`; the cases
+    // around it seed `through` at -10 and +10, which sit either side of BOTH
+    // `<` and `<=`. So the classic off-by-one — relaxing this to `<=` — was
+    // caught by no test in the suite, and it is the one that un-covers a day
+    // the person is still away for: a new `from` lands while the stored period
+    // still has today to run, and every watcher whose device has not yet
+    // settled that day re-decides it and warns about somebody who is genuinely
+    // away. That is the false claim to a family ADR-0001 exists to prevent.
+    await seedDoc(testEnv, ['users', MUM, 'shared', 'away'], {
+      from: dayKey(-5),
+      through: dayKey(0),
+      setBy: ANA,
+      setByName: 'Ana',
+      setAt: Timestamp.now(),
+      updatedAt: Timestamp.now(),
+    });
+
+    await assertFails(
+      setDoc(awayRef(dbAs(ANA)), {
+        from: dayKey(0),
+        through: dayKey(5),
+        setBy: ANA,
+        setByName: 'Ana',
+        setAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      }),
+    );
+  });
+
+  it('and one that ended YESTERDAY is not — the very next day works',
+      async () => {
+    // The other side of the same boundary, one day out. Without this the fix
+    // for the case above could be to freeze `from` again for anything recent,
+    // which would bring back the set-once defect in a narrower form: a family
+    // home from a holiday could not mark her away the following morning.
+    await seedDoc(testEnv, ['users', MUM, 'shared', 'away'], {
+      from: dayKey(-5),
+      through: dayKey(-1),
+      setBy: ANA,
+      setByName: 'Ana',
+      setAt: Timestamp.now(),
+      updatedAt: Timestamp.now(),
+    });
+
+    await assertSucceeds(
+      setDoc(awayRef(dbAs(ANA)), {
+        from: dayKey(0),
+        through: dayKey(5),
+        setBy: ANA,
+        setByName: 'Ana',
+        setAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      }),
+    );
+  });
+
   it('a new period after an ended one is still not RETROACTIVE', async () => {
     // The freeze is what used to stop a `from` in the past; lifting it for an
     // ended period must not lift §12's no-retroactive rule with it, or the days

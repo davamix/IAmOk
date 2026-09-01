@@ -1,15 +1,29 @@
 # Deploy notes
 
-**Date:** 2026-08-15 · **Status, re-verified 2026-08-26:** **`firestore.rules` IS deployed** —
-released 2026-08-20, ruleset `87c8784d-42b8-45c8-8bcc-76d295656157`, confirmed by reading the live
-ruleset back and diffing it against the repo file (byte-identical). **No Functions are deployed**;
-`firebase functions:list` returns *No functions found*.
+**Date:** 2026-08-15 · **Status, re-verified 2026-09-01:** **the repo is AHEAD of the live ruleset.**
+A ruleset is deployed — `87c8784d-42b8-45c8-8bcc-76d295656157`, released 2026-08-20 — but Phase 6
+changed `firestore.rules` on 2026-08-31 and **that change is not deployed**. The live source is
+16 923 bytes against the repo's 19 142; it still carries the flat
+`request.resource.data.from == resource.data.from` and has neither `setByName.trim()` nor
+`awayPeriodEnded()`. **No Functions are deployed**; `firebase functions:list` returns *No functions
+found*.
 
-> **This line said "Nothing is deployed yet" until 2026-08-26**, five days after the rules went live.
-> That is the same failure this file already catalogues below — *"the checklist someone would read
-> immediately before the first deploy, saying the opposite of the truth"* — recurring in the file's
-> own header. `phase-4-handover.md` had it right the whole time, which is the point: the project's
-> record was correct in the wrong file.
+> **What the missing clause costs, if a client reaches production before it lands.** The flat `from`
+> comparison is the **set-once defect** the Phase 6 gate found: a family that took a holiday in July
+> can never mark that person away again, from either phone. It arrives as `permission-denied` and is
+> surfaced as a refusal blaming the chosen day. **A plain `flutter build apk --debug` — the command
+> in `CLAUDE.md`'s own block — is a production client**: it carries no
+> `--dart-define=IAMOK_EMULATOR_HOST`, so it talks to `i-am-ok-c74ca`. Deploy the rules first, or
+> build with the emulator define.
+
+> **This header has now been wrong twice, in the same direction.** It said *"Nothing is deployed
+> yet"* until 2026-08-26, five days after the rules went live; it said *"byte-identical"* until
+> 2026-09-01, one day after they stopped being. That is the failure this file already catalogues
+> below — *"the checklist someone would read immediately before the first deploy, saying the opposite
+> of the truth"* — recurring in the file's own header, twice. Both times the project's record was
+> **correct in the wrong file**: `phase-4-handover.md` then, and `phase-6-summary.md`,
+> `phase-6-handover.md` and `phase-7-brief.md` now. Re-read the live ruleset back at every gate; the
+> read-only command is at the bottom of this file.
 
 What is provisioned, and how it was verified, is in
 [firebase-setup-prompt.md](firebase-setup-prompt.md) — including two Windows CLI traps that cost

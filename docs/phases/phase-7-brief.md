@@ -50,12 +50,20 @@ of them.
 > Functions deploy is neither needed nor wanted here and would still fail — four 2nd-gen APIs are
 > missing, enabling them is billable, and it is the owner's call.
 >
-> **Where Phase 6 left things.** Built, all five reviewers run at the gate, every finding applied,
-> **run on two API 36 AVDs and then on the POCO F3** with every device-checklist row answered and all
-> three exit criteria met on hardware, and **all seven owner decisions taken and applied**. 1 370
-> Dart tests, 102 Functions tests, 80 rules tests, 34/34 mutations caught, `flutter analyze` clean,
-> debug APK builds, secrets guard clean. **Not signed off**: Doze on the handset is unmeasured, and
-> §12's four away transition notifications are specified and deliberately not built.
+> **Where Phase 6 left things.** Built, **the five reviewers run TWICE — once over the phase, once
+> over the close-out** — every applied finding verified by reverting it, **run on two API 36 AVDs and
+> then on the POCO F3** with every device-checklist row answered and all three exit criteria met on
+> hardware, and **all seven owner decisions taken and applied**. 1 380 Dart tests, 102 Functions
+> tests plus a fourth no-emulator run, 82 rules tests, 34/34 mutations caught, `flutter analyze`
+> clean, debug APK builds, secrets guard clean. **Not signed off**: Doze on the handset is unmeasured,
+> §12's four away transition notifications are specified and deliberately not built, and the second
+> gate left **four decisions for the owner** — read *What Phase 6's second gate leaves on this desk*
+> below before planning, because two of them are one edit away from Phase 7's own surfaces.
+>
+> **`firestore.rules` is CHANGED and NOT DEPLOYED**, and the live ruleset still carries the set-once
+> defect. A plain `flutter build apk --debug` is a **production** client, so anything not built with
+> `--dart-define=IAMOK_EMULATOR_HOST` will hit rules that refuse a second away period for ever.
+> `deploy-notes.md` said the opposite until 2026-09-01 and is now correct.
 >
 > **The rig is warm and worth reusing.** Two AVDs and the POCO all have the app installed and paired
 > — Mum (watched), Ana (watcher of both), Pop on the POCO (watched) — and `emulator-data/` holds the
@@ -64,6 +72,46 @@ of them.
 >
 > **This phase opens with owner decisions** — see *The decisions this phase opens with*. Do not
 > decide them alone.
+
+---
+
+## What Phase 6's second gate leaves on this desk
+
+Five reviewers over the close-out, 2026-09-01. Nine findings applied, **four held for the owner**,
+and a handful of observations that land squarely in this phase's surfaces. The full write-up is
+`phase-6-summary.md`'s *The second gate*; what belongs here is the part Phase 7 will trip over.
+
+**The four owner decisions — none is a Phase 7 deliverable, but two touch its screens:**
+
+| | Why Phase 7 cares |
+|---|---|
+| `awayPeriodEnded()` is permissive west of UTC | Rules-only. Decide it before any deploy, not before any screen |
+| `allow delete` is unconditional | Rules-only, but the **access matrix** in `firestore-rules-guidelines.md` currently disagrees with the file. Fix the disagreement before the health panel cites either |
+| **`pickerTitleFor` has no fallback** and can render *"Choose the last day Someone is away"* | **This is a Phase 7 problem too.** Four `?? 'Someone'` sites feed every name surface, and `#8`'s "surfaces for fields already stored" means more of them. A health panel row per person will name people the same way |
+| The queued-cache rule is not in ARCHITECTURE.md | Write it before the panel reads `self_away`, or the panel will be the second reader of a rule the design does not state |
+
+**Two things this phase's own layout will meet:**
+
+- **`WatcherScreen` has no midnight timer.** The Tap screen has one and holds a named
+  `clockExemptions` entry for it. A watcher who leaves the list open across watched-local midnight
+  gets a picker bounded to yesterday and a refusal about a day the screen just offered. A panel that
+  renders *last sync* or *today's status* per row has exactly the same staleness, on more rows.
+- **`emulator-data/` holds four accounts and four links, not three and two** — including a stale
+  Phase-4 Ana and a deliberate **self-link**. A health panel driven off the imported rig will meet
+  both on its first run, and a self-link is the row most likely to be assumed impossible.
+
+**Two carried gaps worth knowing before the panel is designed**, both pre-dating Phase 6's close-out:
+
+- The reconcile lock reads `away` and `checkedIn` **before** the lease and `pendingReminders`
+  **after** it, under a comment saying reading before the lock *"is the whole defect"*. A panel
+  reporting *last reconcile* will be reporting on this.
+- The 6-second away read is on `build()`'s and `tap()`'s critical path, so a captive portal costs six
+  seconds of bare spinner. Any *backend access* row in §13 is measuring that same call.
+
+**And one habit this gate is the second piece of evidence for:** both times the reviewers ran, the
+sharpest findings came from reading a claim against the thing it describes — not from a test failing.
+`deploy-notes.md`, the recorder knob no test turned, and the migration claim that had been false for
+days were all found that way, and the suite was green throughout.
 
 ---
 

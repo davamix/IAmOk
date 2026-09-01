@@ -2,8 +2,8 @@
 #
 #   pwsh -File tools/functions-test.ps1
 #
-# Three runs, because they need different emulators and must not see each
-# other's writes:
+# Four runs. Three need different emulators and must not see each other's
+# writes; the fourth needs no emulator at all:
 #
 #   1. `npm test`, which globs `functions/test/*.test.js` — so it picks up new
 #      suites automatically, and today that is BOTH `check_in_fan_out.test.js`
@@ -23,10 +23,17 @@
 #      the cancellation path. Separate from run 2 rather than folded into it
 #      because both scripts write, wait, and assert on a count of log lines, and
 #      one run's dispatch latency would show up as the other's missing line.
+#   4. `functions/test/deploy_options.mjs` — the deploy-shaping options, read off
+#      the BUILT module's `__endpoint`, which is what `firebase deploy` reads.
+#      No emulator and no network. It exists because `redeemInvite`'s
+#      `concurrency: 1, maxInstances: 3` is a security control that
+#      `OPEN-QUESTIONS.md` #11 and `threat-model.md` both rest on, and until the
+#      Phase 6 gate nothing anywhere asserted either number.
 #
-# Nothing here touches the live project. All three use `demo-i-am-ok`, which the
-# Firebase tooling treats as a guaranteed-offline project — no credentials are
-# used and the SDKs will not reach production for it.
+# Nothing here touches the live project. The three emulator runs use
+# `demo-i-am-ok`, which the Firebase tooling treats as a guaranteed-offline
+# project — no credentials are used and the SDKs will not reach production for
+# it — and run 4 loads a module without connecting to anything.
 #
 # ## THREE scripts now want ports 8080 / 9099 / 5001, and only one may run
 #
@@ -177,7 +184,7 @@ try {
     Write-Host 'PASS  once per day, not once per tap; a non-day id fires nothing' -ForegroundColor Green
 
     Write-Host ''
-    Write-Host '3/3  onAwayChanged is wired, and a cancellation reaches it' -ForegroundColor Cyan
+    Write-Host '3/4  onAwayChanged is wired, and a cancellation reaches it' -ForegroundColor Cyan
 
     firebase emulators:exec --only firestore,functions --project demo-i-am-ok `
         'node functions/test/away_trigger_fires.mjs' 2>&1 |
@@ -193,6 +200,28 @@ try {
     if ($awayExit -ne 0) {
         Write-Host ("  note: exit $awayExit though the probe completed - the documented " +
             'Windows libuv crash.') -ForegroundColor DarkYellow
+    }
+
+    # A COLD START IS NOT A CODE DEFECT, and this run could not tell the two
+    # apart. CLAUDE.md records the measurement made the same day this run was
+    # written: the Functions emulator's FIRST invocation of a session can die in
+    # module resolution after **24 seconds**. Runs 2 and 3 are separate
+    # `emulators:exec` invocations, so each pays that cost fresh, against this
+    # probe's 6-second settle - four times shorter.
+    #
+    # When it overruns, the fan-out lines are simply ABSENT, and every assertion
+    # below then reports one of two specific code defects - "the trigger is
+    # create-only" or "the delete adapter did not run" - for what is a flake.
+    # Sending somebody to read a correct registration is exactly the cost this
+    # project pays for a harness that cannot distinguish a broken run from a
+    # failing one.
+    $coldStart = @($awayLines | Select-String -SimpleMatch -Pattern @(
+        'Failed to load function', 'Failed to handle request'))
+    if ($coldStart.Count -gt 0) {
+        Write-Error ("the functions runtime never loaded: '$($coldStart[0].Line.Trim())'. " +
+            'That is the documented cold start (CLAUDE.md, measured at 24s), not a code ' +
+            'fault - the assertions below would name a defect that is not there. Re-run; ' +
+            'the second invocation of a session is warm.')
     }
 
     $awayFanned = @($awayLines | Select-String -SimpleMatch 'onAwayChanged: fanned out')
@@ -245,6 +274,26 @@ try {
 
     Write-Host ''
     Write-Host 'PASS  the registration dispatches; the update and the delete both arrive' -ForegroundColor Green
+
+    Write-Host ''
+    Write-Host '4/4  the deploy options are what the security argument assumes' -ForegroundColor Cyan
+
+    # No emulator: this loads the built module and reads the manifest
+    # `firebase deploy` reads. Last, because it needs `lib/` and nothing else,
+    # so a failure here is unambiguously about the options rather than about a
+    # port, a JDK or a cold start.
+    node functions/test/deploy_options.mjs 2>&1 | Tee-Object -Variable optionsCaptured
+    $optionsExit = $LASTEXITCODE
+
+    $optionsLines = @($optionsCaptured | ForEach-Object { $_.ToString() })
+    if (-not ($optionsLines -match 'probe: done')) {
+        Write-Error ("the options probe did not reach its end (exit $optionsExit). Its " +
+            'assertions are the only thing anywhere that pins redeemInvite to ' +
+            'concurrency 1 / maxInstances 3, which OPEN-QUESTIONS.md #11 rests on.')
+    }
+
+    Write-Host ''
+    Write-Host 'PASS  redeemInvite is still capped, and every function is still in europe-west1' -ForegroundColor Green
 }
 finally {
     Pop-Location

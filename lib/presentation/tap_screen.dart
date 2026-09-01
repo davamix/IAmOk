@@ -398,11 +398,24 @@ class _BottomBand extends StatelessWidget {
               if (state.isAway)
                 Padding(
                   padding: const EdgeInsets.only(bottom: 12),
-                  child: Text(
-                    _awayLine(state),
-                    key: awayLineKey,
-                    textAlign: TextAlign.center,
-                    style: theme.textTheme.headlineSmall,
+                  // **A live region, because this line IS the confirmation.**
+                  // The owner's decision of 2026-09-01 is that this screen says
+                  // nothing when an away write lands, and its stated reason is
+                  // that the away line is the confirmation and is still there
+                  // tomorrow. That is an argument about a line somebody can
+                  // *see*: `AwayCopy.saved` is null, so `_run` announces
+                  // nothing, and nothing re-reads a changed widget — a blind
+                  // reader pressed *"I'm away"*, chose a day, and heard nothing
+                  // at all. `liveRegion` delivers the line the decision relies
+                  // on without adding a sentence the decision refused.
+                  child: Semantics(
+                    liveRegion: true,
+                    child: Text(
+                      _awayLine(state),
+                      key: awayLineKey,
+                      textAlign: TextAlign.center,
+                      style: theme.textTheme.headlineSmall,
+                    ),
                   ),
                 ),
               if (tappedAt != null)

@@ -56,7 +56,14 @@ export const UID = 'uid-away-probe';
 // Whoever set it, and deliberately NOT the watched person: `setBy` is what the
 // fan-out skips, so a probe that set away as itself would exercise the
 // audience-is-empty branch on every write and never the ordinary one.
-const SETTER = 'uid-away-probe-watcher';
+//
+// **It must not CONTAIN [UID] either.** This was `uid-away-probe-watcher`, a
+// superstring of it, and the harness asserts the three log lines name the
+// watched person with a substring match — safe only for as long as the fan-out
+// logs no `setBy`. Add one uid to `FanOutResult` and that assertion, whose
+// stated point is that the uid "can only have come from `event.params.uid`",
+// starts passing on the setter's name instead, silently.
+const SETTER = 'uid-setter-probe';
 
 // Generous, and sized the same way as the check-in probe: a slow machine should
 // produce a slow pass rather than a false fail.

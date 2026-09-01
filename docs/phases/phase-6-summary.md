@@ -650,3 +650,145 @@ and the mutation driver's own coverage claim, both updated here.
 set an away period from a screen rather than only from an API call. The register is updated: the
 mitigation also got its first surface on the watched side in the same change, which is the half that
 was missing.
+
+---
+
+## The second gate — five reviewers over the close-out, 2026-09-01
+
+**Run one at a time, all five, over `5b131a4..HEAD`** — everything committed after the first gate's
+reviewers finished on 2026-08-27. That range is wider than the handover's prompt described: it
+includes the **first gate's own fix commit** (`024838c`, the `firestore.rules` scope correction),
+which is dated 2026-08-31 and had therefore never been reviewed by anybody either.
+
+Phase 5 was signed off only after exactly this second pass, which found four more defects. This one
+found four that ship wrong behaviour or a wrong instruction, four that need the owner, five
+mechanical, and **two claims in this document and the handover that had stopped being true.**
+
+### The four that mattered
+
+**1. `deploy-notes.md` said the live rules were byte-identical to the repo. They were 2 219 bytes
+behind.** The live ruleset `87c8784d-…` still carries the flat `from == resource.data.from` — the
+**set-once defect this phase's gate existed to fix**. The file that said otherwise is the one the
+deploy-ordering rule lives in and the one `README.md` points at. `CLAUDE.md`'s own command block
+lists `flutter build apk --debug`, which carries no `--dart-define=IAMOK_EMULATOR_HOST` and so is a
+**production client**: installed before the rules land, it has the defect back as `permission-denied`,
+surfaced as a refusal blaming the chosen day. The file's own header already catalogued this failure
+recurring once, on 2026-08-26. It has now recurred twice, in the same direction, and both times the
+project's record was **correct in the wrong file**. Fixed, with the ruleset ids and the byte counts.
+
+**2. The watcher row's outcome switch was only ever driven down the success branch.** The recorder in
+`watcher_away_actions_test.dart` had an `outcome` field **no test ever assigned** — all six ran
+`AwayOutcome.set()`. Rewriting `watcher_screen.dart`'s one branch as `final message = saved;` left
+all 1 370 tests green while a watcher who pressed in a lift read *"Saved. Mum is marked away."* for a
+write the server had refused. **This is Phase 5's finding restated verbatim** — the double replaced
+the method that *acts* and left the method that *chooses a sentence* undriven — on the surface the
+owner took two of the seven decisions about. Three tests added, driving queued, refused and
+confirmed, each asserting the **spoken** platform message as well as the rendered one. Verified by
+reverting: `final message = saved;` now fails two of them and nothing else.
+
+**3. The asymmetry the queued-cache decision rests on was enforced by nothing.** `_cacheQueued`'s
+docstring says *"the watcher's side does NOT do this and must not"*, and that half was held up by the
+**absence of a call**. `WatcherStateNotifier.setAway` and `endAway` were reached by no test at all —
+every test that touches them replaces both with a double — so four symmetrical lines added to the
+watcher side would have failed nothing, and the failure they produce is the one §12 calls the one
+this app cannot detect in itself: a watcher told nothing about a person for up to 31 days, with no
+notification and no error. **Found independently by architecture, security and testing.** New file
+`test/application/watcher_never_caches_test.dart` puts both real methods under execution for the
+first time, with a **green control** proving the watcher cache is reachable in that harness — without
+it every `isNull` would pass for the same reason an empty file would. Verified by mutation: adding
+the optimistic cache fails it, and so does writing `setBy: watchedUid`.
+
+**4. At 320dp and scale 2.0 the confirmation dialog's actions stacked with ZERO gap, destructive
+directly under safe.** `AlertDialog` lays actions out in an `OverflowBar` and defaults
+`overflowSpacing` to 0, so *End it* sat flush against the bottom edge of *Go back* — no gap, no
+divider, no colour between them — at exactly the size the dialog was added for. The existing
+scale-2.0 case asserted only `takeException() isNull` and that *End it* was present; it never
+asserted the way **back** was present at all. `actionsOverflowButtonSpacing: 12`, and the test now
+asserts both actions and measures the gap. Reverting the property fails it, which also settles
+empirically that the dialog really does stack at that size.
+
+### Held for the owner — four, unapplied
+
+| | The call | Why it is not mechanical |
+|---|---|---|
+| `awayPeriodEnded()` is **permissive west of UTC** | Add a day of slack in the strict direction, or correct the comment | `dayStart(through) < todayStartUtc()` with a comment claiming **BIASED STRICT**. For a negative UTC offset the rules call a still-running period ended and admit a new `from` that un-covers days already spent away. The client blocks it, so it needs a direct-SDK writer — but **the comment asserts a guarantee the file does not make**. In Madrid the error runs the *other* way, refusing a legitimate re-set for the first one-to-two hours of each local day, and that half the comment already anticipates |
+| `allow delete` is **unconditional** | Guard it, or record it as client-enforced | The invariant the new clause protects is reachable by delete-then-create in every timezone. Low as an attack; **high as documentation** — a maintainer may conclude the rules back the invariant and drop `AwayRules.periodInForce`, which is the only place it is actually enforced. Guarding it makes a malformed stored document unrepairable |
+| `AwayCopy.pickerTitleFor` has **no fallback** | Approve a title for a person the app cannot name | Four `?? 'Someone'` sites feed the name chain, so it can render *"Choose the last day Someone is away"* and, through the mirror field, *"Someone will know you're OK."* on the elderly person's own daily screen. `guidelines.md` forbids role words by name and `AwayRecord` suppresses this exact string on the **attribution** path; the name path has no equivalent guard. **The fallback is undesigned copy** |
+| The queued-cache rule is **not in ARCHITECTURE.md** | A paragraph in §12, or ADR-0012 | §3 still defines the local store as an offline cache of what Firestore holds; `_cacheQueued` puts a value there that no tier above it holds. Recorded only in `screens.md`, the phase docs and three docstrings. Every decision of comparable weight here got an ADR — 0001, 0003, 0009, 0010 |
+
+### The five mechanical, applied
+
+- **The boundary the new rules clause turns on was untested.** Cases seeded `through` at −10 and +10,
+  which sit either side of both `<` and `<=` — so relaxing `awayPeriodEnded()` to `<=`, the classic
+  off-by-one and the one that un-covers a day still to run, was caught by **no test in the 80**. Two
+  cases added at `dayKey(0)` (denied) and `dayKey(-1)` (allowed).
+- **Run 3 of the Functions harness could not tell a cold start from a code defect.** Runs 2 and 3 are
+  separate `emulators:exec` invocations, so each pays its own first-invocation module load — measured
+  at **24 seconds** and written into `CLAUDE.md` in this very range — against a 6-second settle. When
+  it overran, the fan-out lines were simply absent and the harness named two specific code defects
+  for a flake. It now fails with the cold start named instead.
+- **`redeemInvite`'s `concurrency: 1, maxInstances: 3` had no assertion anywhere**, while
+  `OPEN-QUESTIONS.md` #11 and `threat-model.md` both rest on it and the global block would otherwise
+  hand it `concurrency: 80`. New run 4, `functions/test/deploy_options.mjs`, reads `__endpoint` off
+  the **built** module — what `firebase deploy` reads — needs no emulator, and carries its own
+  control that `onAwayChanged` still differs.
+- **The row's *"Saved. Mum is marked away."* was never cleared, and it is present tense.** It
+  survived a resume, a refresh or a foreground push, so it could sit under a row reading *Everything
+  OK* after the period ended — a status claim contradicting the row above it. Cleared in
+  `didUpdateWidget` on a **value** comparison, so an ordinary rebuild keeps it.
+- **A successful away write was silent to a screen reader on the Tap screen.** `AwayCopy.saved` is
+  null by decision, and the decision's argument is that the away line is the confirmation — an
+  argument about a line somebody can *see*. `Semantics(liveRegion: true)` now delivers that line
+  without adding the sentence the decision refused. **The ending path is still silent** and is listed
+  below, because closing it needs copy that does not exist.
+
+One more, too small to hold: the away probe's setter uid was `uid-away-probe-watcher`, a
+**superstring** of the watched uid the harness matches on. Safe only while the fan-out logs no
+`setBy` — add one and the assertion whose stated point is that the uid *"can only have come from
+`event.params.uid`"* starts passing on the setter's name. Renamed `uid-setter-probe`.
+
+### Two claims in this document that had stopped being true
+
+- **The v1–v4 migration ladder is NOT unexercised.** *Still owed* and the handover's §4 both say the
+  migration test covers v5 → v6 only. `test/data/local_store_lock_test.dart:298` is a group called
+  *migrating a real v1 store*: it seeds a genuine v1 file with a row in every table, runs cases 2→6,
+  and line 550 asserts *"v4 adds last_decided_day, and the v1 row survives it"*. What is genuinely
+  absent is a **shape** comparison for a v1-upgraded store; only v5 gets that.
+- **`emulator-data/` holds four accounts, not three.** Verified in the export: Mum, a **stale
+  Phase-4 Ana** (`watcher@example.test`, created 2026-08-21), the current Ana, and Pop — plus four
+  link documents including a deliberate self-link that `tools/seed-link.ps1` exists to make. It
+  matters for Phase 7, whose health panel will meet both.
+
+### What the reviewers confirmed, so it is not re-derived
+
+Domain purity across the whole computed closure, including the exemption table asserting each
+exemption is still *needed*. The isolate boundary in `push_handler.dart`, with `away: null` correct
+when signed out. The corrected `sqflite` docstring matching the measured behaviour, and `close()`
+having no caller in `lib/`. `AppServices.awayDocument`'s lifetime — null in production, carried
+through `withSelfUid`, never crossing an isolate. ADR-0001 on both sides. §10's step order and all
+five outcomes distinct. The rolling window cancelling as well as adding. `away` as a first-line
+policy parameter, with attribution never reaching a policy. Identity, shape and immutability on the
+away path: `setBy == request.auth.uid` on create *and* update, `setByName` bounded on write,
+`hasOnly` + `hasAll` on the field set, catch-all deny. The fan-out skipping the actor from a
+rules-enforced field, filtering revoked links, cross-checking the link id against its body, and
+carrying nothing a device decides from. The mutation harness's UTF-8 decoding, its thirteen real
+controls, `validateAnchors` running first, and the compile gate that makes *"0 did not compile"* mean
+something. From the CLI: Firestore still `europe-west1`/Native with no drift, nothing deployed, the
+four 2nd-gen APIs still absent, Blaze on, no package moved in the range, and the secrets guard clean
+at 25 ignored / 6 tracked with `.gitignore` untouched.
+
+### Still open after this gate
+
+The four owner decisions above, and: the reconcile lock reads `away` and `checkedIn` **before** the
+lease while reading `pendingReminders` after it, under a comment saying reading before the lock *"is
+the whole defect"* — an FCM reconcile can then apply a desired set computed from inputs the UI
+changed inside the window (**pre-dates this range**); the 6-second away read sits on `build()`'s and
+`tap()`'s critical path, so a captive portal costs six seconds of bare spinner on the screen that
+must be there every morning (**pre-dates this range**); `_cacheQueued` caches the raw display name
+while the write path sends `boundedName`, so a >100-character name is cached as unattributed; the
+watcher row can be refused for a day its own picker offered, because `WatcherScreen` has no midnight
+timer; the dialog's three colour pairs against `surfaceContainerHigh` are unmeasured; the Tap
+screen's **ending** path is still silent to a screen reader and closing it needs new copy;
+`screens.md`'s inventory row still says the picker's copy is owed approval; the migration shape check
+compares name and type only, dropping `notnull`, `dflt_value` and `pk`; and a garbled sentence landed
+in `threat-model.md`'s App Check paragraph.

@@ -26,7 +26,7 @@ here as a free choice: add the decision to this file when it is made.
 | Onboarding 2 — "Who are you looking after?" | 5 | **Built.** Copy below, approved 2026-08-26 |
 | Onboarding 3 — summary | 5 | **Built.** Copy approved 2026-08-26. Reports the links that exist, never what was tapped |
 | Pairing — create invite / redeem code | 5 | **Built**, proven on two devices, copy approved 2026-08-26 |
-| Away picker | 6 | **Built.** Layout decided 2026-08-27; two labels frozen, the rest owed approval |
+| Away picker | 6 | **Built.** Layout decided 2026-08-27; copy approved 2026-09-01 |
 | Watcher list (watcher main) | 7 | Row content decided; multi-person layout undesigned |
 | Health panel | 7 | Checks decided incl. backend access (ADR-0004); layout undesigned |
 

@@ -362,13 +362,12 @@ added.
     reaches at least an internal test track. This is a structural gate, not a "wait for metrics"
     one, and it puts enforcement at Phase 8 or later.
   - **The refusal-to-copy mapping must be verified against a real rejection on hardware.**
-    `FirestoreCheckInReader._mentionsAppCheck` **and**
-  `AwayRepository._mentionsAppCheck` — two call sites since Phase 6, and both must be verified;
-  `OPEN-QUESTIONS.md` #5 carries the detail matches an English substring, and anything
-    unrecognised falls through to *unreachable* — whose approved string claims **this phone has
-    been offline**, which is false when the server was reached and refused. Enforcing before that
-    is checked turns one config change into every watcher in the fleet reading a false statement
-    about their own device.
+    `FirestoreCheckInReader._mentionsAppCheck` **and** `AwayRepository._mentionsAppCheck` — two
+    call sites since Phase 6, and both must be verified; `OPEN-QUESTIONS.md` #5 carries the detail.
+    Each **matches an English substring**, and anything unrecognised falls through to *unreachable*
+    — whose approved string claims **this phone has been offline**, which is false when the server
+    was reached and refused. Enforcing before that is checked turns one config change into every
+    watcher in the fleet reading a false statement about their own device.
 - **No volume bound on `onCheckInCreated`** — §8 allows a user `create`, `update` *and* `delete` on
   their own `checkins/{uid}/days/{date}`, and the trigger fires on every create. A create/delete
   loop is therefore an unbounded push generator aimed at that person's **own** watchers' phones and

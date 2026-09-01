@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:i_am_ok/application/providers.dart';
@@ -104,28 +105,37 @@ void main() {
         ),
       );
 
+  WatcherState stateFor(WatchedPersonState who) => WatcherState(
+        people: [who],
+        today: today,
+        watcherZone: TimeZones.location('Europe/Madrid'),
+        warningDelivery: NotificationDelivery.redundant,
+        uses24Hour: true,
+      );
+
   /// The row inside a scope, with the notifier replaced by a recorder.
+  ///
+  /// [recorder] is optional so a test can pump the **same** tree again with a
+  /// different person — which updates the existing elements rather than
+  /// building new ones, and is the only way to reach `didUpdateWidget`. Passing
+  /// a fresh recorder would rebuild the row's `State` from scratch and any
+  /// assertion about state surviving a rebuild would pass for the wrong reason.
   Future<_RecordingWatcher> pumpRow(
     WidgetTester tester, {
     required WatchedPersonState who,
     Size surface = const Size(400, 800),
     double textScale = 1,
+    _RecordingWatcher? recorder,
   }) async {
     tester.view.physicalSize = surface * tester.view.devicePixelRatio;
     addTearDown(tester.view.reset);
 
-    final state = WatcherState(
-      people: [who],
-      today: today,
-      watcherZone: TimeZones.location('Europe/Madrid'),
-      warningDelivery: NotificationDelivery.redundant,
-      uses24Hour: true,
-    );
-    final recorder = _RecordingWatcher(state);
+    final state = stateFor(who);
+    final notifier = recorder ?? _RecordingWatcher(state);
 
     await tester.pumpWidget(
       ProviderScope(
-        overrides: [watcherStateProvider.overrideWith(() => recorder)],
+        overrides: [watcherStateProvider.overrideWith(() => notifier)],
         child: MaterialApp(
           theme: AppTheme.light,
           home: Builder(
@@ -139,7 +149,7 @@ void main() {
       ),
     );
     await tester.pump();
-    return recorder;
+    return notifier;
   }
 
   group('ending an away period asks first', () {
@@ -229,6 +239,157 @@ void main() {
       expect(tester.takeException(), isNull,
           reason: 'a dialog that overflows here is CLIPPED IN RELEASE');
       expect(find.text(WatcherCopy.endAwayConfirmAction), findsOneWidget);
+      // **And the way BACK is still there.** This assertion did not exist, so
+      // the case measured only that the destructive action survived the scale
+      // — the half that costs nothing if it is missing.
+      expect(find.text(AwayCopy.cancel), findsOneWidget);
+
+      // **The destructive action must not sit flush against the safe one.**
+      // `AlertDialog` stacks its actions in an `OverflowBar` once they no
+      // longer fit side by side, and defaults the gap to 0 — so at this size
+      // *End it* was directly under *Go back*, touching, with nothing between
+      // them. Overshooting *Go back* by a few pixels then ends eleven days of
+      // cover, which is the mis-tap the dialog was added to prevent.
+      final back = tester.getRect(find.byKey(const Key('watcher-away-end-cancel')));
+      final endIt = tester.getRect(find.byKey(const Key('watcher-away-end-confirm')));
+      expect(back.overlaps(endIt), isFalse, reason: 'the two actions overlap');
+      final stacked = endIt.top >= back.bottom - 1;
+      expect(
+        stacked ? endIt.top - back.bottom : endIt.left - back.right,
+        greaterThanOrEqualTo(8),
+        reason: stacked
+            ? 'stacked with no gap: a mis-tap on Go back ends the period'
+            : 'side by side with no gap',
+      );
+    });
+  });
+
+  group('what the row says is what came BACK — not always "Saved"', () {
+    /// The platform messages TalkBack would speak, rather than the copy
+    /// constants: a string-equality check against a constant still passes with
+    /// the whole `sendAnnouncement` call deleted, which is the mistake
+    /// `watcher_screen_test.dart` records being fixed for.
+    List<String> announcementsOn(WidgetTester tester) {
+      final spoken = <String>[];
+      tester.binding.defaultBinaryMessenger
+          .setMockDecodedMessageHandler<Object?>(
+        SystemChannels.accessibility,
+        (message) async {
+          final event = message as Map<Object?, Object?>;
+          if (event['type'] == 'announce') {
+            final data = event['data'] as Map<Object?, Object?>;
+            spoken.add(data['message'] as String);
+          }
+          return null;
+        },
+      );
+      addTearDown(
+        () => tester.binding.defaultBinaryMessenger
+            .setMockDecodedMessageHandler<Object?>(
+                SystemChannels.accessibility, null),
+      );
+      return spoken;
+    }
+
+    /// Ends the period with the recorder returning [outcome], and reports what
+    /// the row said and spoke.
+    Future<(List<String>, _RecordingWatcher)> endWith(
+      WidgetTester tester,
+      AwayOutcome outcome,
+    ) async {
+      final recorder =
+          await pumpRow(tester, who: person(cache: WatcherCache(away: awayRecord())));
+      recorder.outcome = outcome;
+      final spoken = announcementsOn(tester);
+      final handle = tester.ensureSemantics();
+
+      await tester.tap(find.text(WatcherCopy.endAwayAction('Mum')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('watcher-away-end-confirm')));
+      await tester.pumpAndSettle();
+      // Disposed here rather than in a tear-down: the framework verifies no
+      // handle is outstanding BEFORE tear-downs run, so `addTearDown` fails the
+      // test it was meant to clean up after.
+      handle.dispose();
+      return (spoken, recorder);
+    }
+
+    // Until 2026-09-01 this file's recorder had an `outcome` field that **no
+    // test ever assigned**: all six ran the confirmed case. Rewriting the row's
+    // one branch as `final message = saved;` left every test green while a
+    // watcher who pressed in a lift read *"Saved. Mum is marked away."* for a
+    // write the server had refused. That is the Phase 5 gate's finding
+    // restated — the double replaced the method that ACTS, and left the method
+    // that CHOOSES A SENTENCE undriven — and §12 calls a watcher silently wrong
+    // about somebody else's cover the one failure this app cannot detect in
+    // itself.
+
+    testWidgets('a QUEUED write is not reported as saved', (tester) async {
+      final (spoken, recorder) = await endWith(tester, const AwayOutcome.queued());
+
+      expect(recorder.endCalls, 1);
+      expect(find.text(AwayCopy.queued), findsOneWidget);
+      expect(find.text(WatcherCopy.awayEndedSaved('Mum')), findsNothing,
+          reason: 'the write has not landed; saying it has is the false half');
+      expect(spoken, [AwayCopy.queued]);
+    });
+
+    testWidgets('a REFUSED write is not reported as saved', (tester) async {
+      final (spoken, recorder) = await endWith(
+        tester,
+        const AwayOutcome.refused(AwayRefusal.notPermitted),
+      );
+
+      expect(recorder.endCalls, 1);
+      expect(find.text(AwayCopy.refusal(AwayRefusal.notPermitted)),
+          findsOneWidget);
+      expect(find.text(WatcherCopy.awayEndedSaved('Mum')), findsNothing);
+      expect(spoken, [AwayCopy.refusal(AwayRefusal.notPermitted)],
+          reason: 'a blind watcher hears the refusal or hears nothing at all');
+    });
+
+    testWidgets('and the CONFIRMED case still speaks its own sentence',
+        (tester) async {
+      // The control for the two above: without it, a row that said the shared
+      // switch's sentence for everything would pass both of them.
+      final (spoken, _) = await endWith(tester, const AwayOutcome.set());
+
+      expect(find.text(WatcherCopy.awayEndedSaved('Mum')), findsOneWidget);
+      expect(spoken, [WatcherCopy.awayEndedSaved('Mum')]);
+    });
+
+    testWidgets('the sentence is dropped once the period it described moves',
+        (tester) async {
+      // *"Mum is marked away"* is PRESENT TENSE. It was cleared only by the
+      // next press, so a resume, a refresh or a foreground push could leave it
+      // sitting under a row that now reads "Everything OK" — a status claim
+      // contradicting the row above it, which is `guidelines.md`'s *state, not
+      // history* rule broken by the newest sentence on the screen.
+      final recorder = await pumpRow(tester, who: person());
+      recorder.outcome = const AwayOutcome.set();
+
+      await tester.tap(find.text(WatcherCopy.markAwayAction('Mum')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('20'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(AwayPickerScreen.saveKey));
+      await tester.pumpAndSettle();
+      expect(find.text(WatcherCopy.awaySetSaved('Mum')), findsOneWidget);
+
+      // A period appears from elsewhere — Mum's own phone, or another watcher —
+      // and this row is rebuilt from the reconcile that followed. The SAME
+      // recorder, so the tree updates in place and the row's `State` survives:
+      // rebuilding it from scratch would clear `_message` for a reason that has
+      // nothing to do with the fix.
+      await pumpRow(
+        tester,
+        who: person(cache: WatcherCache(away: awayRecord())),
+        recorder: recorder,
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text(WatcherCopy.awaySetSaved('Mum')), findsNothing,
+          reason: 'a present-tense claim must not outlive what it described');
     });
   });
 

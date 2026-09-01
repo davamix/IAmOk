@@ -494,18 +494,19 @@ because dropping every message changes no answer.
 
 ---
 
-## The device run — 2026-09-01, 10:37–11:12
+## The device run — 2026-09-01, 10:37–11:45
 
-**Every Phase 6 checklist row is now ticked, and none of it happened on the POCO.** The full
-write-up, with the timeline and the exact figures, is in `testing/device-matrix.md` under *The Phase
-6 away run*; this is what it changes about the phase.
+**Every Phase 6 checklist row is ticked, first on two AVDs and then, for the OEM half, on the
+POCO.** The full write-up, with the timeline and the exact figures, is in `testing/device-matrix.md`
+under *The Phase 6 away run* and *…and then the POCO*; this is what it changes about the phase.
 
-**The POCO F3 could not be installed to.** `INSTALL_FAILED_USER_RESTRICTED`, on `adb install` and on
-`pm install` from `/data/local/tmp`, with the phone awake and unlocked and `dumpsys user` reporting
-no restrictions at all. It is HyperOS's *Install via USB* developer toggle, which cannot be set over
-adb. **This page's old note that a retry works is now false**, and the consequence is precise:
-nothing OEM-specific about Phase 6 has been measured. Everything below is Android 16 / API 36
-emulators — one existing AVD as Mum, and a second one created for the run as Ana.
+**The POCO refused every install for the first hour.** `INSTALL_FAILED_USER_RESTRICTED`, on
+`adb install` and on `pm install` from `/data/local/tmp`, with the phone awake and unlocked and
+`dumpsys user` reporting no restrictions at all — HyperOS's *Install via USB* developer toggle,
+which **cannot be set over adb**. This page's old note that a retry works is now false; a retry did
+not help, and no adb-side workaround exists. The owner turned the toggle on and the same APK
+installed first try, so the run below is two AVDs (Android 16 / API 36 — Mum and a second AVD
+created as Ana) **and then the handset**, signed in as a third person, Pop, watched by Ana.
 
 **What the run establishes that no test could.**
 
@@ -544,6 +545,17 @@ phone, where she is choosing for somebody else; and `invite_service.dart` has **
 timeout** at all, unlike `AwayRepository`, so the pairing screens spin on the SDK's 60-second default
 with nothing said.
 
+**What the POCO added, once it would take a build.** The OEM doubts were the reason to want it, and
+none of them materialised at stock power settings: reminders armed **21 / 21** around an away period
+(1–7 Sep → 5–11 Sep → back to 1–7 Sep after a cancellation), nothing trimmed by the vendor; and the
+**closed-app nudge works in both directions on HyperOS** — app killed with `pidof` empty, then a
+cancellation and later a creation each woke a new process, rewrote `self_away` and re-armed the
+alarms without the app being opened. Then *"Ana marked you away until Thursday 3."* on the handset
+itself, which is where §17's mitigation has to be read. Two smaller confirmations: the code expiry
+rendered in **24-hour** format because the phone is set that way, and at 392.7dp the picker's day
+cells measure **52.6dp**. Doze is still unmeasured, and away across a real period boundary still
+needs a phone to sit offline overnight.
+
 ---
 
 ## Still owed
@@ -551,9 +563,10 @@ with nothing said.
 **The device run is done**, above, except for what a session cannot drive and what the POCO cannot
 answer:
 
-1. **The POCO, entirely.** Its *Install via USB* toggle has to be turned on by hand before any build
-   can reach it. Every OEM-specific question — HyperOS alarm survival, Doze, vendor trimming — is
-   unanswered for this phase.
+1. **Doze on the POCO.** The phone ran the away rows at stock power settings, screen on; nothing was
+   measured with it idle overnight, and this project's own notes say `deviceidle force-idle` will
+   not reach deep idle on this device from a screen-off state. That is the one OEM question the run
+   did not close.
 2. The third exit criterion **cannot be driven in a session** — it needs a device to sit offline
    across a period boundary. The arithmetic is asserted in tests; what a device would add is
    confidence that nothing else expires the cache. The harness's forced date is the intended route

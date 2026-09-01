@@ -2,9 +2,9 @@
 
 **Written:** 2026-09-01, at the end of the build-and-review session.
 **Updated:** 2026-09-01, after the device run.
-**Status:** Built, all five reviewers run, every finding applied, **and run on two AVDs — every
-Phase 6 checklist row is answered.** **Not signed off**: the POCO refused to be installed to, and
-two owner decisions are open.
+**Status:** Built, all five reviewers run, every finding applied, **and run on two AVDs and then on
+the POCO F3 — every Phase 6 checklist row is answered, including the OEM half.** **Not signed off**:
+the owner decisions are open, and Doze is still unmeasured.
 
 This is the *what to do next* document. [phase-6-summary.md](phase-6-summary.md) is the *what
 happened* one and is longer; read its **The gate review** section before touching anything, because
@@ -20,16 +20,16 @@ then **The device run**, which is what the checklist rows were ticked from.
 > `docs/phases/phase-6-summary.md`. Two things are settled and must not be re-derived: the gate
 > scoped `from`'s immutability to a **period** rather than a person, in both
 > `AwayRules.periodInForce` and `firestore.rules`; and the away feature has now been **driven end to
-> end on two API 36 AVDs** — picker, both surfaces, both cancel shapes, the closed-app nudge, the
-> offline queue and the v5 → v6 migration. The evidence is in `docs/testing/device-matrix.md` under
-> *The Phase 6 away run*. Do not re-run those rows for their own sake.
+> end on two API 36 AVDs and then on the POCO F3** — picker, both surfaces, both cancel shapes, the
+> closed-app nudge in both directions, the offline queue and the v5 → v6 migration. The evidence is
+> in `docs/testing/device-matrix.md` under *The Phase 6 away run* and *…and then the POCO*. Do not
+> re-run those rows for their own sake.
 >
-> **The POCO F3 cannot be installed to.** Every attempt returns
-> `INSTALL_FAILED_USER_RESTRICTED` — HyperOS's *Install via USB* developer toggle, which **cannot be
-> set over adb** and needs a physical tap on the phone (Developer options → Install via USB; MIUI
-> usually also wants a signed-in Mi account). Ask the owner to turn it on before planning anything
-> that needs OEM hardware. Until then everything OEM-specific about this phase — HyperOS alarm
-> survival, Doze, vendor trimming — is unmeasured, and the AVD rows do **not** cover it.
+> **If the POCO refuses an install** with `INSTALL_FAILED_USER_RESTRICTED`, that is HyperOS's
+> *Install via USB* developer toggle, which it revokes on its own schedule. **A retry does not fix
+> it and adb cannot set it** — ask the owner for a physical tap (Developer options → Install via
+> USB; MIUI usually also wants a signed-in Mi account). That cost an hour on 2026-09-01 before the
+> run could touch the phone at all.
 >
 > **Three things are open and each needs a decision rather than a patch**, all recorded with their
 > measurements: an away period set **offline** never reaches the setter's own phone until an
@@ -119,31 +119,30 @@ lines back to their original form. The Phase 5 gate found a mutated build in the
 
 ## What to do next, in order
 
-### 1. The device run — DONE on AVDs, 2026-09-01, and blocked on the POCO
+### 1. The device run — DONE, 2026-09-01, on two AVDs and then on the POCO
 
 **Every row of the Phase 6 checklist is ticked**, including the Phase 5 carry item (the chooser's
-second option, and six warning alarms confirmed armed from `dumpsys alarm`). The evidence, timings
-and exact figures are in `docs/testing/device-matrix.md` under *The Phase 6 away run*. **Do not
+second option, and six warning alarms confirmed armed from `dumpsys alarm`), and **the OEM half was
+then re-run on the handset**. The evidence, timings and exact figures are in
+`docs/testing/device-matrix.md` under *The Phase 6 away run* and *…and then the POCO*. **Do not
 re-run them for their own sake**; re-run one only when its code changes.
 
-**What is still owed here is the POCO, and it needs a person.** `adb install` returns
-`INSTALL_FAILED_USER_RESTRICTED` on every route — streamed install, and `pm install` from
-`/data/local/tmp` — with the phone awake, unlocked, `adb_enabled=1`, and `dumpsys user` reporting
-`Effective restrictions: none`. That is HyperOS's *Install via USB* gate and **adb cannot set it**.
-This page used to say a retry works; it does not any more.
+**What the POCO settled**, at stock power settings: reminders armed 21/21 around an away period with
+nothing trimmed by the vendor, and the **closed-app nudge working in both directions** — a
+cancellation and a creation each woke a killed app, rewrote `self_away` and re-armed the alarms
+without the app being opened. Then *"Ana marked you away until Thursday 3."* on the handset itself.
 
-So the OEM half of this phase is unmeasured, and the AVD rows must not be read as covering it:
-HyperOS alarm survival, Doze behaviour, vendor trimming, and a genuinely narrow screen. (The 360dp
-day-cell floor *was* checked, by forcing `wm density 480` on an AVD — the cells measure exactly
-48dp — but that is a layout answer, not an OEM one.)
+**What is still owed on the phone is Doze**, and only that: everything above ran with the screen on.
+This page's own note says `deviceidle force-idle` will not reach deep idle on this device from a
+screen-off state, so it needs a real overnight — which is also what the third exit criterion needs.
 
 `adb` is **not on PATH**. It is at `D:\Android\Sdk\platform-tools\adb.exe`.
 
 **The rig this run leaves behind:** AVD `Medium_Phone_API_36.0` as **Mum** (watched, away until
-1 Sep after the truncation) and a new AVD **`IAmOk_Watcher_36`** as **Ana** (watching Mum, and
-watched by her). Both links exist because the carry item needs a Tap screen and a code at once.
-Two instances of *one* AVD will not run unless **every** instance carries `-read-only`, which is why
-a second AVD exists at all.
+1 Sep after the truncation); a new AVD **`IAmOk_Watcher_36`** as **Ana** (watching Mum and Pop, and
+watched by Mum); and the **POCO as Pop**, a third identity (`emulator-pop`, host `127.0.0.1` over
+`adb reverse`), watched by Ana and away until 3 Sep as she set it. Two instances of *one* AVD will
+not run unless **every** instance carries `-read-only`, which is why a second AVD exists at all.
 
 **Traps that cost real time last phase, all still true:**
 
@@ -283,11 +282,12 @@ and a font-scale assertion measuring a widget entirely outside the viewport. Bot
 
 ## The rig, as this session leaves it
 
-**POCO F3 — connected, app STILL NOT INSTALLED, and it cannot be.** `1720f883`, `alioth_eea`,
-Android 13 / API 33, HyperOS `OS1.0`. Every install route returns `INSTALL_FAILED_USER_RESTRICTED`;
-HyperOS's *Install via USB* toggle is off and adb cannot set it. **This needs a physical tap before
-the next session plans anything on it** — Developer options → *Install via USB* (MIUI usually also
-wants a signed-in Mi account and a SIM). Nothing else about the phone changed.
+**POCO F3 — the app IS installed, signed in as Pop.** `1720f883`, `alioth_eea`, Android 13 / API 33,
+HyperOS `OS1.0`, stock power settings, locale `es-ES`, 24-hour clock, 392.7dp wide. Watched by Ana,
+away until 3 Sep as she set it, notifications granted. Built with `IAMOK_EMULATOR_HOST=127.0.0.1`,
+so it needs `adb reverse` — run `tools/emulators.ps1 -Device 1720f883`, which sets it up and dies
+with the cable. *Install via USB* is **on again**; if it stops being on, that is the toggle, and a
+retry will not do it.
 
 **AVD `Medium_Phone_API_36.0`** — now **Mum, the watched person**, signed in as `emulator-mum`,
 watched by Ana and watching her, away until 1 Sep (the truncated period), store at **v6**, forced
@@ -298,11 +298,13 @@ date cleared, `font_scale` back to 1.0 and density reset. Scratch rig; *Wipe sto
 because two instances of one AVD require **every** instance to carry `-read-only`, which the
 already-running one did not. Keep it; a second identity is needed by every away row.
 
-**`emulator-data/` is the 2026-09-01 export and it DOES contain this pairing** — both users, both
-links, the away document. Exported with `firebase emulators:export emulator-data --force --project
-i-am-ok-c74ca` **against the running hub**, which is the way to keep state when the suite was started
-detached and so can never receive the Ctrl-C that `--export-on-exit` needs. Phase 5 lost its state
-exactly there. `emulators.ps1` prints the export's date on import, so a stale one stays visible.
+**`emulator-data/` is the 2026-09-01 11:47 export and it DOES contain all of this** — Mum, Ana and
+Pop, both of Ana's links, and the away documents. Exported with `firebase emulators:export
+emulator-data --force --project i-am-ok-c74ca` **against the running hub**, which is the way to keep
+state when the suite was started detached and so can never receive the Ctrl-C that `--export-on-exit`
+needs. Phase 5 lost its state exactly there. The second export printed *"Export complete"* and then
+exited 9 with the documented libuv assertion — read the output, not the code. `emulators.ps1` prints
+the export's date on import, so a stale one stays visible.
 
 **Nothing is deployed.** `firebase functions:list` returns *No functions found*, re-verified
 2026-08-31. `firestore.rules` **has changed this phase** and is **not deployed** — the live ruleset

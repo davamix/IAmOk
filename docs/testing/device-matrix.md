@@ -140,11 +140,13 @@ Full evidence in [phase-2-summary.md](../phases/phase-2-summary.md).
 - [x] The debug harness works on-device: force date, fire alarm now, dump `LocalStore`, run
       `reconcile()`. Without it every later item on this page costs a day to verify.
 
-**Phase 6 — away mode** · **RUN 2026-09-01, 10:37–11:12, on TWO AVDs — not on the POCO.**
-Full write-up in *The Phase 6 away run* below. **The POCO F3 refused every install**
-(`INSTALL_FAILED_USER_RESTRICTED`), so nothing in Phase 6 has been on OEM hardware and every row
-below is ticked against Android 16 / API 36 emulators. Rows whose answer is OEM-specific — alarm
-survival on HyperOS, Doze, the vendor's own trimming — are **not** answered by this run.
+**Phase 6 — away mode** · **RUN 2026-09-01 — first on two AVDs (10:37–11:12), then on the POCO
+F3 (11:36–11:45).** Full write-up in *The Phase 6 away run* below, and *…and then the POCO* for the
+OEM half. The phone refused every install for the first hour (`INSTALL_FAILED_USER_RESTRICTED`);
+the owner turned HyperOS's *Install via USB* toggle on, after which it installed first try. The row
+timings below name the AVD they were first answered on; **the OEM-specific half — reminders around
+an away period, and the closed-app nudge in both directions — was then re-run on the POCO and
+passed there too.**
 
 The feature is built and all three exit criteria are met in tests
 (`test/application/away_exit_criteria_test.dart`); this list is what only a device answers. Written
@@ -1416,7 +1418,7 @@ reference uids the emulator no longer knows — re-pair rather than trying to re
 
 **Every Phase 6 row above was answered in this one sitting, and none of it happened on the POCO.**
 
-#### The POCO refused to be installed to, and that is the finding to act on first
+#### The POCO refused to be installed to for the first hour, and a retry is not the fix
 
 `adb install` returned **`INSTALL_FAILED_USER_RESTRICTED: Install canceled by user`** — twice, then
 again through `adb push` + `pm install` from `/data/local/tmp`. The device was **awake, unlocked, on
@@ -1426,9 +1428,9 @@ the home screen, with no dialog showing**, `adb_enabled=1`, and `dumpsys user` r
 **cannot be re-enabled over adb** — it wants a physical tap and, usually, a signed-in Mi account.
 
 This page's existing note — *"HyperOS refused the first `adb install` and accepted a retry"* — is now
-too weak to rely on. A retry did not help. **Until somebody turns that toggle back on, no build can
-reach this handset**, and everything OEM-specific about Phase 6 is unmeasured: alarm survival under
-HyperOS, Doze, vendor trimming, the 360dp-class screen. Nothing here should be read as covering them.
+too weak to rely on: **a retry did not help, and no adb-side workaround exists.** The owner turned
+the toggle back on at 11:35 and the same APK installed first try at 11:36. The AVD run below
+happened while it was blocked; *…and then the POCO* is what the phone answered afterwards.
 
 #### The substitute rig, stated as a substitution
 
@@ -1525,15 +1527,69 @@ curl -s -X POST http://127.0.0.1:5001/i-am-ok-c74ca/europe-west1/createInvite `
      -H "Content-Type: application/json" -d '{"data":{}}'   # expect 401 "Sign in first."
 ```
 
+### …and then the POCO — 11:36–11:45, the OEM half
+
+**The toggle went on and the phone joined the run.** POCO F3 `1720f883`, Android 13 / API 33,
+HyperOS `OS1.0`, **stock power settings**, 1080×2400 @ 440dpi = **392.7dp wide**, locale `es-ES`,
+clock set to 24 hours. A **third** identity — `IAMOK_EMULATOR_USER=emulator-pop`, `…_NAME=Pop`,
+`IAMOK_EMULATOR_HOST=127.0.0.1` over `adb reverse` — so the phone is a **watched** person, watched by
+Ana on AVD-2, which is the role swap this list asks to be recorded. Pop's uid `xH94dLY…` is distinct
+from Mum's and Ana's, checked in Firestore.
+
+**Pairing, from the watched side and on real hardware.** Code **`KEULBK`** minted on the phone; Ana
+typed it; **the phone's own screen then changed by itself** to *"Ana will now know you're OK."* That
+is the one-sitting property Phase 5 recorded, now seen on the handset rather than on an emulator.
+The expiry line rendered *"It stops working at 11:37 on Wednesday 2 September"* — **24-hour**, the
+phone's own setting, honoured rather than hard-coded, exactly as the AVDs rendered *"10:43 am"*.
+
+**Reminders around an away period, on HyperOS, from `dumpsys alarm`:**
+
+| | Reminders armed |
+|---|---|
+| Before away | **21**, three a day, **1 – 7 Sep** |
+| Away 1 – 4 Sep set on the phone | **21**, **5 – 11 Sep** — every away day gone, first day back armed, last = `through` + 7 |
+| After Ana cancelled it, **app killed** | **21**, back to **1 – 7 Sep** |
+
+Nothing was trimmed, dropped or coalesced by the vendor at any point, at stock power settings.
+
+**The closed-app nudge works on this handset, in both directions.** `am kill` (never `force-stop` —
+that cancels every alarm), `pidof` empty, and then:
+
+- **Cancellation.** Ana ended Pop's period. The phone came back as **pid 5741**, and with the app
+  still closed `self_away` went from `{1 → 4 Sep, set by Pop}` to **empty** and the reminders were
+  rebuilt to 1 – 7 Sep. This is the direction the function's docstring calls the one that matters
+  most, on the OEM device that was the reason to doubt it.
+- **Creation.** Killed again; Ana marked Pop away to 3 Sep. New **pid 5934**, `self_away` =
+  `{1 → 3 Sep, set_by = Ana, set_by_name = "Ana"}`, reminders moved to 4 – 10 Sep — all with the app
+  closed.
+
+**And then §17's surface, on the phone an elderly person actually holds:** opening the app showed
+**"Ana marked you away until Thursday 3. Your family isn't expecting a check-in."**
+
+**What the POCO adds to the layout answers:** at 392.7dp the picker fits without scrolling and the
+day-cell pitch measures **144.7px = 52.6dp**, comfortably over the 48dp floor — the arithmetic
+`(392.7 − 24) / 7` on real hardware. The **app renders in English on a Spanish phone**; there is no
+localisation in this project and none is claimed, but this is the first time it has been seen.
+
+**Not answered, and still not:** Doze — nothing here was run with the screen off for long enough,
+and this page's own note says `deviceidle force-idle` will not reach deep idle on this device from a
+screen-off state. Away across a real period boundary likewise still needs a phone to sit offline
+overnight.
+
 #### The rig as this run leaves it
 
 **The emulator state was exported**, which is the thing Phase 5 lost: `firebase emulators:export
 emulator-data --force --project i-am-ok-c74ca` talks to the **running hub**, so it does not need the
-Ctrl-C that a background-started suite cannot receive. `emulator-data/` now holds both users, both
-links and the away document. Ports 8080 / 9099 / 5001 / 4400 / 4000 were confirmed free afterwards.
+Ctrl-C that a background-started suite cannot receive. It was run **twice** — 11:13 after the AVD
+run, and **11:47 after the POCO one**, so the export holds all three accounts (Mum, Ana, Pop, plus
+one older leftover), both of Ana's links and the away documents. The second export printed *"Export
+complete"* and then **exited 9** with the documented libuv assertion in `src\win\async.c`; the
+metadata file's timestamp and the account list are what say it ran, which is the CLAUDE.md rule
+about reading the output rather than the exit code, arriving on schedule.
 
 **Both AVDs keep their state**: Mum away until 1 Sep (the truncated period), Ana watching her and
-watched by her. **The POCO is still not installed to** and its *Install via USB* toggle is still off.
+watched by her, and now watching Pop as well. **The POCO now has the app installed**, signed in as
+Pop, watched by Ana, away until 3 Sep as set by her, with *Install via USB* on.
 
 ### Three HyperOS behaviours that cost time in this session
 

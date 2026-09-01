@@ -76,6 +76,49 @@ abstract final class OnboardingCopy {
 
   static const String tryAgain = 'Try again';
 
+  // ------------------------------------------------------- the name, if needed
+
+  /// Asked **only** when the account came back without a display name.
+  ///
+  /// Google Sign-In almost always supplies one, so the ordinary path never sees
+  /// this screen. When it does not, the app used to write the literal string
+  /// `'Someone'` into `users/{uid}` and denormalise it onto every link — after
+  /// which this person reads as *"Someone"* on their family's phones, in
+  /// sentences like *"Choose the last day Someone is away"* and *"Someone marked
+  /// you away"*. `guidelines.md` forbids naming a role, and `AwayRecord
+  /// .unnameable` is that same string used as a sentinel meaning *nobody can be
+  /// named* — so the placeholder also silently suppressed this person's away
+  /// attribution.
+  ///
+  /// A question, in the voice the other two onboarding screens already use.
+  static const String nameTitle = 'What is your name?';
+
+  /// What happened, then what to do — `guidelines.md`'s rule for anything that
+  /// interrupts somebody.
+  ///
+  /// *"This phone"* is the house voice for a statement about the device
+  /// (`profileFailed`, `WatcherCopy.couldNotCheck`), and naming **Google** is
+  /// contextual rather than jargon: they pressed *Sign in with Google* one screen
+  /// ago. The second sentence says why it is worth typing — the name is not for
+  /// this phone, it is what other people will read.
+  static const String nameBlurb =
+      'This phone could not get your name from your Google account. Type the '
+      'name your family will see.';
+
+  /// The field's own label, and its screen-reader label with it.
+  static const String nameFieldLabel = 'Your name';
+
+  static const String nameAction = 'Continue';
+
+  /// Submitted with nothing in it.
+  ///
+  /// The rules require `displayName` to be 1–100 characters after trimming, so
+  /// an empty name is not merely unhelpful — it is a `permission-denied` on the
+  /// one write that makes pairing possible. The length ceiling is enforced by
+  /// the field itself rather than by a message, because a refusal somebody
+  /// cannot see coming is worse than a limit they simply cannot exceed.
+  static const String nameEmpty = 'Please type your name.';
+
   // ---------------------------------------------------------------- screen one
 
   /// PLAN.md fixes this heading. Role falls out of the answer.

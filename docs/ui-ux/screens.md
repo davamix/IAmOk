@@ -22,6 +22,7 @@ here as a free choice: add the decision to this file when it is made.
 | Tap (watched main) | 2 | **Built.** Behaviour, copy and layout decided |
 | Debug harness | 2 | **Built.** Debug builds only |
 | Sign-in | 5 | **Built.** Not in this inventory before Phase 5 — see below |
+| Sign-in — "What is your name?" | 6 | **Built 2026-09-01.** Shown only when the account has no display name. Copy below, **owner approval of the exact strings still owed** |
 | Onboarding 1 — "Who should know you're OK?" | 5 | **Built.** Copy below, approved 2026-08-26 |
 | Onboarding 2 — "Who are you looking after?" | 5 | **Built.** Copy below, approved 2026-08-26 |
 | Onboarding 3 — summary | 5 | **Built.** Copy approved 2026-08-26. Reports the links that exist, never what was tapped |
@@ -99,6 +100,50 @@ that made `TapCopy.tapTargetLabel` stop saying *"tell your family"*.
 app still cannot be paired with, since `redeemInvite` copies the name and timezone off
 `users/{uid}` onto the link (§7). *"Could not sign in"* would send somebody to retry the half that
 worked.
+
+### Asking for a name — **new 2026-09-01, and shown to almost nobody**
+
+> **Drafted at the Phase 6 close-out gate and owner-directed the same day**: *"the app cannot detect
+> the person's name automatically, ask for it — clear and easy to understand for elderly people."*
+> The wording below is that instruction written in this file's voice. **Owner approval of the exact
+> strings is still owed.**
+
+Shown **only** when Google Sign-In returns an account with no display name — after the sign-in, and
+**before** `users/{uid}` is written, so the document is right the first time.
+
+| | Text |
+|---|---|
+| Question | *"What is your name?"* |
+| Body | *"This phone could not get your name from your Google account. Type the name your family will see."* |
+| Field label | **"Your name"** |
+| Action | **"Continue"** |
+| Nothing typed | *"Please type your name."* |
+
+**Why it exists at all.** Without it the app wrote the literal string `Someone` into `users/{uid}`,
+and `redeemInvite` denormalises that onto every link (§7). From that point the person reads as
+*"Someone"* on their family's phones — *"Choose the last day Someone is away"*, *"Someone marked you
+away"* — which `guidelines.md` forbids, because it names a **role**. Worse, `AwayRecord.unnameable`
+is that same string used as a sentinel meaning *nobody can be named*, so the placeholder also
+silently suppressed this person's away attribution.
+
+**The body says what happened, then what to do**, which is this file's rule for anything that
+interrupts somebody. *"This phone"* is the house voice for a claim about the device
+(`profileFailed`, `WatcherCopy.couldNotCheck`), and naming **Google** is contextual rather than
+jargon — they pressed *Sign in with Google* one screen earlier. The second sentence says why it is
+worth typing: the name is not for this phone, it is what other people read.
+
+**Only the empty case has a message.** The 1–100 character bound the rules impose is enforced by the
+field itself, so it cannot be exceeded rather than being refused after the fact — a limit somebody
+cannot cross beats a refusal they could not see coming.
+
+**A typed name is remembered on this phone**, because `refreshProfile` rewrites `users/{uid}` on
+every launch: a name it did not prefer would be replaced by the placeholder within minutes, and the
+feature would look as though it had never worked.
+
+**What this does not fix.** A link already accepted keeps the name it was denormalised with, so an
+account paired before it was named still reads as *"Someone"* on the other phone. Repairing those
+needs either a per-watcher local nickname or a re-sync path, and neither is built — recorded here
+rather than left to be discovered.
 
 ### The three screens, as built
 

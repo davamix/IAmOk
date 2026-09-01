@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show LengthLimitingTextInputFormatter;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../application/onboarding_controller.dart';
@@ -59,6 +60,38 @@ class _SignInState extends ConsumerState<_SignIn> {
   bool _busy = false;
   String? _error;
 
+  /// Signed in, but the account had no name and one has not been typed yet.
+  ///
+  /// Held here rather than as an `OnboardingStep` because it is not a step:
+  /// almost nobody sees it, it cannot be returned to, and it is answerable only
+  /// with the uid this screen has just obtained. `OnboardingController`'s own
+  /// docstring draws the line — it owns *"the step and the two answers"*,
+  /// because those decide where the app opens for ever afterwards. This decides
+  /// nothing beyond one field on one document.
+  String? _signedInUid;
+
+  /// Stores the typed name, then finishes exactly as an account with a name
+  /// would have.
+  ///
+  /// [name] arrives **trimmed and non-empty** — [AskNameForm] owns that rule, so
+  /// it can be asserted without a composition root.
+  ///
+  /// Written to disk **before** `users/{uid}`, so a failed profile write leaves
+  /// the name to retry with rather than making them type it again — and so the
+  /// next launch's `refreshProfile` cannot overwrite it with the placeholder.
+  Future<void> _submitName(String name) async {
+    final uid = _signedInUid;
+    if (uid == null) return;
+
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    await ref.read(appServicesProvider).store.setChosenDisplayName(name);
+    if (!mounted) return;
+    await _finish(uid);
+  }
+
   /// Signs in, then writes `users/{uid}` **before going anywhere**.
   ///
   /// The order is not cosmetic. `redeemInvite` reads that document to
@@ -94,10 +127,43 @@ class _SignInState extends ConsumerState<_SignIn> {
       return;
     }
 
+    // **Ask for a name rather than inventing one.** Google Sign-In almost always
+    // supplies a display name; when it does not, this used to write the literal
+    // `'Someone'` into `users/{uid}`, which `redeemInvite` then denormalises onto
+    // every link (§7). From that point the person reads as *"Someone"* on their
+    // family's phones — *"Choose the last day Someone is away"* — which names a
+    // role, forbidden by `guidelines.md`, and silently suppresses their away
+    // attribution, because `AwayRecord.unnameable` is the same string.
+    //
+    // Asked HERE, before `users/{uid}` is written, so the document is right the
+    // first time. Writing the placeholder and correcting it later would leave
+    // every link redeemed in between carrying the wrong name, on somebody else's
+    // phone, with no path back.
+    if (services.needsDisplayName) {
+      if (!mounted) return;
+      setState(() {
+        _busy = false;
+        _signedInUid = uid;
+      });
+      return;
+    }
+
+    await _finish(uid);
+  }
+
+  /// Writes `users/{uid}`, registers for push, and advances the flow.
+  ///
+  /// Split out of [_signIn] so the name screen can reach it with exactly the
+  /// same ordering. The display name is resolved by
+  /// [AppServices.profileDisplayName], which is also what every later launch
+  /// uses — one precedence rule, in one place, rather than a second copy here
+  /// that could disagree with `refreshProfile`.
+  Future<void> _finish(String uid) async {
+    final services = ref.read(appServicesProvider);
     try {
       await services.users.upsert(
         uid: uid,
-        displayName: services.auth.displayName ?? 'Someone',
+        displayName: await services.profileDisplayName(),
         timezone: await services.store.deviceTimezone() ?? 'Etc/UTC',
       );
     } on Object {
@@ -125,6 +191,13 @@ class _SignInState extends ConsumerState<_SignIn> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    if (_signedInUid != null) {
+      return AskNameForm(
+        busy: _busy,
+        error: _error,
+        onSubmit: (name) => unawaited(_submitName(name)),
+      );
+    }
     return _Page(
       children: [
         const Spacer(),
@@ -429,6 +502,156 @@ class _Summary extends ConsumerWidget {
 /// `guidelines.md` requires the app to work at the system's largest font setting
 /// **without clipping or overlap**, which a bare `Column` cannot promise — so
 /// the frame scrolls rather than each screen remembering to.
+/// The name field, for the test that has to type into it.
+///
+/// A named key rather than `find.byType(TextField)`: the pairing flow has a text
+/// field too, and a finder that would match either is a finder that stops
+/// meaning anything the moment these screens are composed differently.
+const Key nameFieldKey = Key('onboarding-name-field');
+
+/// [AskNameForm]'s button. Keyed for the same reason as the field.
+const Key nameSubmitKey = Key('onboarding-name-submit');
+
+/// *"What is your name?"* — one question, one field, one button.
+///
+/// **Public, and it reaches no provider, no repository and no store.** That is
+/// deliberate and it is the only way this screen is testable at all: this repo
+/// has already established that pumping a widget which touches a real
+/// `LocalStore` **hangs** — `WidgetTester` runs in a fake-async zone, `sqflite`
+/// does real I/O off it, and the test times out rather than failing.
+/// `app_lifecycle_test.dart` records that finding in full and is the reason
+/// `IAmOkApp` is never pumped. Everything this widget decides — the field's
+/// rule, the floors, what the button does with whitespace — is asserted by
+/// pumping it directly with a callback.
+///
+/// It owns exactly one rule: **a name is trimmed, and an empty one is refused.**
+/// [onSubmit] is therefore called only with a trimmed, non-empty string, so the
+/// caller has nothing left to validate. The rules require `displayName` to be
+/// 1–100 characters after trimming, and a write outside that is a
+/// `permission-denied` on the one document that makes pairing possible.
+///
+/// Built to the same floors as every other elderly-facing surface: the whole
+/// page scrolls, so the largest system font scale pushes nothing off the bottom
+/// and the keyboard cannot cover the field; the button is [tallButton],
+/// comfortably past the 48dp floor; and the field carries a visible label which
+/// is also its screen-reader label, because `guidelines.md` requires every
+/// interactive element to be labelled and a hint alone is not read as one.
+///
+/// **`maxLength` is not used**, deliberately: it renders a live character
+/// counter, which is clutter on a screen whose whole job is one plain question.
+/// The 100-character ceiling is enforced by an input formatter instead, so it
+/// cannot be exceeded rather than being refused after the fact.
+class AskNameForm extends StatefulWidget {
+  const AskNameForm({
+    super.key,
+    required this.busy,
+    required this.onSubmit,
+    this.error,
+  });
+
+  /// A write is in flight: the field and the button are disabled.
+  final bool busy;
+
+  /// Called with a **trimmed, non-empty** name.
+  final ValueChanged<String> onSubmit;
+
+  /// A failure from the write, rendered below the field.
+  ///
+  /// Separate from the field's own refusal, and rendered separately, because
+  /// `errorText` also turns the field red and relabels it as invalid — the same
+  /// distinction `pairing_screens.dart` draws between refusals that are about
+  /// the code and refusals that are not.
+  final String? error;
+
+  @override
+  State<AskNameForm> createState() => _AskNameFormState();
+}
+
+class _AskNameFormState extends State<AskNameForm> {
+  final _field = TextEditingController();
+  String? _fieldError;
+
+  @override
+  void dispose() {
+    _field.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    if (widget.busy) return;
+    final typed = _field.text.trim();
+    if (typed.isEmpty) {
+      setState(() => _fieldError = OnboardingCopy.nameEmpty);
+      return;
+    }
+    setState(() => _fieldError = null);
+    widget.onSubmit(typed);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return _Page(
+      children: [
+        const Spacer(),
+        Text(
+          OnboardingCopy.nameTitle,
+          style: theme.textTheme.displaySmall,
+          textAlign: TextAlign.center,
+        ),
+        const SizedBox(height: 24),
+        Text(
+          OnboardingCopy.nameBlurb,
+          style: theme.textTheme.bodyLarge,
+          textAlign: TextAlign.center,
+        ),
+        const SizedBox(height: 32),
+        TextField(
+          key: nameFieldKey,
+          controller: _field,
+          autofocus: true,
+          enabled: !widget.busy,
+          textCapitalization: TextCapitalization.words,
+          textInputAction: TextInputAction.done,
+          onSubmitted: (_) => _submit(),
+          inputFormatters: [LengthLimitingTextInputFormatter(100)],
+          style: theme.textTheme.headlineSmall,
+          textAlign: TextAlign.center,
+          decoration: InputDecoration(
+            labelText: OnboardingCopy.nameFieldLabel,
+            border: const OutlineInputBorder(),
+            errorText: _fieldError,
+            errorMaxLines: 3,
+          ),
+        ),
+        const Spacer(),
+        if (widget.error case final message?) ...[
+          Text(
+            message,
+            style: theme.textTheme.bodyMedium
+                ?.copyWith(color: theme.colorScheme.error),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 16),
+        ],
+        FilledButton(
+          key: nameSubmitKey,
+          onPressed: widget.busy ? null : _submit,
+          style: tallButton,
+          child: widget.busy
+              ? const SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Text(OnboardingCopy.nameAction),
+        ),
+        const SizedBox(height: 24),
+      ],
+    );
+  }
+}
+
 class _Page extends StatelessWidget {
   const _Page({required this.children});
 

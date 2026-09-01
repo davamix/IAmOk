@@ -244,12 +244,45 @@ class AppServices {
   /// write that throws leaves the previous document, which is the correct
   /// outcome, and an exception escaping into a resume would replace whatever
   /// screen the reader opened.
+  /// Whether this account arrived without a usable name, and must be asked.
+  ///
+  /// **On `AppServices` rather than inside the onboarding widget**, for the
+  /// reason `app_lifecycle_test.dart` records at length: pumping a widget that
+  /// reaches a real `LocalStore` hangs, so a decision left in `build` is a
+  /// decision nothing can assert. `IAmOkApp.repairOnResume` and
+  /// `WatcherScreen.isShowing` were hoisted out for exactly this, and the shape
+  /// of the bug is the same — invert it and either every user is interrogated
+  /// about a name they already have, or nobody is ever asked and the placeholder
+  /// ships.
+  ///
+  /// Trimmed, because the rules require `displayName` to be 1–100 characters
+  /// **after** trimming: a Google account whose name is three spaces has no
+  /// usable name.
+  bool get needsDisplayName => (auth.displayName ?? '').trim().isEmpty;
+
+  /// The name to write to `users/{uid}`, in precedence order.
+  ///
+  /// **A name this person typed wins over the account's**, and that ordering is
+  /// the whole reason [LocalStore.chosenDisplayName] exists: this method runs on
+  /// every launch, so preferring `auth.displayName` would overwrite a typed name
+  /// with the placeholder within minutes of somebody entering it. It is only
+  /// ever set when the account had no name at all, so it cannot shadow a real
+  /// Google name.
+  ///
+  /// [AwayCopy.unnamedWriter] is the last resort rather than an inline literal —
+  /// it is the same string `AwayRecord.unnameable` suppresses, and having it
+  /// written out in three places is how the two stopped agreeing once already.
+  Future<String> profileDisplayName() async =>
+      await store.chosenDisplayName() ??
+      auth.displayName ??
+      AwayCopy.unnamedWriter;
+
   Future<void> refreshProfile() async {
     if (!signedIn) return;
     try {
       await users.upsert(
         uid: selfUid,
-        displayName: auth.displayName ?? 'Someone',
+        displayName: await profileDisplayName(),
         timezone: await store.deviceTimezone() ?? 'Etc/UTC',
       );
     } on Object {

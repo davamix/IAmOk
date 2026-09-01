@@ -480,6 +480,7 @@ class LocalStore {
   static const String _keyDeviceTimezone = 'device_timezone';
   static const String _keyClockOffsetMs = 'debug_clock_offset_ms';
   static const String _keySimulatedBackend = 'debug_simulated_backend';
+  static const String _keyChosenDisplayName = 'chosen_display_name';
   static const String _keyWarningAlarmsExact = 'warning_alarms_exact';
   static const String _keyLinkReconcileFailed = 'link_reconcile_failed';
   static const String _keyUses24HourClock = 'uses_24_hour_clock';
@@ -667,6 +668,27 @@ class LocalStore {
         _keyClockOffsetMs,
         offset == Duration.zero ? null : '${offset.inMilliseconds}',
       );
+
+  /// The name this person typed for themselves, when their account had none.
+  ///
+  /// **Why it is on disk and not merely written to Firestore.**
+  /// `AppServices.refreshProfile` rewrites `users/{uid}` on **every launch** from
+  /// `auth.displayName ?? 'Someone'`. Without a local copy to prefer, a name
+  /// somebody typed during onboarding would be silently overwritten by the
+  /// placeholder the next time they opened the app — the feature would appear to
+  /// work and then forget, which is worse than not offering it.
+  ///
+  /// Null is the ordinary case: Google Sign-In almost always supplies a name, and
+  /// nobody is asked when it does.
+  ///
+  /// A **setting** rather than a column, so this needed no schema migration —
+  /// `schemaVersion` is untouched.
+  Future<String?> chosenDisplayName() => _setting(_keyChosenDisplayName);
+
+  /// Records a typed name. Trimmed by the caller; the rules bound it at 1–100
+  /// characters and a write outside that is a `permission-denied` on onboarding.
+  Future<void> setChosenDisplayName(String? name) =>
+      _putSetting(_keyChosenDisplayName, name);
 
   /// Phase 3's simulated backend, as JSON. See `CheckInReader`.
   ///

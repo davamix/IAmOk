@@ -607,15 +607,16 @@ bounds. Unclamped, the screen would crash for exactly the family whose period si
 forbids a gesture being the only route to an action. The same decision this file records by hand for
 the *Add someone* chooser and the Google account chooser — a dismissal is a choice, not a fault.
 
-### Copy — **owed the owner's approval**
+### Copy — **approved by the owner, 2026-09-01**
 
 The two labels above are frozen and were approved long ago. Everything else the picker and the away
-write path say is **drafted, not approved**, and is listed here so approval has something to read.
-`AwayCopy` is the code-side twin.
+write path say was drafted at the gate and is **approved as it stands**, with one amendment: the
+picker title now names the person on a watcher's phone. `AwayCopy` is the code-side twin.
 
 | | |
 |---|---|
-| Picker title | *"Choose the last day you are away"* — names the one thing this screen collects. `from` is always today, so a title offering a range would promise a choice the screen cannot make |
+| Picker title — **her own phone** | *"Choose the last day you are away"* — names the one thing this screen collects. `from` is always today, so a title offering a range would promise a choice the screen cannot make |
+| Picker title — **a watcher's phone** | *"Choose the last day Mum is away"* — **amended 2026-09-01.** Both surfaces shared the sentence above, so a watcher opening the picker from *"Mark Mum away"* was asked about **herself**. Found by using it on a device; invisible to a widget test, which watched both screens render the string correctly. Named rather than *"them"*, because a watcher may look after several people |
 | Confirm | *"Save"* |
 | Dismiss | *"Go back"* — **amended at the gate**; on a screen about away *dates*, *"Not now"* reads as *"I'm not away now"* or *"start later"* rather than *"leave this screen"* |
 | Write queued offline | *"Saved. Your family will see this as soon as this phone can send it."* — **amended at the gate**, see below |
@@ -626,6 +627,8 @@ write path say is **drafted, not approved**, and is listed here so approval has 
 | Watched screen, somebody else set it | *"Ana marked you away until Saturday 22. Your family isn't expecting a check-in."* — **approved 2026-08-27**, see *The away line names who set it* below |
 | Watcher row | *"Away until Sat 22 Aug — set by Ana"* — already approved; *"Away until Sat 22 Aug"* is the unattributed variant |
 | Watcher row control | *"Mark Mum away"* / *"End Mum's away period"* |
+| Watcher row, **ending it — the confirmation** | *"End Mum's away period?"* · *"The rest of the away period will be removed, and Mum will be expected to check in again. You can set it again at any time."* · **End it** / **Go back** — **added 2026-09-01** with the decision below. The destructive part first, because that is what a mis-tap costs; then the consequence; then the way back. **No dates in it**: ending truncates to *yesterday* in the ordinary case and deletes the document outright when the period started today, so any sentence naming a day would be wrong in one of the two — and the row behind the dialog already carries the period. *"Go back"* is the picker's approved dismissal, verbatim |
+| Watcher row, **a write that landed** | *"Saved. Mum is marked away."* / *"Saved. Mum's away period has ended."* — **added 2026-09-01**. Named, because this row is one of several and the sentence is also what TalkBack speaks. The dates stay on the row underneath: the row is the durable statement, this is the acknowledgement |
 
 > **There is deliberately no *"could not reach the server"* refusal**, and its absence is
 > [ADR-0004](../architecture/decisions/0004-refused-is-not-unreachable.md)'s rule one layer below
@@ -651,10 +654,26 @@ write path say is **drafted, not approved**, and is listed here so approval has 
 > parties writing seconds apart. It also named no next step, which `guidelines.md`'s Floors require of
 > every error. Amended at the gate.
 
-### Owed decisions this phase opened and did not close
+### The decisions this phase opened — **all seven taken by the owner, 2026-09-01**
 
-Recorded rather than left implicit, because in each case the **code has already decided** and an
-absence here would read as a free choice.
+Recorded rather than left implicit, because in each case the **code had already decided** and an
+absence here would have read as a free choice. The table below is what was open and what was
+decided; the *"What was decided"* column is the answer, and the reasoning beside it is why the
+question was worth asking rather than a preference.
+
+| | What was decided |
+|---|---|
+| Extending a period in force | **Record the limitation, revisit after the app ships.** Now in ARCHITECTURE.md §12, beside the sentence that says away may be *extended* — the model permits it; the surface does not |
+| The watcher row's cancel | **Add a confirmation, on that row only.** Copy above. The Tap screen keeps none, deliberately |
+| Nothing is said when a write lands | **Split the two surfaces.** The Tap screen stays silent — its away line is the confirmation and is still there tomorrow. The watcher row says so, and speaks it |
+| The writer nobody can name | **Keep as-is**: `"Someone"` written, suppressed at render. A real person called that loses their attribution, which is the right way to be wrong |
+| The spoken outcome strings | **Approved as they stand** — they reuse the rendered sentence, which is already approved copy |
+| The picker title | **Name the person on the watcher's phone.** Two strings, above |
+| An away period set offline says *"Saved."* | **Cache it locally and re-arm.** A queued write now goes into `self_away` on the phone that wrote it, and the reconcile re-derives the reminders from there. Bounded: the first read that succeeds overrules it, and being wrong stops reminders — the loud direction — rather than silencing anybody. Confined to the **watched** side; the watcher's cache still comes only from a read that succeeded |
+
+**And the questions themselves, kept as they were put.** Each is what the code had already decided
+and why that was worth a person's answer rather than a maintainer's preference — which is also what
+makes the decisions above readable a year from now.
 
 | | |
 |---|---|

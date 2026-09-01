@@ -39,7 +39,12 @@ import '../domain/domain.dart';
 /// — which is why `AwayRefusal.rejectedPeriod` is reachable only by the clock
 /// moving underneath the reader, and not by anything they can press.
 class AwayPickerScreen extends StatefulWidget {
-  const AwayPickerScreen({required this.today, this.initialLastDay, super.key});
+  const AwayPickerScreen({
+    required this.today,
+    this.initialLastDay,
+    this.personName,
+    super.key,
+  });
 
   /// Today in the **watched person's** zone, resolved by the reconcile that
   /// built the screen this was opened from.
@@ -63,6 +68,24 @@ class AwayPickerScreen extends StatefulWidget {
   /// reach it is owed a decision, recorded in `screens.md`. When it lands, this
   /// is where it plugs in.
   final DayKey? initialLastDay;
+
+  /// Whose away period this is, when it is **not** the reader's own.
+  ///
+  /// Null on the Tap screen, where the reader is the subject and the title says
+  /// *"you"*. Set on the watcher's row, where it does not: the device run on
+  /// 2026-09-01 watched Ana open this from *"Mark Mum away"* and be asked about
+  /// herself. A parameter rather than a lookup because this widget takes its
+  /// inputs and holds no decisions — the same rule as [today], which is the
+  /// watched person's day and not the reader's.
+  final String? personName;
+
+  /// The title, which is about whoever the period belongs to.
+  String get title {
+    final name = personName;
+    return name == null
+        ? AwayCopy.pickerTitle
+        : AwayCopy.pickerTitleFor(name);
+  }
 
   static const Key calendarKey = Key('away-picker-calendar');
   static const Key saveKey = Key('away-picker-save');
@@ -124,7 +147,7 @@ class _AwayPickerScreenState extends State<AwayPickerScreen> {
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
                 child: Text(
-                  AwayCopy.pickerTitle,
+                  widget.title,
                   style: theme.textTheme.headlineSmall,
                 ),
               ),

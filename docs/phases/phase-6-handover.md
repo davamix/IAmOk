@@ -2,9 +2,10 @@
 
 **Written:** 2026-09-01, at the end of the build-and-review session.
 **Updated:** 2026-09-01, after the device run.
-**Status:** Built, all five reviewers run, every finding applied, **and run on two AVDs and then on
-the POCO F3 — every Phase 6 checklist row is answered, including the OEM half.** **Not signed off**:
-the owner decisions are open, and Doze is still unmeasured.
+**Status:** Built, all five reviewers run, every finding applied, **run on two AVDs and then on the
+POCO F3 — every Phase 6 checklist row answered, including the OEM half — and all seven owner
+decisions taken and applied, 2026-09-01.** **Not signed off**: Doze is unmeasured, and §12's four
+away transition notifications are specified and deliberately not built.
 
 This is the *what to do next* document. [phase-6-summary.md](phase-6-summary.md) is the *what
 happened* one and is longer; read its **The gate review** section before touching anything, because
@@ -31,12 +32,12 @@ then **The device run**, which is what the checklist rows were ticked from.
 > USB; MIUI usually also wants a signed-in Mi account). That cost an hour on 2026-09-01 before the
 > run could touch the phone at all.
 >
-> **Three things are open and each needs a decision rather than a patch**, all recorded with their
-> measurements: an away period set **offline** never reaches the setter's own phone until an
-> unrelated reconcile (the screen contradicts its own *"Saved."* and the reminders keep firing); the
-> picker title says *"the last day **you** are away"* on the **watcher's** phone; and
-> `invite_service.dart` has no client-side timeout, so the pairing screens spin on the SDK's
-> 60-second default.
+> **The owner's decisions are taken and applied** — the copy is approved, the picker title names the
+> person on a watcher's phone, ending a period from the watcher's row asks first, that row says when
+> a write lands, and a **queued** away write is now cached on the phone that wrote it. Do not
+> re-open them; the answers and the questions they answered are both in `docs/ui-ux/screens.md`.
+> **One thing is still recorded and undecided**: `invite_service.dart` has no client-side timeout,
+> so the pairing screens spin on the SDK's 60-second default.
 >
 > **Build against the local Firebase Emulator Suite**, as Phases 4, 5 and 6 did. A real Functions
 > deploy is neither needed nor wanted and would still fail — the four 2nd-gen APIs are still
@@ -48,9 +49,9 @@ then **The device run**, which is what the checklist rows were ticked from.
 > before driving a phone**: the first callable of a session can die of a cold-start timeout and it
 > looks exactly like an app fault.
 >
-> **Two owner decisions are owed before this phase can be signed off** — the drafted picker and
-> refusal copy, and five layout/behaviour questions the gate surfaced. Both lists are in
-> `docs/ui-ux/screens.md`. Do not decide them alone.
+> **What is left before sign-off is Doze on the handset** — everything else ran with the screen on —
+> and §12's four away transition notifications, which are specified and deliberately not built. The
+> **cancellation** notice among them is different in kind and is written up as a §17 gap.
 
 ---
 
@@ -62,18 +63,19 @@ pushes only when asked.
 | | |
 |---|---|
 | `flutter analyze` | clean |
-| `flutter test` | **1 354** (1 202 at the start of the phase) |
+| `flutter test` | **1 370** (1 202 at the start of the phase; 1 354 before the owner's decisions were applied) |
 | Rules tests | **80** (75 before) |
 | Functions tests | **102** (83 before) |
 | `tsc --noEmit` | clean at the pinned Node 22 types |
 | Debug APK | builds |
 | Secrets guard | clean — 25 ignored, 6 deliberately tracked |
 | Dart mutations | **31 caught, 0 survived, 0 did not compile**, 10 passing controls |
-| Device | **every Phase 6 row run 2026-09-01 on two API 36 AVDs. The POCO refused every install** |
+| Device | **every Phase 6 row run 2026-09-01 — two API 36 AVDs, then the POCO F3 for the OEM half** |
 
 **All three exit criteria are met in tests** — `test/application/away_exit_criteria_test.dart`,
 driven end to end through both reconcilers and built around **ending** rather than starting, because
-away is the first feature here whose failure mode is silence.
+away is the first feature here whose failure mode is silence — **and now on devices too**, the third
+of them on the POCO with aeroplane mode on and the harness walking the clock across the boundary.
 
 ### The mutation harness, and what it cost to get a number
 
@@ -174,29 +176,39 @@ whole period still ends away on the right day"* needs a phone to sit offline acr
 boundary. The debug harness's forced date is the intended route, and it shortens this from days to
 minutes.
 
-### 2. The two owner decision sets
+### 2. The owner decisions — ALL TAKEN, 2026-09-01, and applied
 
-Both are in `docs/ui-ux/screens.md`. **Do not decide them alone.**
+Nothing here is owed any more. The answers, and where they live, are in
+`docs/ui-ux/screens.md` under *Away picker → Copy* and *The decisions this phase opened*; the
+questions are kept beside them, because a decision without the question it answered is unreadable a
+year later.
 
-**a. The drafted copy** — *Away picker → Copy*, which lists every string with what it says. The
-picker title, `Save`, `Go back`, the queued sentence and the four refusals are **drafted, not
-approved**. Two of them (`serverFault`, `notSignedIn`) reuse already-approved pairing sentences
-verbatim and are the cheapest to approve.
+**The copy is approved**, with one amendment: the picker title now names the person on a watcher's
+phone (*"Choose the last day Mum is away"*), because sharing the Tap screen's *"you"* asked a
+watcher about herself. The rest — `Save`, `Go back`, the queued sentence and the four refusals —
+stands as drafted.
 
-**b. Seven decisions — five from the gate, two added by the device run** — *Owed decisions this
-phase opened and did not close*. Each is a case where **the code has already decided** and an
-absence in that file would read as a free choice. The two new ones are the **picker title
-addressing the wrong person on the watcher's phone**, and **an away period set offline saying
-*"Saved."* while changing nothing on that phone** — the second is the sharper of the two and is the
-same decision as *"nothing is said when a write lands"* seen from the other side:
+**The seven decisions, and what each one cost to apply:**
 
-| | |
-|---|---|
-| Extending a period in force | Unreachable in v1 — both controls flip to *end* while away. §12 says away may be *extended*. Either offer both actions, or record the limitation in §12 |
-| The watcher row's cancel has no confirmation | The Tap screen's argument does not transfer: cancelling **truncates**, so a mis-tap on day 3 of a 14-day stay destroys 11 days, and what is loud is a warning waking the *rest* of the family |
-| Nothing is said when a write lands | Fine on the Tap screen, whose away line is the confirmation. On the watcher row the only feedback is a status line changing under a reader who may not be looking |
-| The writer nobody can name | An account with no display name writes `"Someone"`, suppressed at render. A real person called that loses their attribution |
-| The spoken outcome strings | Now announced on both surfaces, reusing the rendered sentence. `screens.md`'s own rule is that spoken labels are approved copy like any other |
+| | Decided | Where it landed |
+|---|---|---|
+| Extending a period in force | Record the limitation, revisit after ship | ARCHITECTURE.md §12, beside the sentence that says away may be extended |
+| The watcher row's cancel | Add a confirmation, that row only | `_AwayRowActionState._confirmEnd`, `scrollable: true`, 48dp actions, *Go back* reused verbatim |
+| Nothing is said when a write lands | Split the surfaces | The Tap screen stays silent; the watcher row says *"Saved. Mum is marked away."* and speaks it |
+| The writer nobody can name | Keep as-is | No change |
+| The spoken outcome strings | Approved as they stand | No change |
+| The picker title | Name the person on the watcher's phone | `AwayCopy.pickerTitleFor`, `AwayPickerScreen.personName` |
+| Away set offline says *"Saved."* | Cache it locally and re-arm | `WatchedNotifier._cacheQueued`, **watched side only** |
+
+**The last one is the only one with teeth**, and it is bounded deliberately: a queued write goes
+into `self_away` on the phone that wrote it, the reconcile re-derives the reminders from there, and
+the first read that *succeeds* overrules it — including by saying there is no period at all. Being
+wrong therefore **stops reminders**, which is the loud direction, rather than silencing anybody. The
+watcher's cache still comes only from a read that succeeded, because there the same shortcut would
+silence a watcher about somebody else for up to a month.
+
+**16 new tests**, and the one that carries the decision is the negative: *Go back* must write
+nothing. A confirmation that runs the action anyway is worse than none.
 
 ### 3. `onAwayChanged`'s trigger wiring — DONE 2026-09-01, from both ends
 

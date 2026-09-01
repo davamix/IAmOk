@@ -776,7 +776,17 @@ class _AwayRowActionState extends ConsumerState<_AwayRowAction> {
   bool _busy = false;
   String? _message;
 
-  Future<void> _run(Future<AwayOutcome> Function() action) async {
+  /// Runs one away write and reports what came back.
+  ///
+  /// [saved] is what this row says when the write **succeeded**, and it is a
+  /// parameter because only the caller knows which of the two actions ran.
+  /// `AwayCopy.saved` is deliberately null — that is the Tap screen's decision,
+  /// where the away line is the confirmation and is still there tomorrow. This
+  /// row has no such line, so the owner split the two surfaces on 2026-09-01.
+  Future<void> _run(
+    Future<AwayOutcome> Function() action, {
+    required String saved,
+  }) async {
     setState(() {
       _busy = true;
       _message = null;
@@ -791,7 +801,10 @@ class _AwayRowActionState extends ConsumerState<_AwayRowAction> {
       outcome = const AwayOutcome.refused(AwayRefusal.serverFault);
     }
     if (!mounted) return;
-    final message = AwayCopy.awayMessageFor(outcome);
+    // The success case is this surface's own; everything else — queued, and the
+    // four refusals — is the shared exhaustive switch, so a refusal added later
+    // still cannot default into somebody else's sentence.
+    final message = outcome is AwaySet ? saved : AwayCopy.awayMessageFor(outcome);
     setState(() {
       _busy = false;
       _message = message;
@@ -808,6 +821,64 @@ class _AwayRowActionState extends ConsumerState<_AwayRowAction> {
     }
   }
 
+  /// Confirms before **ending** a period, and only here.
+  ///
+  /// Owner decision, 2026-09-01. The Tap screen's *"I'm not away"* has no
+  /// confirmation on the argument that the failure is loud and setting it again
+  /// is two taps. Neither half holds on this row: ending **truncates**, so a
+  /// mis-tap on day 3 of a 14-day stay destroys the remaining 11 days, and what
+  /// is loud is a warning waking the rest of the family about somebody who is
+  /// genuinely away. The asymmetry is the decision, not an oversight.
+  ///
+  /// **`scrollable: true`**, because this is the shape `screens.md` records the
+  /// Phase 5 gate measuring: a dialog whose content overflows at the largest
+  /// font scale is **clipped in release**, silently and with no overflow
+  /// stripe. A title, three lines of body and two 48dp actions do not fit a
+  /// 320×480 phone at scale 2.0.
+  Future<bool> _confirmEnd(String watchedName) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        scrollable: true,
+        title: Text(WatcherCopy.endAwayConfirmTitle(watchedName)),
+        content: Text(WatcherCopy.endAwayConfirmBody(watchedName)),
+        actions: [
+          TextButton(
+            key: const Key('watcher-away-end-cancel'),
+            style: TextButton.styleFrom(minimumSize: const Size(88, 48)),
+            onPressed: () => Navigator.of(context).pop(false),
+            // The picker's approved dismissal, verbatim. A dismissal is a
+            // choice rather than a fault, and it says nothing afterwards.
+            child: const Text(AwayCopy.cancel),
+          ),
+          TextButton(
+            key: const Key('watcher-away-end-confirm'),
+            style: TextButton.styleFrom(minimumSize: const Size(88, 48)),
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text(WatcherCopy.endAwayConfirmAction),
+          ),
+        ],
+      ),
+    );
+    return confirmed ?? false;
+  }
+
+  Future<void> _endAway(AwayPeriod away) async {
+    final person = widget.person;
+    if (!await _confirmEnd(person.name)) return;
+    if (!mounted) return;
+    await _run(
+      () => ref
+          .read(watcherStateProvider.notifier)
+          .endAway(
+            watchedUid: person.link.watchedUid,
+            existing: away,
+            watchedToday: person.watchedToday,
+          ),
+      saved: WatcherCopy.awayEndedSaved(person.name),
+    );
+  }
+
   Future<void> _setAway() async {
     final person = widget.person;
     final lastDay = await Navigator.of(context).push<DayKey>(
@@ -819,6 +890,11 @@ class _AwayRowActionState extends ConsumerState<_AwayRowAction> {
           // *she* is living, or the first and last days are off by one.
           today: person.watchedToday,
           initialLastDay: person.cache.away?.period.through,
+          // **Whose period this is.** Shared with the Tap screen, this title
+          // said *"the last day you are away"* to a watcher choosing dates for
+          // somebody else — found on a device 2026-09-01, and invisible to a
+          // widget test because both surfaces rendered the string correctly.
+          personName: person.name,
         ),
       ),
     );
@@ -833,6 +909,7 @@ class _AwayRowActionState extends ConsumerState<_AwayRowAction> {
             watchedToday: person.watchedToday,
             existing: person.cache.away?.period,
           ),
+      saved: WatcherCopy.awaySetSaved(person.name),
     );
   }
 
@@ -859,17 +936,7 @@ class _AwayRowActionState extends ConsumerState<_AwayRowAction> {
           key: Key('watcher-away-${person.link.id}'),
           onPressed: _busy || (isAway && away == null)
               ? null
-              : () => isAway
-                    ? _run(
-                        () => ref
-                            .read(watcherStateProvider.notifier)
-                            .endAway(
-                              watchedUid: person.link.watchedUid,
-                              existing: away!,
-                              watchedToday: person.watchedToday,
-                            ),
-                      )
-                    : _setAway(),
+              : () => isAway ? _endAway(away!) : _setAway(),
           style: TextButton.styleFrom(
             minimumSize: const Size(88, 48),
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),

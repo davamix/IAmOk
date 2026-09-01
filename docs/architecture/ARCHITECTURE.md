@@ -722,6 +722,20 @@ I'm accountable for that"* — which is exactly what happens when someone is in 
 staying with family, and precisely when the watched person is least able to answer a prompt.
 Requiring approval would block the feature in its main use case.
 
+> **Extending is not reachable in v1, and that is a recorded limitation rather than a silent
+> gap.** The rules and `AwayRules.validateUpdate` both permit it, and the picker's
+> `initialLastDay` is the parameter it plugs into — but **both surfaces flip their control to
+> *end* while a period is in force**, so nothing opens the picker with one running. Making the
+> period longer therefore means ending it and setting it again, which truncates first,
+> re-attributes the period to whoever pressed, and asks somebody to remember a date the screen
+> no longer shows.
+>
+> Offering both actions while away costs a second control on the one screen `guidelines.md`
+> keeps to a single action, which is why it was not done for a case a family meets rarely.
+> **Owner decision, 2026-09-01: record the limitation now, revisit after the app ships.** The
+> sentence above says "extend" because the *model* permits it; this is the surface that does
+> not.
+
 `setByName` is denormalized onto the document so this is never mysterious: every device can
 show *"Ana marked Mum away until Sat 22 Aug."* It has to be denormalized — links are
 `(watched, watcher)` pairs, so a watcher has no path from a *peer* watcher's uid to their name,

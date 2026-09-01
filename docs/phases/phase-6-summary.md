@@ -1,8 +1,10 @@
 # Phase 6 — Away mode · summary
 
-**Date:** 2026-08-27 · **Status:** Built, reviewed by all five reviewers, and their findings
-applied. **Not yet signed off** — nothing here has been on a handset, and the drafted picker and
-refusal copy is owed the owner's approval.
+**Date:** 2026-08-27, with the device run and the owner's decisions added 2026-09-01 ·
+**Status:** Built, reviewed by all five reviewers, their findings applied, **run on two AVDs and
+then on the POCO F3**, and **all seven owner decisions taken and applied**. **Not yet signed off** —
+Doze is unmeasured, and §12's four away transition notifications are specified and deliberately not
+built.
 
 **The gate found that the feature did not work.** Away could be set once per person and then never
 again — see *The gate review* below, which is the part of this document to read first.
@@ -66,8 +68,11 @@ convenient one — see *A missing name may never cost the period* below.
 | The Tap screen's away state | The line, and the live control with the separation `screens.md` required |
 | The watcher list's away row and action | The branch `screens.md` named in Phase 3, above *"Everything OK"* |
 
-**Test counts:** 1 322 Dart (1 202 before), 102 Functions (83 before), 75 rules (unchanged — the
-away rules were already written and covered by 27 of them). `flutter analyze` clean.
+**Test counts:** 1 322 Dart at this point in the phase (1 202 before), 102 Functions (83 before),
+75 rules (unchanged — the away rules were already written and covered by 27 of them). `flutter
+analyze` clean. *(The gate took Dart to 1 354 and the owner's decisions to **1 370**; the rules to
+**80**. This line is the count when the feature was built, and the Verification table below is the
+current one.)*
 
 ---
 
@@ -127,6 +132,14 @@ the direction §12 calls the one failure this app cannot detect in itself.
 
 The watched side does write its cache, through the reconcile, and the asymmetry is deliberate: its
 failure direction is a false **warning**, which is loud and self-correcting.
+
+**Since 2026-09-01 the watched side also writes it directly, on a queued write, and the same
+asymmetry is what permits it.** The device run measured the alternative: aeroplane mode, *"Saved."*,
+and then a screen still offering *"I'm away"* with the reminders for the away days still armed —
+uncorrected, because the nudge that tells every other device deliberately skips the setter. Caching
+it there is bounded by the same rule as everything else: the first read that **succeeds** overrules
+the optimistic row, including by saying there is no period at all. The watcher's cache is unchanged
+and must stay so.
 
 ### The watcher's away row is keyed on *her* today
 
@@ -324,7 +337,7 @@ with `git status` clean.
 | | |
 |---|---|
 | `flutter analyze` | clean |
-| `flutter test` | **1 354 passing** (1 202 at the start of the phase) |
+| `flutter test` | **1 370 passing** (1 202 at the start of the phase; 1 354 before the owner's decisions were applied) |
 | Functions | **102 passing** (83 before) — the runner globs `test/*.test.js`, and its own count is what says the new suite ran |
 | `tsc --noEmit` | clean, at the pinned Node 22 types |
 | Rules | **80 tests** (75 before). `firestore.rules` CHANGED this phase — see the gate review — and is **not deployed** |
@@ -581,10 +594,20 @@ section above is what they found. *(This paragraph said "the reviewers have not 
 2026-09-01. It was written before the gate and left standing after it, in the document whose own
 subject is claims that stop being true. Corrected during the device run.)*
 
-**Copy approval.** The picker and refusal strings are **drafted, not approved** — listed in
-`screens.md` under *Away picker → Copy* so approval has something to read. Two of them reuse
-already-approved sentences verbatim rather than inventing siblings. The device run adds one concrete
-observation to that list: the picker title addresses the wrong person on the watcher's phone.
+**Copy approval — done, 2026-09-01.** The picker and refusal strings are **approved as drafted**,
+with one amendment the device run earned: the picker title now names the person on a watcher's phone
+(*"Choose the last day Mum is away"*), because sharing the Tap screen's *"you"* asked a watcher about
+herself.
+
+**And all seven open decisions were taken the same day**, applied in code, and recorded with the
+questions they answered in `screens.md`. Two changed behaviour rather than words: ending a period
+from the **watcher's row** now asks first — that row only, because truncation destroys days and the
+Tap screen's *"the failure is loud"* argument does not transfer — and a **queued** away write is now
+cached on the phone that wrote it, which is what stops the screen contradicting its own *"Saved."*
+The second is bounded on purpose: the first read that succeeds overrules the optimistic row, being
+wrong stops reminders rather than silencing anybody, and the **watcher's** cache still comes only
+from a read that succeeded. **1 370 tests** (1 354 before), sixteen of them new, and the one the
+confirmation rests on is the negative: *Go back* must write nothing.
 
 **The four away transition notifications.** §12's table and `testing/strategy.md`'s must-cover list
 both name them — *"Ana marked Mum away until Sat 22 Aug"*, the cancellation notice, and the locally

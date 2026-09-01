@@ -309,6 +309,63 @@ abstract final class WatcherCopy {
   static String endAwayAction(String watchedName) =>
       'End $watchedName\'s away period';
 
+  // ------------------------------------------------ ending it, deliberately
+  //
+  // Owner decision, 2026-09-01. The Tap screen's *"I'm not away"* has no
+  // confirmation and should not have one — the failure there is loud and
+  // setting it again is two taps. **Neither half of that argument transfers to
+  // this row.** Cancelling TRUNCATES, so a mis-tap on day 3 of a 14-day
+  // hospital stay destroys the remaining 11 days; and what is loud is a warning
+  // waking the rest of the family about somebody who is genuinely away, none of
+  // whom mis-tapped. So the two surfaces are deliberately asymmetric, which is
+  // the answer this file prefers to a consistency that costs days of cover.
+
+  /// The confirmation's question.
+  static String endAwayConfirmTitle(String watchedName) =>
+      'End $watchedName\'s away period?';
+
+  /// What ending it actually does, in the order the reader needs it.
+  ///
+  /// **It says the destructive part first.** The remaining days go — that is
+  /// the thing a mis-tap costs and the reason this dialog exists at all. Then
+  /// the consequence, then the way back, which is `guidelines.md`'s rule for
+  /// every message that reports something happening.
+  ///
+  /// **No dates.** Truncation lands on *yesterday* in the ordinary case and
+  /// deletes the document outright when the period started today, so any
+  /// sentence naming a day would be wrong in one of the two — and the row
+  /// behind the dialog already carries the period it is about.
+  static String endAwayConfirmBody(String watchedName) =>
+      'The rest of the away period will be removed, and $watchedName will be '
+      'expected to check in again. You can set it again at any time.';
+
+  /// The confirming action.
+  ///
+  /// Says what pressing it does, like every other control here. Not *"Yes"*,
+  /// which answers the title rather than naming the act.
+  static const String endAwayConfirmAction = 'End it';
+
+  // -------------------------------------------- and saying that it worked
+  //
+  // Owner decision, 2026-09-01, splitting `AwayCopy.saved` by surface. The Tap
+  // screen stays silent — its own away line is the confirmation and it is still
+  // there tomorrow. This row has no such line: the only feedback was a status
+  // line changing under a reader who may not be looking, and a blind watcher
+  // heard nothing at all.
+
+  /// Confirms a period this watcher just set.
+  ///
+  /// **Names the person, for the same reason the controls do**: a watcher may
+  /// look after several people, and this sentence is also what TalkBack speaks.
+  /// The dates are on the row underneath, which is why they are not repeated
+  /// here — the row is the durable statement and this is the acknowledgement.
+  static String awaySetSaved(String watchedName) =>
+      'Saved. $watchedName is marked away.';
+
+  /// Confirms a period this watcher just ended.
+  static String awayEndedSaved(String watchedName) =>
+      'Saved. $watchedName\'s away period has ended.';
+
   /// A row's TalkBack label.
   ///
   /// Names the person **and** their state, because a screen reader user gets

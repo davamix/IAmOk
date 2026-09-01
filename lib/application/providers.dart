@@ -42,8 +42,11 @@ class AppServices {
     // Private, so it cannot be an initialising formal — a named parameter may
     // not bind to a private field. Same shape as the repositories' `_injected`.
     PushRegistration? push,
+    AwayRepository? awayDocument,
     // ignore: prefer_initializing_formals
-  }) : _push = push;
+  })  : _push = push,
+        // ignore: prefer_initializing_formals
+        _awayDocument = awayDocument;
 
   final LocalStore store;
   final Clock clock;
@@ -91,6 +94,7 @@ class AppServices {
     selfUid: uid,
     auth: auth,
     push: _push,
+    awayDocument: _awayDocument,
   );
 
   /// Google Sign-In → the Firebase uid (§6). UI isolate only.
@@ -113,7 +117,9 @@ class AppServices {
     // consequence: there is no `users/{uid}/shared/away` to read. The CACHED
     // period is still honoured — expiry is arithmetic and needs no server
     // (§12) — so a phone that signs out mid-holiday does not start nagging.
-    away: signedIn ? AwayRepository() : null,
+    // The same instance the write path uses, so an injected double sees both
+    // halves of a round trip rather than only the write.
+    away: signedIn ? awayDocument : null,
     selfUid: selfUid,
   );
 
@@ -123,7 +129,15 @@ class AppServices {
   /// offline like any other Firestore write, which is what lets a watcher set
   /// away on a plane. Exposed separately from [watchedReconcile] because the
   /// *watcher* writes it too, for somebody else's uid.
-  AwayRepository get awayDocument => AwayRepository();
+  ///
+  /// **Injectable since 2026-09-01, and for the reason this file's own test
+  /// suite exists**: what a *queued* write does to this phone's cache is
+  /// composition-root wiring, and wiring is where both of the defects that suite
+  /// was written for actually were. Without a seam here the only way to reach
+  /// that branch is a real Firestore.
+  AwayRepository get awayDocument => _awayDocument ?? AwayRepository();
+
+  final AwayRepository? _awayDocument;
 
   /// Links, from Firestore into `LocalStore` (§6). UI isolate only.
   ///
@@ -902,8 +916,55 @@ class WatchedStateNotifier extends AsyncNotifier<WatchedState> {
       existing: current.away?.period,
     );
 
+    await _cacheQueued(outcome, period);
     await refresh();
     return outcome;
+  }
+
+  /// Puts a **queued** write into this phone's own cache — owner decision,
+  /// 2026-09-01, after the device run measured what the alternative feels like.
+  ///
+  /// Aeroplane mode, set away, and the screen said *"Saved."* while
+  /// `self_away` stayed empty, the away line never appeared, the control still
+  /// read *"I'm away"*, and the reminders for the away days stayed armed. On the
+  /// plane §8 names, the phone goes on reminding her three times a day through
+  /// the period she has just been told is saved. Nothing corrects it either: the
+  /// watched side takes its away row from a **read-back**, and `onAwayChanged`
+  /// deliberately skips the setter, so the one device certain not to be told is
+  /// the one that wrote it.
+  ///
+  /// **This is not "reconcile, don't mutate" being broken.** What is written
+  /// here is the *input* — the cached away record this phone authored — and
+  /// [refresh] then recomputes the reminders from it like any other reconcile.
+  /// No alarm is patched, and the desired set is still derived in one place.
+  ///
+  /// **It is bounded, and it self-heals.** If the server later refuses the
+  /// write, this phone believes it is away when it is not: it stops reminding
+  /// her, which is the loud direction — her family still reads the server, sees
+  /// no away period and warns exactly as before — and the first read that
+  /// *succeeds* overwrites the cache with what Firestore holds, including with
+  /// nothing (ADR-0001 decision 1). A reconcile that gets a good read in the
+  /// window between the timeout and the write landing will do the same, which is
+  /// the pre-existing behaviour rather than a new hole.
+  ///
+  /// **The watcher's side does NOT do this and must not.** There, an optimistic
+  /// cache of a write the server refused would silence a watcher about somebody
+  /// else for up to a month with nothing said — the failure §12 calls the one
+  /// this app cannot detect in itself. Here the cache is about the reader's own
+  /// state, and being wrong makes noise rather than silence. The asymmetry is
+  /// the decision.
+  Future<void> _cacheQueued(AwayOutcome outcome, AwayPeriod? period) async {
+    if (outcome is! AwayQueued) return;
+    final services = ref.read(appServicesProvider);
+    await services.store.setSelfAway(
+      period == null
+          ? null
+          : AwayRecord(
+              period: period,
+              setBy: services.selfUid,
+              setByName: services.auth.displayName ?? AwayCopy.unnamedWriter,
+            ),
+    );
   }
 
   /// Ends the away period — **truncating, not deleting** (ADR-0001 decision 5).
@@ -942,6 +1003,13 @@ class WatchedStateNotifier extends AsyncNotifier<WatchedState> {
             existing: away.period,
           );
 
+    // **The same decision, in the direction that matters more.** A queued
+    // *ending* left uncached would leave this phone reading *"You're away"*
+    // after being told it saved, with its reminders still suppressed — she would
+    // not be reminded to tap on a day she is expecting to be. `truncated` is
+    // null exactly when the document is deleted, and `setSelfAway(null)` is the
+    // cache's version of that same delete.
+    await _cacheQueued(outcome, truncated);
     await refresh();
     return outcome;
   }

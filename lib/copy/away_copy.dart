@@ -24,6 +24,24 @@ abstract final class AwayCopy {
   /// offering a choice the screen cannot make is a promise it then breaks.
   static const String pickerTitle = 'Choose the last day you are away';
 
+  /// The same title on a **watcher's** phone, where *"you"* names the wrong
+  /// person.
+  ///
+  /// Both surfaces shared [pickerTitle] until the device run on 2026-09-01
+  /// found the obvious thing a widget test cannot: Ana opens this screen from
+  /// *"Mark Mum away"* and is then asked about **herself**. Nothing about the
+  /// screen was wrong; the sentence was about the reader on the one surface
+  /// where the reader is not the subject.
+  ///
+  /// **Named, not "them".** `guidelines.md`'s rule is real names over roles, and
+  /// the row this is opened from names the person for the same reason: a watcher
+  /// may look after several people, and a title that says *"them"* is ambiguous
+  /// on exactly the screen that sets dates.
+  ///
+  /// Approved by the owner 2026-09-01 with the rest of the picker's copy.
+  static String pickerTitleFor(String watchedName) =>
+      'Choose the last day $watchedName is away';
+
   /// *"Last day away: Saturday 22"* — **frozen**, and half of the pair that
   /// removes the ambiguity in "until".
   static String lastDayAway(String date) => 'Last day away: $date';
@@ -65,6 +83,13 @@ abstract final class AwayCopy {
   /// confirmation, and it is a better one than a toast because it is still
   /// there tomorrow. Present as a named constant so the absence is a decision
   /// somebody made rather than a case somebody missed.
+  ///
+  /// **This is the TAP SCREEN's decision, and only its.** The owner split the
+  /// two surfaces on 2026-09-01: the watcher's row has no away line of its own,
+  /// so the only feedback there is a status line changing under a reader who may
+  /// not be looking at it — and a blind watcher got nothing at all. That row
+  /// says `WatcherCopy.awaySetSaved` or `WatcherCopy.awayEndedSaved` instead,
+  /// chosen at the press because only the caller knows which action ran.
   static const String? saved = null;
 
   /// The write did not confirm in time, so Firestore is holding it.

@@ -1194,8 +1194,18 @@ class LocalStore {
   ///
   /// The caller decides whether the read was good enough to write from —
   /// ADR-0001 decision 1, and it is not this method's to guess: a failed read is
-  /// not an answer, so only [WatchedReconcileService] calls this with null, and
-  /// only on a read that succeeded.
+  /// not an answer, so `WatchedReconcileService` writes here only on a read that
+  /// succeeded.
+  ///
+  /// **There is a second caller since 2026-09-01, and it writes from no read at
+  /// all.** `WatchedNotifier._cacheQueued` puts a *queued* away write — this
+  /// phone's own, not yet confirmed by the server — straight into this row,
+  /// including the null that a queued cancellation means. That is an owner
+  /// decision with its reasoning in that method: without it the phone says
+  /// *"Saved."* and then contradicts itself until an unrelated reconcile runs,
+  /// because the nudge that corrects every other device deliberately skips the
+  /// one that wrote. It stays confined to the **watched** side, where being
+  /// wrong makes noise rather than silence.
   Future<void> setSelfAway(AwayRecord? away) async {
     if (away == null) {
       await _db.delete('self_away', where: 'id = 0');

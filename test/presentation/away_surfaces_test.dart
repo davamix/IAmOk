@@ -286,6 +286,7 @@ void main() {
     Future<void> pumpPicker(
       WidgetTester tester, {
       DayKey? initialLastDay,
+      String? personName,
       double textScale = 1,
       Size surface = const Size(400, 800),
     }) async {
@@ -301,6 +302,7 @@ void main() {
               child: AwayPickerScreen(
                 today: today,
                 initialLastDay: initialLastDay,
+                personName: personName,
               ),
             ),
           ),
@@ -317,6 +319,27 @@ void main() {
       // a tap. Both halves, or neither is doing its job.
       expect(find.text(AwayCopy.lastDayAway('Monday 17')), findsOneWidget);
       expect(find.text(AwayCopy.backOn('Tuesday 18')), findsOneWidget);
+    });
+
+    // **The title is about whoever the period belongs to, not the reader.**
+    // Owner decision 2026-09-01, and the reason it took a device to find is
+    // worth keeping: both surfaces rendered the shared string correctly, so
+    // nothing here was red — it took watching Ana press *"Mark Mum away"* and
+    // then be asked about herself. These two tests are what stop the single
+    // string coming back.
+    testWidgets('names the person on a watcher\'s phone', (tester) async {
+      await pumpPicker(tester, personName: 'Mum');
+
+      expect(find.text(AwayCopy.pickerTitleFor('Mum')), findsOneWidget);
+      expect(find.text(AwayCopy.pickerTitle), findsNothing,
+          reason: 'the watcher is not the one who is away');
+    });
+
+    testWidgets('and still says "you" on the person\'s own phone',
+        (tester) async {
+      await pumpPicker(tester);
+
+      expect(find.text(AwayCopy.pickerTitle), findsOneWidget);
     });
 
     testWidgets('the labels follow the selection', (tester) async {

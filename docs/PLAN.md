@@ -363,9 +363,9 @@ watcher list showing Mum. **The AVD also tapped**, which closes the half Phase 4
 ## Phase 6 — Away mode
 
 > **BUILT and REVIEWED against the emulator suite, 2026-08-27; RUN ON DEVICES 2026-09-01 — two API
-> 36 AVDs and then the POCO F3. Not signed off** — the drafted picker and refusal copy is owed the
-> owner's approval, seven decisions are open, and **Doze is the one device question the run did not
-> close**. Start from [phases/phase-6-handover.md](phases/phase-6-handover.md) — what is left and
+> 36 AVDs and then the POCO F3; ALL SEVEN OWNER DECISIONS TAKEN AND APPLIED the same day. Not signed
+> off** — **Doze is the one device question the run did not close**, and §12's four away transition
+> notifications are specified and deliberately not built. Start from [phases/phase-6-handover.md](phases/phase-6-handover.md) — what is left and
 > in what order — then read *The gate review* and *The device run* in
 > [phases/phase-6-summary.md](phases/phase-6-summary.md).
 >
@@ -420,10 +420,15 @@ watcher list showing Mum. **The AVD also tapped**, which closes the half Phase 4
 > handset, and the v5 → v6 migration on a real store — and found that an away period set **offline**
 > reports *"Saved."* and changes nothing on the setter's own phone until an unrelated reconcile runs.
 >
-> **Owed:** owner approval of the drafted picker and refusal copy plus **seven** open decisions in
-> `ui-ux/screens.md`; §12's four away **transition notifications**, which are specified and
-> deliberately not built — this deliverable list does not name them and the exit criteria do not turn
-> on them; and **Doze**, plus the third exit criterion below.
+> **The owner's decisions are taken**, 2026-09-01, and applied: the copy is approved with the picker
+> title amended to name the person on a watcher's phone; ending a period from the **watcher's row**
+> now asks first; that row says when a write lands; and a **queued** away write is cached on the
+> phone that wrote it, which is what stops the screen contradicting its own *"Saved."*. Answers and
+> questions both in `ui-ux/screens.md`; the extending limitation is recorded in §12.
+>
+> **Owed:** §12's four away **transition notifications**, which are specified and deliberately not
+> built — this deliverable list does not name them and the exit criteria do not turn on them — and
+> **Doze on the handset**.
 
 **Deliverables** — `users/{uid}/shared/away`, rules validation (31-day cap — **deliberately slack in the rules, see `security/firestore-rules-guidelines.md`; the exact check is `AwayRules`**, no retroactive,
 `through >= from`), the `onAwayChanged` fan-out, the Away button on the Tap screen (which becomes

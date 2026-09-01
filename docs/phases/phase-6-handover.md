@@ -132,9 +132,15 @@ nothing trimmed by the vendor, and the **closed-app nudge working in both direct
 cancellation and a creation each woke a killed app, rewrote `self_away` and re-armed the alarms
 without the app being opened. Then *"Ana marked you away until Thursday 3."* on the handset itself.
 
+**The third exit criterion is done too** — *"a device offline for the whole period still ends away on
+the right day"*, run on the POCO on 2026-09-01 in eleven minutes with aeroplane mode on throughout
+and the harness walking the clock across the boundary. Every read was refused (`UNAVAILABLE`), the
+period ended by arithmetic on the first day back, the cached row survived, and the reminders came
+back on the right day. All three criteria are now met on devices, not only in tests.
+
 **What is still owed on the phone is Doze**, and only that: everything above ran with the screen on.
 This page's own note says `deviceidle force-idle` will not reach deep idle on this device from a
-screen-off state, so it needs a real overnight — which is also what the third exit criterion needs.
+screen-off state, so it needs a real overnight.
 
 `adb` is **not on PATH**. It is at `D:\Android\Sdk\platform-tools\adb.exe`.
 

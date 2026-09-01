@@ -268,14 +268,38 @@ device table.
       above executed the same adapter from a real cancellation — `cleared:true, parties:2,
       tokens:2` — so the wiring is now proven from both ends.
 
-**Cannot be driven in a session, and that is stated rather than quietly skipped:**
+**Said to need days, and it took eleven minutes — the harness is the whole reason:**
 
-- [ ] *"A device that was offline for the whole period still ends away on the right day."* It needs a
+- [x] *"A device that was offline for the whole period still ends away on the right day."* It needs a
       phone to sit offline **across a period boundary**. The arithmetic is asserted in tests and
       mutation-checked from the silent direction; what a device would add is confidence that nothing
       *else* — an OEM cache wipe, a force-stop, a store migration — expires or resurrects the cached
       period. The debug harness can force the date, which shortens this from days to minutes and is
-      the intended route.
+      the intended route. — **Run 2026-09-01 12:05–12:09 on the POCO**, exactly the shape of clause 3
+      in `away_exit_criteria_test.dart`, and the fixture was already on the phone: `self_away`
+      `{2026-09-01 → 2026-09-03, set by Ana}`, seeded earlier by a nudge that got through, which is
+      the test's *"she was online when it was set. After this, nothing."*
+
+      **Aeroplane mode on first**, and left on for the whole run. Then the harness walked the clock:
+
+      | Forced date | The phone said | Store |
+      |---|---|---|
+      | **3 Sep** — the last away day | *"Ana marked you away until Thursday 3."*, control *I'm not away* | row intact, reminders 4 – 10 Sep |
+      | **4 Sep** — the first day back | **no away line**, control back to *I'm away*, *"Ana will know you're OK."* | **row still there**, 20 reminders across 4 – 10 Sep |
+
+      **The row is not deleted** — `{1 → 3 Sep, set by Ana}` survives the period ending, which is
+      ADR-0001's argument applied to the cache: the days already spent away stay covered. **20 and
+      not 21** is right too: forced "now" was 12:08, so the 12:00 slot on the 4th is in the past and
+      the other two that day are armed.
+
+      **And it really did ask.** Firestore logged `UNAVAILABLE — End of stream or IOException`
+      repeatedly through the run, so the reads were attempted and refused rather than skipped, which
+      is the distinction the test itself had to be corrected for. **Nothing was transmitted and the
+      period still ended on the right day, by arithmetic.**
+
+      Not covered by this run: the **watcher's** half of the same clause — a watcher offline across
+      the boundary warning again on the first day back — which `away_exit_criteria_test.dart` covers
+      and no device has.
 
 ### How to read the alarms — the only ground truth
 

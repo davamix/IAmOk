@@ -567,10 +567,14 @@ answer:
    measured with it idle overnight, and this project's own notes say `deviceidle force-idle` will
    not reach deep idle on this device from a screen-off state. That is the one OEM question the run
    did not close.
-2. The third exit criterion **cannot be driven in a session** — it needs a device to sit offline
-   across a period boundary. The arithmetic is asserted in tests; what a device would add is
-   confidence that nothing else expires the cache. The harness's forced date is the intended route
-   and shortens it from days to minutes.
+2. ~~The third exit criterion cannot be driven in a session.~~ **Driven 2026-09-01, in eleven
+   minutes.** Aeroplane mode on the POCO for the whole run and the harness walking the clock: away
+   on the last away day, **ended on the first day back**, with every Firestore read refused
+   (`UNAVAILABLE`) rather than skipped, the cached row surviving the period's end, and the reminders
+   armed again on the right day. The harness is the reason this cost minutes instead of days, which
+   is the argument PLAN.md made for building it beside the first alarm. **All three exit criteria
+   are now met on devices.** The *watcher's* half of the same clause — offline across the boundary,
+   warning again on the first day back — is covered in the test file and on no device.
 
 **The reviewers have run** — all five, one at a time, 2026-08-27, and every finding was applied; the
 section above is what they found. *(This paragraph said "the reviewers have not run" until

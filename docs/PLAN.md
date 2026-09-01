@@ -439,9 +439,13 @@ through both reconcilers and built around **ending** rather than starting, becau
 feature here whose failure mode is silence. **The first two are now met on devices as well,
 2026-09-01** — away set from either side silenced both, and cancelling from either side restored
 both, on two AVDs and on the POCO, with the alarms read from `dumpsys` rather than from the app's own
-record. **The third is still not**: it needs a phone to sit offline across a period boundary, and
-what a device would add there is confidence that nothing *else* expires the cache. The debug
-harness's forced date is the intended route and shortens it from days to minutes; it was not run.
+record. **And the third was driven the same day**, on the POCO in eleven minutes: aeroplane mode on
+for the whole run, the harness walking the clock from the last away day to the first day back, the
+period ending **by arithmetic with every read refused** (`UNAVAILABLE` throughout), the cached row
+surviving because the days spent away stay covered, and the reminders armed again on the right day.
+**All three exit criteria are now met on devices as well as in tests.** What no device has is the
+*watcher's* half of clause 3 — a watcher offline across the boundary warning again on the first day
+back — which the test file covers.
 
 ---
 

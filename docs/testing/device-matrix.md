@@ -140,7 +140,11 @@ Full evidence in [phase-2-summary.md](../phases/phase-2-summary.md).
 - [x] The debug harness works on-device: force date, fire alarm now, dump `LocalStore`, run
       `reconcile()`. Without it every later item on this page costs a day to verify.
 
-**Phase 6 — away mode** · **NOT RUN. Nothing in Phase 6 has been on a handset.**
+**Phase 6 — away mode** · **RUN 2026-09-01, 10:37–11:12, on TWO AVDs — not on the POCO.**
+Full write-up in *The Phase 6 away run* below. **The POCO F3 refused every install**
+(`INSTALL_FAILED_USER_RESTRICTED`), so nothing in Phase 6 has been on OEM hardware and every row
+below is ticked against Android 16 / API 36 emulators. Rows whose answer is OEM-specific — alarm
+survival on HyperOS, Doze, the vendor's own trimming — are **not** answered by this run.
 
 The feature is built and all three exit criteria are met in tests
 (`test/application/away_exit_criteria_test.dart`); this list is what only a device answers. Written
@@ -148,39 +152,92 @@ before the run rather than after, so the checklist is not shaped by what happene
 
 **First, and carried from the Phase 5 gate** — it is a Phase 5 defect that no Phase 6 test can reach:
 
-- [ ] Press **Add someone**, take the **second** option (*"Someone I look after"*), complete a
+- [x] Press **Add someone**, take the **second** option (*"Someone I look after"*), complete a
       pairing, and confirm a **warning alarm actually arms** — read `dumpsys alarm` off the device,
       not the app's own belief. The chooser's second option, the empty-audience 21:00 reminder and
-      the fourth refusal are covered by tests and mutation only.
+      the fourth refusal are covered by tests and mutation only. — **2026-09-01 11:02, AVD-1.**
+      Chooser → *"Someone I look after"* → code `TK6Y8R` → *"You are now looking after Ana."*, and
+      `dumpsys alarm` then carried **6** `AlarmBroadcastReceiver` alarms at 10:00 on 2 – 7 Sep
+      beside the 21 `ScheduledNotificationReceiver` reminders. Read off the platform, not from
+      `pending_alarms`. **On an AVD, not the POCO.**
 
 **Then Phase 6's own:**
 
-- [ ] Set away from the Tap screen: the picker opens, both frozen labels read correctly and follow
-      the selection, and **nothing clips at the largest system font scale**.
-- [ ] Reminders stop on the away days — from `dumpsys alarm`, and the window still extends to
-      `through` + 7 so the days back are already armed.
-- [ ] The Tap screen's away line renders, the control reads *"I'm not away"*, and **the tap target
+- [x] Set away from the Tap screen: the picker opens, both frozen labels read correctly and follow
+      the selection, and **nothing clips at the largest system font scale**. — **10:46–10:48,
+      AVD-1.** Labels read *"Last day away: Tuesday 1"* / *"Back on Wednesday 2"* and both followed
+      a tap on the 5th. At `font_scale 2.0` the title wraps to two lines instead of ellipsizing (the
+      gate's fix — it is in the scrolling body, not the `AppBar`), and **Save** and **Go back** are
+      both reachable by scrolling. The **31-day cap is visible**: in October only the 1st is
+      selectable, which is 1 Sep + 30 = 31 days inclusive.
+- [x] Reminders stop on the away days — from `dumpsys alarm`, and the window still extends to
+      `through` + 7 so the days back are already armed. — **10:50, AVD-1**, away 1 – 5 Sep. Exactly
+      **21** alarms, three a day at 12:00 / 18:00 / 21:00 local, on **6 – 12 Sep**: nothing on any
+      away day, first day back armed, last day = `through` + 7.
+- [x] The Tap screen's away line renders, the control reads *"I'm not away"*, and **the tap target
       is still enabled** — §12 allows tapping during away and the plausible bug is suppressing the
-      write with the reminders.
-- [ ] Set away from the **watcher's** phone for the watched person, and confirm the watched device's
+      write with the reminders. — **10:48–10:49, AVD-1.** Line: *"You're away until Saturday 5. Your
+      family isn't expecting a check-in."*, unattributed because she set it herself. The tap target
+      was pressed while away and **wrote `checkins/{uid}/days/2026-09-01`** — checked in Firestore,
+      not by the button's colour.
+- [x] Set away from the **watcher's** phone for the watched person, and confirm the watched device's
       Tap screen names the watcher: *"Ana marked you away until …"*. This is the surface §17's
-      mitigation depends on and the one thing no emulator run has ever exercised.
-- [ ] The watcher's row reads *"Away until Sat 22 Aug — set by …"* and the away control switches to
-      *"End …'s away period"*.
-- [ ] Cancel from **either** side and confirm both restore — the truncation, not a delete, and the
-      days already spent away stay covered.
-- [ ] `onAwayChanged` reaches a **closed** app: away set on one phone, the other phone's app force-
+      mitigation depends on and the one thing no emulator run has ever exercised. — **11:00–11:01.**
+      Ana's row → *"Mark Mum away"* → 3 Sep → Mum's Tap screen: **"Ana marked you away until
+      Thursday 3. Your family isn't expecting a check-in."** The document carried
+      `setBy = <Ana's uid>`, `setByName = "Ana"`.
+- [x] The watcher's row reads *"Away until Sat 22 Aug — set by …"* and the away control switches to
+      *"End …'s away period"*. — **10:57, AVD-2**: *"Mum / Away until Sat 5 Sep — set by Mum / This
+      phone last checked 10:57 am."* with **End Mum's away period** beneath it. After the cancel the
+      same row read *"Everything OK …"* and the control flipped back to **Mark Mum away**.
+- [x] Cancel from **either** side and confirm both restore — the truncation, not a delete, and the
+      days already spent away stay covered. — **Both directions, and both shapes.** Watcher side
+      10:58: Ana ended it, the document was **deleted** (404) — §12's rule for cancelling on the day
+      the period starts, since truncating would write `through = from − 1` — and Mum's open app
+      restored itself with no touch. Watched side 11:03: same, from Mum's own screen. **The
+      truncation** needed a past `from`, so the harness forced 2 Sep (11:09) and the cancel then
+      **rewrote `through` to 2026-09-01 and left the document standing** — the day already spent
+      away still covered, exactly as ADR-0001 requires.
+- [x] `onAwayChanged` reaches a **closed** app: away set on one phone, the other phone's app force-
       stopped, and the reconcile runs. Same shape as Phase 4's fan-out measurement, and the same
-      caveat — over `adb reverse` this is loopback, not a radio.
-- [ ] The write **queued offline**: aeroplane mode, set away, confirm the screen says
-      *"Saved. Your family will see this when this phone is back online."* and that the period lands
-      when the radio returns. §8 chose a direct client write for exactly this, and it is the claim
-      `AwayOutcome.queued` makes.
-- [ ] The **v5 → v6 migration on a real store**, the way the v4 → v5 one was run: install the
+      caveat — over `adb reverse` this is loopback, not a radio. — **10:59–11:00, and it is the
+      strongest result of the run.** Mum's app killed (`am kill`, `pidof` empty), Ana set away for
+      her; the function logged `cleared:false, parties:2, tokens:1, sent:1, skippedSelf:1` — the
+      setter's own device skipped by the rules-enforced `setBy`. Mum's phone came back as a **new
+      pid**, and with the app still closed her store went from `self_away` **empty** to
+      `{2026-09-01 → 2026-09-03, set_by = Ana}` while her reminders **re-armed from 4 – 10 Sep**
+      (`dumpsys`, 21 alarms). That is the gate's `push_handler` fix — the FCM reconcile deciding
+      from the *new* away period rather than the cache the nudge came to replace — proven on a
+      device. `am kill`, not `force-stop`: a force-stop would have cancelled every alarm and stopped
+      FCM delivery, which is the trap this page already carries. **Loopback, not a radio.**
+- [x] The write **queued offline**: aeroplane mode, set away, confirm the screen says
+      *"Saved. Your family will see this as soon as this phone can send it."* and that the period
+      lands when the radio returns. §8 chose a direct client write for exactly this, and it is the
+      claim `AwayOutcome.queued` makes. (This row quoted the **pre-gate** sentence — *"when this
+      phone is back online"* — until the run; the gate amended the copy one commit after the
+      checklist was written, which is this repo's own recurring failure mode arriving in a document
+      whose whole job is to be read on a device.) — **11:04–11:07, AVD-1.** Aeroplane mode on,
+      away set to 4 Sep, and the amended sentence appeared verbatim. Radio back at 11:06 and the
+      document landed: `from 2026-09-01, through 2026-09-04`, `setAt` stamped **at flush time**
+      (09:06:31Z), which is the mechanism behind the known two-UTC-midnights edge.
+      **And it found something** — see *An away period set offline does not reach the setter's own
+      phone* below. The claim `queued` makes is about the server and it holds; what does not hold
+      for as long as the app is not resumed is this phone's own state.
+- [x] The **v5 → v6 migration on a real store**, the way the v4 → v5 one was run: install the
       previous build, pair, let a watcher cache exist, then install this build over it and pull the
       database. `LocalStore.open()` is unguarded at all three call sites — `main.dart`, the alarm
       handler and the FCM handler — so a migration that
-      throws is an app that cannot open its own store.
+      throws is an app that cannot open its own store. — **10:50–10:56, AVD-2, and run in that
+      order deliberately.** A debug APK built from `b79a7b6` — the Phase 6 brief commit, so the last
+      tree before `schemaVersion` went to 6 — was installed first, signed in as Ana, paired with
+      Mum, and its store read back at **`user_version: 5`** with a `watcher_cache` row and 27
+      `pending_alarms`. Then `adb install -r` of the v6 build over it, and after one launch:
+      **`user_version: 6`**, `watcher_cache` grown by exactly `away_set_by` and `away_set_by_name`,
+      and **every row still there** — the link, the 27 alarms, the 7 settings, `away_from`,
+      `away_through`, `last_confirmed_day`, `last_decided_day` all unchanged. The two new columns
+      were **already populated** (`Mum`, her uid) from the first v6 reconcile, which is what the
+      migration's own comment says will happen: nothing is back-filled, and the next successful read
+      fills it. No crash at any of the three `open()` sites.
 
 **Two of these need a second device, and they are listed again under *Owed on a second device*
 below** — with a detail this list does not carry: the "reminders for the first days back fire without
@@ -191,7 +248,7 @@ device table.
 
 **Not a device check, but owed before the first deploy and found at the gate:**
 
-- [ ] **`onAwayChanged`'s trigger wiring has never been executed by anything.** The fan-out is tested
+- [x] **`onAwayChanged`'s trigger wiring has never been executed by anything.** The fan-out is tested
       against the real emulated Firestore, but nothing dispatches a real event at the
       `onDocumentWritten` registration — `tools/functions-test.ps1`'s probe covers `onCheckInCreated`
       only. What is therefore unrun is `event.params.uid` and the **delete adapter**,
@@ -199,6 +256,15 @@ device table.
       one the function's own docstring calls the one that matters most. Owed: a third run in that
       script, asserting two `onAwayChanged: fanned out` lines, one `cleared:false` and one
       `cleared:true`, because a count alone would pass if the delete had silently done nothing.
+      — **Done 2026-09-01, and twice over.** `functions/test/away_trigger_fires.mjs` plus run 3 of
+      `tools/functions-test.ps1`: **three** writes, not two — create, truncating **update**, delete
+      — because the update is what separates this trigger from `onCheckInCreated` and a copy-pasted
+      `onDocumentCreated` would silence it. Asserts two `cleared:false`, one `cleared:true`, and the
+      probe's uid in all three lines (it can only come from `event.params.uid`; nothing in the body
+      carries it). **The assertion was mutation-checked**: with the delete replaced by another
+      `set`, run 3 fails on the `cleared:true` clause rather than on the count. And the device run
+      above executed the same adapter from a real cancellation — `cleared:true, parties:2,
+      tokens:2` — so the wiring is now proven from both ends.
 
 **Cannot be driven in a session, and that is stated rather than quietly skipped:**
 
@@ -1345,6 +1411,129 @@ scratch rig; *Wipe store* resets it.
 `Ctrl-C`, so `emulator-data/` is still the 2026-08-25 export and today's users, invites and link are
 **not** in it. The next `emulators.ps1` run starts from the older state and the AVD's local store will
 reference uids the emulator no longer knows — re-pair rather than trying to reconcile it.
+
+### The Phase 6 away run — 2026-09-01, 10:37–11:12, on two AVDs
+
+**Every Phase 6 row above was answered in this one sitting, and none of it happened on the POCO.**
+
+#### The POCO refused to be installed to, and that is the finding to act on first
+
+`adb install` returned **`INSTALL_FAILED_USER_RESTRICTED: Install canceled by user`** — twice, then
+again through `adb push` + `pm install` from `/data/local/tmp`. The device was **awake, unlocked, on
+the home screen, with no dialog showing**, `adb_enabled=1`, and `dumpsys user` reports
+`Effective restrictions: none`, so this is not an Android user restriction: it is HyperOS's own
+*Install via USB* gate in Developer options, which MIUI/HyperOS revokes on its own schedule and which
+**cannot be re-enabled over adb** — it wants a physical tap and, usually, a signed-in Mi account.
+
+This page's existing note — *"HyperOS refused the first `adb install` and accepted a retry"* — is now
+too weak to rely on. A retry did not help. **Until somebody turns that toggle back on, no build can
+reach this handset**, and everything OEM-specific about Phase 6 is unmeasured: alarm survival under
+HyperOS, Doze, vendor trimming, the 360dp-class screen. Nothing here should be read as covering them.
+
+#### The substitute rig, stated as a substitution
+
+| | |
+|---|---|
+| **AVD-1** `Medium_Phone_API_36.0`, `emulator-5554` | **Mum, the watched person.** Android 16 / API 36, 1080×2400 @ 420dpi = **411dp wide**, stock. |
+| **AVD-2** `IAmOk_Watcher_36`, `emulator-5556` | **Ana, the watcher.** Created for this run from the same system image. |
+| Backend | `tools/emulators.ps1`, `--project i-am-ok-c74ca`, both phones on `10.0.2.2`. |
+| Identities | `IAMOK_EMULATOR_USER=emulator-mum` / `emulator-ana`; uids `SVCQr6m…` and `mv12eAH…` — two people, checked in Firestore, not assumed from the build flags. |
+
+**A second AVD had to be created rather than a second instance of the first.** The emulator refuses:
+*"Another emulator instance is running. Please close it or run all emulators with `-read-only`"* —
+**all** instances must carry the flag, including the one already running, so a `-read-only` second
+copy is not available once the first was started without it. `avdmanager create avd -n … -k
+"system-images;android-36;google_apis_playstore;x86_64"` works; passing `-d pixel_6` fails with
+*"Could not load devices from …/devices.xml"* and the profile is not worth chasing.
+
+**Both links exist, in both directions**, because the Phase 5 carry item needs a Tap screen and a
+code at the same time: Ana watches Mum (via onboarding screen 2), and Mum watches Ana (via the Tap
+screen chooser's **second** option, which is the row that was owed). Codes are always minted by the
+*watched* party and redeemed by the *watcher* — `createInvite` takes the caller as watched,
+`redeemInvite` takes the caller as watcher — so there is no other shape this rig could have had.
+
+#### What passed, in order
+
+| Time | What |
+|---|---|
+| 10:37 | Cold install, AVD-1. Sign-in → *"Who should know you're OK?"* |
+| 10:43 | Chooser → *"Someone to look after me"* → code **`SYR39L`**, *"It stops working at 10:43 am on Wednesday 2 September."* |
+| 10:46 | Away picker: both frozen labels, following the selection; **31-day cap visible** (October: only the 1st selectable) |
+| 10:47 | `font_scale 2.0`: title wraps rather than ellipsizing, Save **and** Go back reachable by scrolling |
+| 10:47 | `wm density 480` → **360dp wide**: day-cell pitch measured **144px = exactly 48dp**, the floor the gate fixed, met at the width that used to breach it |
+| 10:48 | Away 1 – 5 Sep written by a real client through the real rules: `from`, `through`, `setBy`, `setByName`, `setAt == updatedAt` |
+| 10:49 | **Tapped while away** → `checkins/{uid}/days/2026-09-01` written. The target is enabled, not merely dark |
+| 10:50 | `dumpsys alarm`: 21 reminders, 6 – 12 Sep, none on an away day, last = `through` + 7 |
+| 10:53 | AVD-2 (v5 build) redeems `SYR39L` → *"You are now looking after Mum."* → screen 3 → *"You will be told if Mum misses a day."* |
+| 10:54 | Ana's store at **v5**: watcher cache holding Mum's away period, 27 pending alarms — **6 warning alarms at 10:00** on the platform beside 21 reminders |
+| 10:56 | v6 installed over it → **v5 → v6 migration passes** |
+| 10:57 | Ana's row: *"Away until Sat 5 Sep — set by Mum"* + **End Mum's away period** |
+| 10:58 | Ana ends it → document **deleted** → Mum's open app restores itself, untouched |
+| 11:00 | Mum's app killed; Ana marks her away to 3 Sep; **the closed app is woken, writes `self_away` and re-arms 21 reminders 4 – 10 Sep** |
+| 11:01 | Mum's Tap screen: **"Ana marked you away until Thursday 3."** — §17's surface, first time on a device |
+| 11:02 | Mum's Tap screen chooser → **second option** → `TK6Y8R` → *"You are now looking after Ana."*; 6 warning alarms arm |
+| 11:04 | Aeroplane mode; away to 4 Sep; *"Saved. Your family will see this as soon as this phone can send it."* |
+| 11:06 | Radio back → the queued period lands, `setAt` stamped at flush time |
+| 11:09 | Forced date 2 Sep → a real warning notification fires: **"No check-in from Ana yesterday."** |
+| 11:11 | Cancel with a past `from` → **truncation**: `through` rewritten to 1 Sep, document kept |
+
+#### An away period set offline does not reach the setter's own phone
+
+**Measured, not inferred.** With the radio off, the away write reported *"Saved."* — and then, for as
+long as the app was not resumed:
+
+- `self_away` was **empty**;
+- the reminders for the away days were **still armed** (18 alarms, 2 – 7 Sep, unchanged);
+- the Tap screen showed **no away line** and its control still read **"I'm away"**, directly above
+  the sentence saying it had been saved.
+
+That survived the radio coming back and the document landing on the server. Backgrounding the app and
+reopening it fixed everything at once — `self_away` filled, reminders moved to 5 – 11 Sep.
+
+The mechanism is not a bug in one place. The watched side takes its away row from a **read-back**,
+never from its own write; the nudge that corrects every other device is **deliberately not sent to
+the setter** (`skippedSelf`, and on a delete there is no `setBy` to skip at all); so the one phone
+guaranteed not to be told is the one that wrote it. On the plane §8 names, that phone goes on
+reminding her three times a day through the period she has just been told is saved.
+
+**This is a call, not a patch**: it is the collision of *"nothing is optimistically cached"* with
+*"the setter already knows"*, and it lands on the owed decision `screens.md` already carries about a
+write that says nothing when it succeeds.
+
+#### Three smaller things the run turned up
+
+**The picker title says *you* on the watcher's phone.** `AwayCopy.pickerTitle` — *"Choose the last
+day you are away"* — is used by both surfaces, and Ana sees it while choosing dates **for Mum**. The
+title is drafted, not approved (`screens.md`), so this is one concrete observation for that decision
+rather than a defect report.
+
+**The pairing callables have no client-side time bound.** `invite_service.dart` contains no
+`timeout`, unlike `AwayRepository`, which bounds every call at six seconds and had that bound *added
+at this gate* for exactly this reason. So the *Your code* screen spins on the SDK default —
+**60 seconds** (`cloud_functions_platform_interface` 6.0.6) — with no message. Observed here because
+the emulator gave it something to wait for.
+
+**The Functions emulator's first invocation can fail on Windows.** The very first `createInvite` from
+a device produced *"Failed to handle request … Failed to load function"* after a 24-second gap in the
+runtime's module resolution, and the app sat on a spinner. `functions/lib/index.js` loads fine under
+plain `node`, and the next call — a `curl` from the host — answered in **1.4 s**. It is a cold-start
+timeout, not a code fault. **Warm the callable with one `curl` before driving a phone**, or the first
+device action of a session looks like the app's fault:
+
+```powershell
+curl -s -X POST http://127.0.0.1:5001/i-am-ok-c74ca/europe-west1/createInvite `
+     -H "Content-Type: application/json" -d '{"data":{}}'   # expect 401 "Sign in first."
+```
+
+#### The rig as this run leaves it
+
+**The emulator state was exported**, which is the thing Phase 5 lost: `firebase emulators:export
+emulator-data --force --project i-am-ok-c74ca` talks to the **running hub**, so it does not need the
+Ctrl-C that a background-started suite cannot receive. `emulator-data/` now holds both users, both
+links and the away document. Ports 8080 / 9099 / 5001 / 4400 / 4000 were confirmed free afterwards.
+
+**Both AVDs keep their state**: Mum away until 1 Sep (the truncated period), Ana watching her and
+watched by her. **The POCO is still not installed to** and its *Install via USB* toggle is still off.
 
 ### Three HyperOS behaviours that cost time in this session
 

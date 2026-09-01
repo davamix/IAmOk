@@ -329,8 +329,8 @@ with `git status` clean.
 | `tsc --noEmit` | clean, at the pinned Node 22 types |
 | Rules | **80 tests** (75 before). `firestore.rules` CHANGED this phase — see the gate review — and is **not deployed** |
 | Dart mutations | **31 caught, 0 survived, 0 did not compile**, 10 passing controls |
-| Debug APK | *(owed — see below)* |
-| Device | **nothing in this phase has been on a handset** |
+| Debug APK | builds — three of them, from two trees, for the device run |
+| Device | **run 2026-09-01 on two API 36 AVDs. Every Phase 6 row answered; the POCO refused to be installed to** — see *The device run* below |
 
 ---
 
@@ -494,29 +494,80 @@ because dropping every message changes no answer.
 
 ---
 
+## The device run — 2026-09-01, 10:37–11:12
+
+**Every Phase 6 checklist row is now ticked, and none of it happened on the POCO.** The full
+write-up, with the timeline and the exact figures, is in `testing/device-matrix.md` under *The Phase
+6 away run*; this is what it changes about the phase.
+
+**The POCO F3 could not be installed to.** `INSTALL_FAILED_USER_RESTRICTED`, on `adb install` and on
+`pm install` from `/data/local/tmp`, with the phone awake and unlocked and `dumpsys user` reporting
+no restrictions at all. It is HyperOS's *Install via USB* developer toggle, which cannot be set over
+adb. **This page's old note that a retry works is now false**, and the consequence is precise:
+nothing OEM-specific about Phase 6 has been measured. Everything below is Android 16 / API 36
+emulators — one existing AVD as Mum, and a second one created for the run as Ana.
+
+**What the run establishes that no test could.**
+
+- **`onAwayChanged` reaches a closed app, and the gate's `push_handler` fix is real.** Mum's app
+  killed; Ana marked her away; the phone came back as a new pid and, still closed, wrote
+  `self_away` and **re-armed its reminders around the new away period**. Had the missing `away:`
+  argument still been there, the FCM reconcile would have decided from the cache the nudge came to
+  replace and the alarms would not have moved.
+- **The trigger's delete adapter ran on a real cancellation** — `cleared:true, parties:2, tokens:2`
+  — and the fan-out skipped the setter's own device on the create (`skippedSelf:1`), which is the
+  rules-enforced `setBy` doing what §17 needs it to do.
+- **§17's surface exists on a phone**: *"Ana marked you away until Thursday 3."*
+- **Cancelling produces both shapes**: a **delete** on the day the period starts, and — with the
+  harness forcing tomorrow — a **truncation** that rewrites `through` and keeps the days already
+  spent away covered.
+- **Reminders stop on away days and resume at `through` + 7**, read from `dumpsys alarm` rather than
+  from `pending_alarms`, both when the app drove it and when the background isolate did.
+- **The accessibility fixes hold on a device**: at `font_scale 2.0` the picker's title wraps instead
+  of ellipsizing and both actions are reachable; at a forced **360dp** width the day cells measure
+  **exactly 48dp**, the floor that used to be breached below 392dp.
+- **The v5 → v6 migration passes on a real store** — built from `b79a7b6`, paired, upgraded in
+  place: version 5 → 6, the two new columns added and already populated, every row intact.
+
+**And it found something the tests are structurally unable to see.** An away period set **offline**
+is reported *"Saved."* and then reaches nothing on the setter's own phone: `self_away` stays empty,
+the away line does not appear, the control still reads *"I'm away"*, and the reminders for the away
+days stay armed — until an unrelated reconcile happens to run. The watched side takes its away row
+from a read-back, and the nudge that corrects every *other* device is deliberately not sent to the
+setter, so the one phone certain not to be told is the one that wrote it. On the plane §8 names, it
+goes on reminding her through the period she was just told was saved. **It needs a decision, not a
+patch** — it is two deliberate choices colliding, and it lands on the owed decision about a write
+that says nothing when it succeeds.
+
+Two smaller things: the picker title says *"the last day **you** are away"* on the **watcher's**
+phone, where she is choosing for somebody else; and `invite_service.dart` has **no client-side
+timeout** at all, unlike `AwayRepository`, so the pairing screens spin on the SDK's 60-second default
+with nothing said.
+
+---
+
 ## Still owed
 
-**The device run.** Nothing here has run on a phone. The brief's own first instruction is still
-outstanding and is now joined by this phase's:
+**The device run is done**, above, except for what a session cannot drive and what the POCO cannot
+answer:
 
-1. **Press *Add someone*, take the second option, and confirm a warning alarm actually arms** — the
-   Phase 5 gate defect that only a device proves.
-2. Set away from the Tap screen; confirm reminders stop and the picker's labels read correctly at the
-   largest font scale.
-3. Set away from a **watcher's** phone; confirm the watched device's Tap screen names the watcher.
-4. Cancel from either side; confirm both sides restore.
-5. The third exit criterion **cannot be driven in a session** — it needs a device to sit offline
+1. **The POCO, entirely.** Its *Install via USB* toggle has to be turned on by hand before any build
+   can reach it. Every OEM-specific question — HyperOS alarm survival, Doze, vendor trimming — is
+   unanswered for this phase.
+2. The third exit criterion **cannot be driven in a session** — it needs a device to sit offline
    across a period boundary. The arithmetic is asserted in tests; what a device would add is
-   confidence that nothing else expires the cache.
+   confidence that nothing else expires the cache. The harness's forced date is the intended route
+   and shortens it from days to minutes.
 
-**The reviewers have not run.** All five are owed at the gate: architecture (a new domain type, a new
-repository, a background-closure change), security (a new client write path against the rules, and a
-Function), UI/UX (a new screen and new copy), testing, infrastructure (the fourth Function, and a
-schema migration).
+**The reviewers have run** — all five, one at a time, 2026-08-27, and every finding was applied; the
+section above is what they found. *(This paragraph said "the reviewers have not run" until
+2026-09-01. It was written before the gate and left standing after it, in the document whose own
+subject is claims that stop being true. Corrected during the device run.)*
 
 **Copy approval.** The picker and refusal strings are **drafted, not approved** — listed in
 `screens.md` under *Away picker → Copy* so approval has something to read. Two of them reuse
-already-approved sentences verbatim rather than inventing siblings.
+already-approved sentences verbatim rather than inventing siblings. The device run adds one concrete
+observation to that list: the picker title addresses the wrong person on the watcher's phone.
 
 **The four away transition notifications.** §12's table and `testing/strategy.md`'s must-cover list
 both name them — *"Ana marked Mum away until Sat 22 Aug"*, the cancellation notice, and the locally

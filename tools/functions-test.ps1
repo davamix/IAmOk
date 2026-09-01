@@ -2,8 +2,8 @@
 #
 #   pwsh -File tools/functions-test.ps1
 #
-# Two runs, because they need different emulators and must not see each other's
-# writes:
+# Three runs, because they need different emulators and must not see each
+# other's writes:
 #
 #   1. `npm test`, which globs `functions/test/*.test.js` — so it picks up new
 #      suites automatically, and today that is BOTH `check_in_fan_out.test.js`
@@ -16,8 +16,15 @@
 #      second tap on the same day is an UPDATE and fires nothing. Needs the
 #      functions emulator, and its only observable effect is a log line, so the
 #      assertion is at the bottom of this file rather than inside the script.
+#   3. `functions/test/away_trigger_fires.mjs` — the same shape, for the trigger
+#      run 2 does not touch. `onAwayChanged`'s fan-out is well covered by run 1;
+#      its REGISTRATION was executed by nothing at all until this run existed,
+#      and what that leaves unrun is `event.params.uid` and the delete adapter —
+#      the cancellation path. Separate from run 2 rather than folded into it
+#      because both scripts write, wait, and assert on a count of log lines, and
+#      one run's dispatch latency would show up as the other's missing line.
 #
-# Nothing here touches the live project. Both runs use `demo-i-am-ok`, which the
+# Nothing here touches the live project. All three use `demo-i-am-ok`, which the
 # Firebase tooling treats as a guaranteed-offline project — no credentials are
 # used and the SDKs will not reach production for it.
 #
@@ -76,7 +83,7 @@ try {
     if ($LASTEXITCODE -ne 0) { Write-Error 'functions build failed - not testing a stale lib/' }
 
     Write-Host ''
-    Write-Host '1/2  fan-out, against the Firestore emulator' -ForegroundColor Cyan
+    Write-Host '1/3  fan-out, against the Firestore emulator' -ForegroundColor Cyan
     firebase emulators:exec --only firestore --project demo-i-am-ok `
         'npm --prefix functions test' 2>&1 | Tee-Object -Variable fanOutOutput
     $fanOutExit = $LASTEXITCODE
@@ -103,7 +110,7 @@ try {
     }
 
     Write-Host ''
-    Write-Host '2/2  the trigger fires once per day, not once per tap' -ForegroundColor Cyan
+    Write-Host '2/3  the trigger fires once per day, not once per tap' -ForegroundColor Cyan
 
     # Captured as well as shown, because the ASSERTION IS ON THE OUTPUT. The
     # trigger's only effect with no links seeded is a log line, which is the
@@ -168,6 +175,76 @@ try {
 
     Write-Host ''
     Write-Host 'PASS  once per day, not once per tap; a non-day id fires nothing' -ForegroundColor Green
+
+    Write-Host ''
+    Write-Host '3/3  onAwayChanged is wired, and a cancellation reaches it' -ForegroundColor Cyan
+
+    firebase emulators:exec --only firestore,functions --project demo-i-am-ok `
+        'node functions/test/away_trigger_fires.mjs' 2>&1 |
+        Tee-Object -Variable awayCaptured
+    $awayExit = $LASTEXITCODE
+
+    $awayLines = @($awayCaptured | ForEach-Object { $_.ToString() })
+
+    if (-not ($awayLines -match 'probe: done')) {
+        Write-Error ("the away probe never reached the end (exit $awayExit) - the counts " +
+            'below would be meaningless')
+    }
+    if ($awayExit -ne 0) {
+        Write-Host ("  note: exit $awayExit though the probe completed - the documented " +
+            'Windows libuv crash.') -ForegroundColor DarkYellow
+    }
+
+    $awayFanned = @($awayLines | Select-String -SimpleMatch 'onAwayChanged: fanned out')
+
+    Write-Host ''
+    Write-Host "onAwayChanged ran $($awayFanned.Count) time(s):" -ForegroundColor DarkGray
+    $awayFanned | ForEach-Object { Write-Host "  $_" -ForegroundColor DarkGray }
+
+    # THE COUNT ALONE PROVES ALMOST NOTHING, which is the whole reason this run
+    # exists. Three writes went in - a create, a truncating update and a delete -
+    # and each has its own way of disappearing silently:
+    #
+    #   `cleared:false` twice   the CREATE and the UPDATE. Switch the
+    #                           registration to `onDocumentCreated` - the
+    #                           plausible copy-paste from the function above it -
+    #                           and the update goes silent while everything still
+    #                           looks wired.
+    #   `cleared:true` once     the DELETE, through
+    #                           `after?.exists === true ? after.data() : undefined`.
+    #                           This is the cancellation path, and it had never
+    #                           been executed by anything before this run. A
+    #                           count of three would pass with the delete
+    #                           reported as just another period.
+    #
+    # The uid is matched rather than assumed: it can only have come from
+    # `event.params.uid`, which reads the document PATH. Nothing in the body
+    # carries it.
+    #
+    # Rendering differs between the emulator's structured and plain log output -
+    # `"cleared":false` and `cleared: false` - so the separator is matched
+    # loosely on purpose. Tightening it to one form is how this assertion starts
+    # passing vacuously.
+    $cleared = @($awayFanned | Where-Object { $_.Line -match 'cleared\W{1,4}false' })
+    $cancelled = @($awayFanned | Where-Object { $_.Line -match 'cleared\W{1,4}true' })
+    $named = @($awayFanned | Select-String -SimpleMatch 'uid-away-probe')
+
+    if ($awayFanned.Count -ne 3 -or $cleared.Count -ne 2 -or $cancelled.Count -ne 1) {
+        Write-Error ("expected onAwayChanged to run exactly three times - create, update, " +
+            "delete - with two 'cleared:false' lines and one 'cleared:true'; got " +
+            "$($awayFanned.Count) line(s), $($cleared.Count) and $($cancelled.Count). " +
+            'A missing update line means the trigger is create-only, which would silence ' +
+            'every truncation; a missing cleared:true means the delete adapter did not run, ' +
+            'and that is the cancellation - the one the docstring calls the one that matters ' +
+            'most, because until every device hears about it their family stays silent.')
+    }
+    if ($named.Count -ne 3) {
+        Write-Error ("expected all three lines to name uid-away-probe, from event.params.uid " +
+            "- the document path is the only place that uid exists. Got $($named.Count).")
+    }
+
+    Write-Host ''
+    Write-Host 'PASS  the registration dispatches; the update and the delete both arrive' -ForegroundColor Green
 }
 finally {
     Pop-Location

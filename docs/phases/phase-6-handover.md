@@ -1,34 +1,52 @@
 # Phase 6 — Away mode · handover
 
 **Written:** 2026-09-01, at the end of the build-and-review session.
-**Status:** Built, all five reviewers run, every finding applied. **Not signed off.**
+**Updated:** 2026-09-01, after the device run.
+**Status:** Built, all five reviewers run, every finding applied, **and run on two AVDs — every
+Phase 6 checklist row is answered.** **Not signed off**: the POCO refused to be installed to, and
+two owner decisions are open.
 
 This is the *what to do next* document. [phase-6-summary.md](phase-6-summary.md) is the *what
 happened* one and is longer; read its **The gate review** section before touching anything, because
-the gate found that the feature did not work and the fix changed both the client and the rules.
+the gate found that the feature did not work and the fix changed both the client and the rules, and
+then **The device run**, which is what the checklist rows were ticked from.
 
 ---
 
 ## Prompt to start the next session
 
 > I'm continuing **Phase 6 — away mode** of the I Am Ok project. Read
-> `docs/phases/phase-6-handover.md` first, then *The gate review* in
-> `docs/phases/phase-6-summary.md` — the gate found that away could be set **once per person and
-> then never again**, and the fix scoped `from`'s immutability to a **period** rather than a person
-> in both `AwayRules.periodInForce` and `firestore.rules`. Do not re-derive that; it is settled and
-> tested.
+> `docs/phases/phase-6-handover.md` first, then *The gate review* and *The device run* in
+> `docs/phases/phase-6-summary.md`. Two things are settled and must not be re-derived: the gate
+> scoped `from`'s immutability to a **period** rather than a person, in both
+> `AwayRules.periodInForce` and `firestore.rules`; and the away feature has now been **driven end to
+> end on two API 36 AVDs** — picker, both surfaces, both cancel shapes, the closed-app nudge, the
+> offline queue and the v5 → v6 migration. The evidence is in `docs/testing/device-matrix.md` under
+> *The Phase 6 away run*. Do not re-run those rows for their own sake.
 >
-> **The work left is almost entirely on a device.** The POCO F3 is connected and the app is
-> **not installed**. Nothing in Phase 6 has ever run on a handset, and the checklist is already
-> written in `docs/testing/device-matrix.md` under *Per-device checklist → Phase 6*. Start there
-> rather than writing a new one.
+> **The POCO F3 cannot be installed to.** Every attempt returns
+> `INSTALL_FAILED_USER_RESTRICTED` — HyperOS's *Install via USB* developer toggle, which **cannot be
+> set over adb** and needs a physical tap on the phone (Developer options → Install via USB; MIUI
+> usually also wants a signed-in Mi account). Ask the owner to turn it on before planning anything
+> that needs OEM hardware. Until then everything OEM-specific about this phase — HyperOS alarm
+> survival, Doze, vendor trimming — is unmeasured, and the AVD rows do **not** cover it.
+>
+> **Three things are open and each needs a decision rather than a patch**, all recorded with their
+> measurements: an away period set **offline** never reaches the setter's own phone until an
+> unrelated reconcile (the screen contradicts its own *"Saved."* and the reminders keep firing); the
+> picker title says *"the last day **you** are away"* on the **watcher's** phone; and
+> `invite_service.dart` has no client-side timeout, so the pairing screens spin on the SDK's
+> 60-second default.
 >
 > **Build against the local Firebase Emulator Suite**, as Phases 4, 5 and 6 did. A real Functions
 > deploy is neither needed nor wanted and would still fail — the four 2nd-gen APIs are still
 > missing, re-verified from the CLI on 2026-08-31. **Only one emulator script may run at a time**
-> (ports 8080 / 9099 / 5001), and a stale one **will** be left behind if a run is killed: the
-> symptom is *"Port 8080 is not open on localhost"*, which reads like a broken script. Kill the
-> `java` process holding the port.
+> (ports 8080 / 9099 / 5001). `emulator-data/` now holds the **2026-09-01** export with both users,
+> both links and the away document, exported with `firebase emulators:export emulator-data --force
+> --project i-am-ok-c74ca` against the **running hub** — which is how to keep state when the suite
+> was started detached and cannot receive a Ctrl-C. **Warm the Functions emulator with one `curl`
+> before driving a phone**: the first callable of a session can die of a cold-start timeout and it
+> looks exactly like an app fault.
 >
 > **Two owner decisions are owed before this phase can be signed off** — the drafted picker and
 > refusal copy, and five layout/behaviour questions the gate surfaced. Both lists are in
@@ -51,7 +69,7 @@ pushes only when asked.
 | Debug APK | builds |
 | Secrets guard | clean — 25 ignored, 6 deliberately tracked |
 | Dart mutations | **31 caught, 0 survived, 0 did not compile**, 10 passing controls |
-| Device | **nothing in this phase has been on a handset** |
+| Device | **every Phase 6 row run 2026-09-01 on two API 36 AVDs. The POCO refused every install** |
 
 **All three exit criteria are met in tests** — `test/application/away_exit_criteria_test.dart`,
 driven end to end through both reconcilers and built around **ending** rather than starting, because
@@ -101,24 +119,31 @@ lines back to their original form. The Phase 5 gate found a mutated build in the
 
 ## What to do next, in order
 
-### 1. The device run — this is the bulk of what is left
+### 1. The device run — DONE on AVDs, 2026-09-01, and blocked on the POCO
 
-The POCO F3 is connected (`1720f883`, `alioth`, Android 13 / API 33, HyperOS `OS1.0`) and the app is
-**not installed**, which is the state Phase 5 deliberately left it in.
+**Every row of the Phase 6 checklist is ticked**, including the Phase 5 carry item (the chooser's
+second option, and six warning alarms confirmed armed from `dumpsys alarm`). The evidence, timings
+and exact figures are in `docs/testing/device-matrix.md` under *The Phase 6 away run*. **Do not
+re-run them for their own sake**; re-run one only when its code changes.
+
+**What is still owed here is the POCO, and it needs a person.** `adb install` returns
+`INSTALL_FAILED_USER_RESTRICTED` on every route — streamed install, and `pm install` from
+`/data/local/tmp` — with the phone awake, unlocked, `adb_enabled=1`, and `dumpsys user` reporting
+`Effective restrictions: none`. That is HyperOS's *Install via USB* gate and **adb cannot set it**.
+This page used to say a retry works; it does not any more.
+
+So the OEM half of this phase is unmeasured, and the AVD rows must not be read as covering it:
+HyperOS alarm survival, Doze behaviour, vendor trimming, and a genuinely narrow screen. (The 360dp
+day-cell floor *was* checked, by forcing `wm density 480` on an AVD — the cells measure exactly
+48dp — but that is a layout answer, not an OEM one.)
 
 `adb` is **not on PATH**. It is at `D:\Android\Sdk\platform-tools\adb.exe`.
 
-**The full checklist is already written** — `docs/testing/device-matrix.md`, *Per-device checklist →
-Phase 6*, written before the run so it is not shaped by whatever happened to be tried. Do not
-rewrite it. It leads with a **Phase 5** item that no Phase 6 test can reach:
-
-> Press **Add someone**, take the **second** option (*"Someone I look after"*), complete a pairing,
-> and confirm a **warning alarm actually arms** — read `dumpsys alarm` off the device, not the app's
-> own belief.
-
-Then Phase 6's own rows: the picker at the largest font scale, reminders stopping on away days, the
-Tap screen naming the watcher who set it, cancelling from either side, `onAwayChanged` reaching a
-**closed** app, the offline-queued write, and the **v5 → v6 migration on a real store**.
+**The rig this run leaves behind:** AVD `Medium_Phone_API_36.0` as **Mum** (watched, away until
+1 Sep after the truncation) and a new AVD **`IAmOk_Watcher_36`** as **Ana** (watching Mum, and
+watched by her). Both links exist because the carry item needs a Tap screen and a code at once.
+Two instances of *one* AVD will not run unless **every** instance carries `-read-only`, which is why
+a second AVD exists at all.
 
 **Traps that cost real time last phase, all still true:**
 
@@ -153,9 +178,12 @@ picker title, `Save`, `Go back`, the queued sentence and the four refusals are *
 approved**. Two of them (`serverFault`, `notSignedIn`) reuse already-approved pairing sentences
 verbatim and are the cheapest to approve.
 
-**b. Five decisions the gate surfaced** — *Owed decisions this phase opened and did not close*. Each
-is a case where **the code has already decided** and an absence in that file would read as a free
-choice:
+**b. Seven decisions — five from the gate, two added by the device run** — *Owed decisions this
+phase opened and did not close*. Each is a case where **the code has already decided** and an
+absence in that file would read as a free choice. The two new ones are the **picker title
+addressing the wrong person on the watcher's phone**, and **an away period set offline saying
+*"Saved."* while changing nothing on that phone** — the second is the sharper of the two and is the
+same decision as *"nothing is said when a write lands"* seen from the other side:
 
 | | |
 |---|---|
@@ -165,27 +193,24 @@ choice:
 | The writer nobody can name | An account with no display name writes `"Someone"`, suppressed at render. A real person called that loses their attribution |
 | The spoken outcome strings | Now announced on both surfaces, reusing the rendered sentence. `screens.md`'s own rule is that spoken labels are approved copy like any other |
 
-### 3. `onAwayChanged`'s trigger wiring has never been executed by anything
+### 3. `onAwayChanged`'s trigger wiring — DONE 2026-09-01, from both ends
 
-Found by the infrastructure reviewer, and it is the last thing between this phase and a deploy that
-would be the **first** execution of the away trigger's adapter.
+The infrastructure reviewer's finding was that nothing had ever dispatched a real event at the
+`onDocumentWritten` registration, leaving `event.params.uid` and the **delete adapter** — the
+cancellation path — unrun until the first deploy. Both are now executed:
 
-`functions/test/away_fan_out.test.js` imports `lib/away_fan_out.js` and never `lib/index.js`. The
-only place anything dispatches a real event is run 2 of `tools/functions-test.ps1`, whose probe is
-`onCheckInCreated`-only. So the `onDocumentWritten` registration, `event.params.uid`, and above all
-the **delete adapter** are unrun:
+**`functions/test/away_trigger_fires.mjs`, run as 3/3 of `tools/functions-test.ps1`.** Three writes,
+not the two that were asked for: create, truncating **update**, delete. The update earns its place —
+it is what separates this trigger from `onCheckInCreated`, and a copy-pasted `onDocumentCreated`
+would silence every truncation while still looking wired. The assertion is two `cleared:false`, one
+`cleared:true`, and the probe's uid in all three lines, which can only have come from the path.
 
-```ts
-const after = event.data?.after;
-const fact = awayFactFrom(watchedUid, after?.exists === true ? after.data() : undefined);
-```
+**And it was mutation-checked rather than trusted.** With the delete replaced by another `set`, the
+line count stays at three and the run **fails on the `cleared:true` clause** — exactly the failure a
+bare count would have missed. Reverted immediately; `git status` clean.
 
-That is the **cancellation** path — the one the function's own docstring calls the one that matters
-most, *"because until every device hears about it their family stays silent."*
-
-Owed: a third run in `tools/functions-test.ps1`, same shape as run 2, asserting **two**
-`onAwayChanged: fanned out` lines — one `cleared:false` and one `cleared:true`. A count alone would
-pass if the delete had silently done nothing.
+**The device run then did it for real:** Ana cancelled Mum's period from her own phone and the
+function logged `cleared:true, parties:2, tokens:2`, with the create logging `skippedSelf:1`.
 
 ### 4. Smaller, and all recorded rather than forgotten
 
@@ -198,7 +223,15 @@ pass if the delete had silently done nothing.
 - **An away *create* queued offline across two UTC midnights is dropped.** `awayNotRetroactive` is
   evaluated at commit time with one day of slack while `from` is a literal composed on the device,
   and the person has already read *"Saved"*. Narrow, and it is the collision of two deliberate
-  decisions rather than a coding mistake, so it needs a call rather than a patch.
+  decisions rather than a coding mistake, so it needs a call rather than a patch. **The device run
+  showed the mechanism**: a period queued at 11:04 and flushed at 11:06 carried `setAt` stamped at
+  **flush** time, which is exactly the clock the rule is evaluated against while `from` is not.
+- **`invite_service.dart` has no client-side timeout.** Neither callable is bounded, so the pairing
+  screens spin on the SDK default — **60 s** (`cloud_functions_platform_interface` 6.0.6) — with
+  nothing said. `AwayRepository` bounds every call at six seconds, and the gate *added* the missing
+  bound to `AwayRepository.read` this phase for the same argument. Seen on a device when the
+  Functions emulator's first invocation cold-started: the *Your code* screen showed a bare spinner
+  and no explanation. Not a defect of this phase's code; it is the same class, one screen over.
 - **The Firestore error classifier is now written twice** — `FirestoreCheckInReader._classify` and
   `AwayRepository.classifyRead`, including the English-substring App Check match.
   `OPEN-QUESTIONS.md` #5 named one site and now names both; hoisting them into one classifier is the
@@ -250,16 +283,26 @@ and a font-scale assertion measuring a widget entirely outside the viewport. Bot
 
 ## The rig, as this session leaves it
 
-**POCO F3 — connected, app UNINSTALLED.** `1720f883`, `alioth_eea`, Android 13 / API 33, HyperOS
-`OS1.0`. Verified 2026-09-01. This is the state Phase 5 deliberately left it in, and it is a clean
-starting point: a cold install is what the Phase 6 checklist wants anyway.
+**POCO F3 — connected, app STILL NOT INSTALLED, and it cannot be.** `1720f883`, `alioth_eea`,
+Android 13 / API 33, HyperOS `OS1.0`. Every install route returns `INSTALL_FAILED_USER_RESTRICTED`;
+HyperOS's *Install via USB* toggle is off and adb cannot set it. **This needs a physical tap before
+the next session plans anything on it** — Developer options → *Install via USB* (MIUI usually also
+wants a signed-in Mi account and a SIM). Nothing else about the phone changed.
 
-**AVD `Medium_Phone_API_36.0`** — held a paired *Mum*↔*Ana* state as of Phase 5. Scratch rig;
-*Wipe store* resets it. Treat its contents as unverified after this long.
+**AVD `Medium_Phone_API_36.0`** — now **Mum, the watched person**, signed in as `emulator-mum`,
+watched by Ana and watching her, away until 1 Sep (the truncated period), store at **v6**, forced
+date cleared, `font_scale` back to 1.0 and density reset. Scratch rig; *Wipe store* resets it.
 
-**`emulator-data/` is the 2026-08-25 export and does not contain that pairing.** Re-pair; do not try
-to reconcile the two. `emulators.ps1` prints the export's date on import so this is visible rather
-than silent.
+**AVD `IAmOk_Watcher_36` — new, created for this run** from
+`system-images;android-36;google_apis_playstore;x86_64`, running as **Ana, the watcher**. It exists
+because two instances of one AVD require **every** instance to carry `-read-only`, which the
+already-running one did not. Keep it; a second identity is needed by every away row.
+
+**`emulator-data/` is the 2026-09-01 export and it DOES contain this pairing** — both users, both
+links, the away document. Exported with `firebase emulators:export emulator-data --force --project
+i-am-ok-c74ca` **against the running hub**, which is the way to keep state when the suite was started
+detached and so can never receive the Ctrl-C that `--export-on-exit` needs. Phase 5 lost its state
+exactly there. `emulators.ps1` prints the export's date on import, so a stale one stays visible.
 
 **Nothing is deployed.** `firebase functions:list` returns *No functions found*, re-verified
 2026-08-31. `firestore.rules` **has changed this phase** and is **not deployed** — the live ruleset

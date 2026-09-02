@@ -1617,6 +1617,64 @@ about reading the output rather than the exit code, arriving on schedule.
 watched by her, and now watching Pop as well. **The POCO now has the app installed**, signed in as
 Pop, watched by Ana, away until 3 Sep as set by her, with *Install via USB* on.
 
+### Doze, on a real overnight — 2026-09-01 23:48 → 2026-09-02 12:34, and the last Phase 6 gap closes
+
+**The reminder fired 876 ms after the armed second, from 4h42m of unbroken deep Doze.** This is the
+one row the Phase 6 run left open — everything else in it ran with the screen on — and it is the
+first time this project has measured **natural** deep idle rather than `deviceidle force-idle`.
+
+**Set-up, and why it had to be built rather than just left overnight.** With Pop away until 3 Sep the
+phone had **21 alarms armed, the earliest on 4 September** — correct behaviour, and it meant a night
+would have measured nothing. Away was ended from the Tap screen at 23:45 with the emulator suite
+reachable over `adb reverse`, the reconcile re-armed **18 alarms with the earliest at 2 Sep 12:00**,
+and the phone was then unplugged and put into aeroplane mode. **Aeroplane mode is the control**: a
+call or a message wakes the device and opens a maintenance window, and deferred work flushes in it —
+which is exactly how a late alarm gets misread as an on-time one.
+
+**The Doze progression, from `dumpsys batterystats --history`, `RESET:TIME: 2026-09-01-23-48-30`:**
+
+| Wall clock | Offset | State |
+|---|---|---|
+| 23:48:46 | +16s | screen off |
+| 23:55:48 | +7m18s | `device_idle=light` |
+| **00:50:39** | **+1h02m09s** | **`device_idle=full`** — deep Doze, ~62 min after unplug |
+| 01:50:40 / 01:51:10 | +2h02m | maintenance window, **30 s**, then `full` again |
+| 03:51:12 / 03:51:42 | +4h03m | maintenance window, **30 s**, then `full` |
+| 07:51:44 / 07:52:14 | +8h03m | maintenance window, **30 s**, then `full` |
+| **07:52:14 → 12:34:16** | | **`full`, unbroken, 4h42m02s** |
+| 12:34:16 | +12h45m46s | `+screen` — picked up |
+
+The 1 h / 2 h / 4 h / 8 h doubling with 30-second maintenance windows is textbook AOSP Doze; HyperOS
+did not trim or shorten it. **12:00:00 falls squarely inside the final 4h42m stretch.**
+
+**The delivery, from logcat:**
+
+```
+09-02 12:00:00.740 D/AlarmManager: mBroadcastRefCount -> 1
+09-02 12:00:00.747 I/SmartPower.io.github.davamix.i_am_ok/10617(7604): idle->background R(alarm start)
+09-02 12:00:00.876 mCreationTimeMs   <- NotificationManagerService recorded the post
+```
+
+`android.title=I Am Ok`, `android.text=Remember to tap I'm OK today.`, `channel=reminders`. The armed
+alarm disappeared from `dumpsys alarm` and the count went **18 → 17**, so exactly one fired.
+
+**Three things this establishes beyond ADR-0008.** That decision measured **forced** Doze in Phase 3
+and found the reminder path unaffected; this is a natural 12h45m idle, on the **first day back after
+an away period**, with the app process (pid 7604) alive but idle the whole night. And the drain was
+**0%** — the battery never left 100 across 12h45m in aeroplane mode.
+
+**What it does not touch** is the *warning* path — `android_alarm_manager_plus` →
+`JobIntentService` → JobScheduler — which ADR-0008 already established **is** blocked until Doze
+ends. That is the watcher side, it needs Ana's handset, and it is accepted, not open.
+
+> **`DaemonSensorPolicy`'s `mDeviceIdle` is INVERTED, and reading it as Doze state gives you the
+> exact opposite answer.** At the same timestamps: batterystats says `device_idle=off` at 07:51:44
+> and `full` at 07:52:14; `DaemonSensorPolicy` logs `mDeviceIdle: true` at 07:51:44 and `false` at
+> 07:52:14. It is a HyperOS sensor-daemon signal, it is the first thing a `grep -i deviceidle` over
+> logcat returns, and it nearly produced the conclusion that the phone was **awake** at 12:00.
+> **Use `dumpsys batterystats --history` and its `device_idle=full` markers.** `dumpsys deviceidle`
+> alone is not enough either — on this device it carries the current state and no step history.
+
 ### Three HyperOS behaviours that cost time in this session
 
 **`deviceidle force-idle` will not reach deep idle from a screen-off device.** It stops at

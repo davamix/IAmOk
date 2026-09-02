@@ -1,10 +1,11 @@
 # Phase 6 — Away mode · summary
 
-**Date:** 2026-08-27, with the device run and the owner's decisions added 2026-09-01 ·
-**Status:** Built, reviewed by all five reviewers, their findings applied, **run on two AVDs and
-then on the POCO F3**, and **all seven owner decisions taken and applied**. **Not yet signed off** —
-Doze is unmeasured, and §12's four away transition notifications are specified and deliberately not
-built.
+**Date:** 2026-08-27, with the device run and the owner's decisions added 2026-09-01, the second
+gate 2026-09-01, and Doze 2026-09-02 ·
+**Status:** Built, **reviewed by all five reviewers twice** — once over the phase, once over the
+close-out — every finding applied, **run on two AVDs and then on the POCO F3**, all seven owner
+decisions taken and applied, and **Doze measured on a real overnight**. **Not yet signed off** —
+§12's four away transition notifications are specified and deliberately not built.
 
 **The gate found that the feature did not work.** Away could be set once per person and then never
 again — see *The gate review* below, which is the part of this document to read first.
@@ -578,7 +579,7 @@ cancellation and later a creation each woke a new process, rewrote `self_away` a
 alarms without the app being opened. Then *"Ana marked you away until Thursday 3."* on the handset
 itself, which is where §17's mitigation has to be read. Two smaller confirmations: the code expiry
 rendered in **24-hour** format because the phone is set that way, and at 392.7dp the picker's day
-cells measure **52.6dp**. Doze is still unmeasured, and away across a real period boundary still
+cells measure **52.6dp**. (Doze was measured on 2026-09-02 — see *Still owed*.) Away across a real period boundary still
 needs a phone to sit offline overnight.
 
 ---
@@ -588,10 +589,14 @@ needs a phone to sit offline overnight.
 **The device run is done**, above, except for what a session cannot drive and what the POCO cannot
 answer:
 
-1. **Doze on the POCO.** The phone ran the away rows at stock power settings, screen on; nothing was
-   measured with it idle overnight, and this project's own notes say `deviceidle force-idle` will
-   not reach deep idle on this device from a screen-off state. That is the one OEM question the run
-   did not close.
+1. ~~**Doze on the POCO.**~~ **DONE 2026-09-02, on a real overnight — the last device row.**
+   Unplugged 23:48 in aeroplane mode; `device_idle=full` at **00:50**, then the textbook
+   1 h / 2 h / 4 h / 8 h doubling with 30-second maintenance windows, and **`full` unbroken from
+   07:52 to 12:34**. The 12:00 reminder — the **first day back after the away period ended** — was
+   posted at **12:00:00.876**, 876 ms after the armed second, with **0%** battery drain across
+   12h45m. It goes beyond ADR-0008, which measured *forced* Doze in Phase 3; the *warning* path is
+   untouched and stays as ADR-0008 accepted it. Write-up, and the inverted-signal trap that nearly
+   reversed the reading, in `testing/device-matrix.md` under *Doze, on a real overnight*.
 2. ~~The third exit criterion cannot be driven in a session.~~ **Driven 2026-09-01, in eleven
    minutes.** Aeroplane mode on the POCO for the whole run and the harness walking the clock: away
    on the last away day, **ended on the first day back**, with every Firestore read refused

@@ -5,8 +5,9 @@
 **Status:** Built, run on two AVDs and then on the POCO F3 — every Phase 6 checklist row answered,
 including the OEM half — all seven owner decisions taken and applied, and **the five reviewers run a
 second time, over the close-out itself, 2026-09-01.** Nine of that gate's findings are applied;
-**four are held for the owner** and are the only work owed before Phase 7. **Not signed off**: Doze
-is unmeasured, §12's four away transition notifications are specified and deliberately not built,
+**all four have since been decided and applied**. **Doze measured on a real overnight 2026-09-02** —
+the reminder fired **876 ms** after the armed second from 4h42m of unbroken deep Doze, which was the
+last open device row. **Not signed off**: §12's four away transition notifications are specified and deliberately not built,
 and `firestore.rules` is **changed and undeployed**.
 
 This is the *what to do next* document. [phase-6-summary.md](phase-6-summary.md) is the *what
@@ -77,7 +78,7 @@ project commits to `main` and pushes only when asked.
 | Debug APK | builds |
 | Secrets guard | clean — 25 ignored, 6 deliberately tracked |
 | Dart mutations | **34 caught, 0 survived, 0 did not compile**, 13 passing controls |
-| Device | **every Phase 6 row run 2026-09-01 — two API 36 AVDs, then the POCO F3 for the OEM half** |
+| Device | **every Phase 6 row run 2026-09-01** — two API 36 AVDs, then the POCO F3 for the OEM half — **and Doze on a real overnight 2026-09-02**: the reminder posted **876 ms** after the armed second from 4h42m of unbroken `device_idle=full` |
 
 **All three exit criteria are met in tests** — `test/application/away_exit_criteria_test.dart`,
 driven end to end through both reconcilers and built around **ending** rather than starting, because
@@ -236,9 +237,13 @@ and the harness walking the clock across the boundary. Every read was refused (`
 period ended by arithmetic on the first day back, the cached row survived, and the reminders came
 back on the right day. All three criteria are now met on devices, not only in tests.
 
-**What is still owed on the phone is Doze**, and only that: everything above ran with the screen on.
-This page's own note says `deviceidle force-idle` will not reach deep idle on this device from a
-screen-off state, so it needs a real overnight.
+~~**What is still owed on the phone is Doze**~~ — **DONE, 2026-09-02, on a real overnight.**
+Unplugged at 23:48 in aeroplane mode; deep Doze (`device_idle=full`) at 00:50, then the textbook
+1 h / 2 h / 4 h / 8 h doubling with 30-second maintenance windows, and **`full` unbroken from 07:52
+to 12:34**. The 12:00 reminder — the first day back after the away period ended — was posted at
+**12:00:00.876**, 876 ms after the armed second, and the battery never left 100%. Full write-up in
+`testing/device-matrix.md` under *Doze, on a real overnight*, including the trap that nearly
+inverted the reading: `DaemonSensorPolicy`'s `mDeviceIdle` is the **opposite** of the Doze state.
 
 `adb` is **not on PATH**. It is at `D:\Android\Sdk\platform-tools\adb.exe`.
 

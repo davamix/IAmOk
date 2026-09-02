@@ -293,10 +293,19 @@ produced a number.
 
 ### Results
 
-**2026-09-01: 34 mutations, 34 caught, 0 survived, 0 `DID NOT COMPILE`**, with **thirteen** passing
+**2026-09-02: 39 mutations, 39 caught, 0 survived, 0 `DID NOT COMPILE`**, with **fourteen** passing
 no-op controls — one per file, each of which has to pass before anything in that group is scored.
 That is the number *with* the compile gate the Phase 5 gate review added, which is the only version
-worth quoting.
+worth quoting. `lib/` and `test/` were clean afterwards, which is this project's own post-run check.
+
+> **It was 34 / 13 on 2026-09-01, and that number went stale the same week.** The second gate and the
+> name question added six `lib/` files and +380 lines — `AskNameForm`, `profileDisplayName`,
+> `needsDisplayName`, `chosenDisplayName`, `didUpdateWidget` — and **none of it had a mutation**. The
+> re-run on a clean tree still scored 34 / 34, so the figure was never *wrong*; it simply stopped
+> describing the code. **Five were added**, all silent-direction: the account name beating the typed
+> one (which is `refreshProfile` overwriting a name within minutes of somebody entering it),
+> `needsDisplayName` inverted, the form's trim and empty-name guards, and the watcher row keeping a
+> present-tense sentence about a period that has moved.
 
 **Twenty of the 34 are away surfaces**: six on `AwayPeriod`/`AwayRules`, three on `AwayRecord`, two
 on the watched reconcile, four on `WarningPolicy` step 5, one on `WatcherCache.applyRead`, one on
@@ -350,13 +359,13 @@ with `git status` clean.
 | | |
 |---|---|
 | `flutter analyze` | clean |
-| `flutter test` | **1 370 passing** (1 202 at the start of the phase; 1 354 before the owner's decisions were applied) |
-| Functions | **102 passing** (83 before) — the runner globs `test/*.test.js`, and its own count is what says the new suite ran |
+| `flutter test` | **1 396 passing** (1 202 at the start of the phase; 1 354 before the owner's decisions; 1 370 before the second gate) |
+| Functions | **102 passing** (83 before) — the runner globs `test/*.test.js`, and its own count is what says the new suite ran — plus a **fourth run**, `deploy_options.mjs`, which needs no emulator |
 | `tsc --noEmit` | clean, at the pinned Node 22 types |
-| Rules | **80 tests** (75 before). `firestore.rules` CHANGED this phase — see the gate review — and is **not deployed** |
-| Dart mutations | **34 caught, 0 survived, 0 did not compile**, 13 passing controls |
+| Rules | **82 tests** (75 at the start; 80 before the second gate). `firestore.rules` CHANGED this phase — see the gate review — and is **not deployed**, deliberately: the emulator is the working surface until release |
+| Dart mutations | **39 caught, 0 survived, 0 did not compile**, 14 passing controls — re-run 2026-09-02 with five added for the code the second gate and the name question introduced |
 | Debug APK | builds — three of them, from two trees, for the device run |
-| Device | **run 2026-09-01 on two API 36 AVDs. Every Phase 6 row answered; the POCO refused to be installed to** — see *The device run* below |
+| Device | **run 2026-09-01 on two API 36 AVDs, then the POCO F3 for the OEM half**, and **Doze on a real overnight 2026-09-02** — the reminder posted 876 ms after the armed second from 4h42m of unbroken deep idle. See *The device run* below |
 
 ---
 

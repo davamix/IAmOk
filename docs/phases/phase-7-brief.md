@@ -53,9 +53,11 @@ of them.
 > **Where Phase 6 left things.** Built, **the five reviewers run TWICE — once over the phase, once
 > over the close-out** — every applied finding verified by reverting it, **run on two API 36 AVDs and
 > then on the POCO F3** with every device-checklist row answered and all three exit criteria met on
-> hardware, and **all seven owner decisions taken and applied**. 1 380 Dart tests, 102 Functions
-> tests plus a fourth no-emulator run, 82 rules tests, 34/34 mutations caught, `flutter analyze`
-> clean, debug APK builds, secrets guard clean. **Not signed off**: Doze on the handset is unmeasured,
+> hardware, and **all seven owner decisions taken and applied**. 1 396 Dart tests, 102 Functions
+> tests plus a fourth no-emulator run, 82 rules tests, **39/39 mutations caught** with 14 controls,
+> `flutter analyze` clean, debug APK builds, secrets guard clean. **Doze was measured on a real
+> overnight 2026-09-02** — the reminder posted 876 ms after the armed second from 4h42m of unbroken
+> `device_idle=full`, which closed the last device row. **Not signed off**:
 > §12's four away transition notifications are specified and deliberately not built, and the second
 > gate left **four decisions for the owner** — read *What Phase 6's second gate leaves on this desk*
 > below before planning, because two of them are one edit away from Phase 7's own surfaces.

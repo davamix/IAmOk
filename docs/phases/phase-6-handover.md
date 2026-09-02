@@ -70,14 +70,14 @@ project commits to `main` and pushes only when asked.
 | | |
 |---|---|
 | `flutter analyze` | clean |
-| `flutter test` | **1 380** (1 202 at the start of the phase; 1 354 before the owner's decisions; 1 370 before the second gate) |
+| `flutter test` | **1 396** (1 202 at the start of the phase; 1 354 before the owner's decisions; 1 370 before the second gate; 1 380 before the name question) |
 | Rules tests | **82** (75 at the start; 80 before the second gate) |
 | Functions tests | **102** (83 before), plus a **fourth run** — `deploy_options.mjs`, no emulator |
 | `firestore.rules` | **changed this phase and NOT deployed.** The live ruleset is Phase 4's and still has the set-once defect — see `deploy-notes.md`, corrected 2026-09-01 |
 | `tsc --noEmit` | clean at the pinned Node 22 types |
 | Debug APK | builds |
 | Secrets guard | clean — 25 ignored, 6 deliberately tracked |
-| Dart mutations | **34 caught, 0 survived, 0 did not compile**, 13 passing controls |
+| Dart mutations | **39 caught, 0 survived, 0 did not compile**, 14 passing controls — re-run 2026-09-02 |
 | Device | **every Phase 6 row run 2026-09-01** — two API 36 AVDs, then the POCO F3 for the OEM half — **and Doze on a real overnight 2026-09-02**: the reminder posted **876 ms** after the armed second from 4h42m of unbroken `device_idle=full` |
 
 **All three exit criteria are met in tests** — `test/application/away_exit_criteria_test.dart`,
@@ -87,9 +87,11 @@ of them on the POCO with aeroplane mode on and the harness walking the clock acr
 
 ### The mutation harness, and what it cost to get a number
 
-**34 mutations, 34 caught, 0 survived, 0 `DID NOT COMPILE`**, thirteen passing no-op controls,
-**re-run 2026-09-01 after the owner's decisions were applied**, on a clean tree. Twenty of the 34
-are away surfaces. Re-run with:
+**39 mutations, 39 caught, 0 survived, 0 `DID NOT COMPILE`**, fourteen passing no-op controls,
+**re-run 2026-09-02, after the second gate and the name question**, on a clean tree — and `lib/` and
+`test/` were clean afterwards, which is this file's own post-run check. Twenty of the 39 are away
+surfaces; **five were added on 2026-09-02** for the code the second gate and the name question
+introduced, because until then none of it had any. Re-run with:
 
 ```powershell
 node tools/mutate-dart.mjs

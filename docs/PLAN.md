@@ -362,12 +362,29 @@ watcher list showing Mum. **The AVD also tapped**, which closes the half Phase 4
 
 ## Phase 6 — Away mode
 
-> **BUILT and REVIEWED against the emulator suite, 2026-08-27; RUN ON DEVICES 2026-09-01 — two API
-> 36 AVDs and then the POCO F3; ALL SEVEN OWNER DECISIONS TAKEN AND APPLIED the same day. Not signed
-> off** — **Doze is the one device question the run did not close**, and §12's four away transition
-> notifications are specified and deliberately not built. Start from [phases/phase-6-handover.md](phases/phase-6-handover.md) — what is left and
-> in what order — then read *The gate review* and *The device run* in
-> [phases/phase-6-summary.md](phases/phase-6-summary.md).
+> **BUILT; REVIEWED TWICE — once over the phase 2026-08-27, once over the close-out 2026-09-01; RUN
+> ON DEVICES 2026-09-01 (two API 36 AVDs, then the POCO F3); ALL SEVEN OWNER DECISIONS TAKEN AND
+> APPLIED the same day; DOZE MEASURED ON A REAL OVERNIGHT 2026-09-02. Not signed off** — the only
+> thing outstanding is §12's four away transition notifications, which are specified and deliberately
+> not built, and which this deliverable list does not name. Start from
+> [phases/phase-6-handover.md](phases/phase-6-handover.md), then read *The gate review*, *The device
+> run* and *The second gate* in [phases/phase-6-summary.md](phases/phase-6-summary.md).
+>
+> **The second gate found four more defects**, which is why it exists: Phase 5 was signed off only
+> after the same second pass. A stale `deploy-notes.md` header claiming the live rules were
+> byte-identical to the repo when they were 2 219 bytes behind; a recorder knob **no test ever
+> turned**, so the watcher row could report *"Saved."* for a refused write with all 1 370 tests green;
+> the watcher-side write path reached by **no test at all**, leaving the queued-cache asymmetry
+> enforced only by the absence of a call; and a confirmation dialog whose two actions stacked with
+> **zero gap**, destructive directly under safe, at the font scale it was built for. Nine findings
+> applied and each verified by reverting it; four decisions taken.
+>
+> **Doze, measured 2026-09-02 on a real overnight** — the last open device row. Unplugged 23:48 in
+> aeroplane mode, `device_idle=full` at 00:50, then the textbook 1 h / 2 h / 4 h / 8 h doubling with
+> 30-second maintenance windows, and `full` **unbroken from 07:52 to 12:34**. The 12:00 reminder — the
+> first day back after the away period ended — posted at **12:00:00.876**, 876 ms after the armed
+> second, with 0% battery drain over 12h45m. It goes beyond ADR-0008, which measured *forced* Doze in
+> Phase 3; the *warning* path is untouched and stays as ADR-0008 accepted it.
 >
 > **The gate found that the feature did not work.** Three of the five reviewers independently found
 > that away could be set **once per person and then never again**: nothing deletes the away document
@@ -409,10 +426,11 @@ watcher list showing Mum. **The AVD also tapped**, which closes the half Phase 4
 > `PairingRefusal.serverFault`.
 >
 > **`AwayPeriod` came off the mutation harness's "not mutated" list**, where it had sat for five
-> phases as a type nothing read. **34 Dart mutations, 34 caught, 0 survived, 0 failed to compile,
-> thirteen passing controls. 1 370 Dart tests**, 102 Functions tests, 80 rules tests, analyze clean, debug
-> APK builds. *(This paragraph read 25 / 1 322 until 2026-09-01 — the gate's own commits moved both
-> numbers and did not move this line.)*
+> phases as a type nothing read. **39 Dart mutations, 39 caught, 0 survived, 0 failed to compile,
+> fourteen passing controls. 1 396 Dart tests**, 102 Functions tests plus a fourth no-emulator run,
+> 82 rules tests, analyze clean, debug APK builds. *(This paragraph read 25 / 1 322 until 2026-09-01
+> and 34 / 1 370 until 2026-09-02 — twice now the gate's own commits moved the numbers and did not
+> move this line. It is the third claim in this document corrected for that reason.)*
 >
 > **The device run is done**, 2026-09-01: every checklist row in `testing/device-matrix.md`,
 > including the Phase 5 gate's unarmed-warning check, on two AVDs and then the OEM half on the POCO.
@@ -426,9 +444,10 @@ watcher list showing Mum. **The AVD also tapped**, which closes the half Phase 4
 > phone that wrote it, which is what stops the screen contradicting its own *"Saved."*. Answers and
 > questions both in `ui-ux/screens.md`; the extending limitation is recorded in §12.
 >
-> **Owed:** §12's four away **transition notifications**, which are specified and deliberately not
-> built — this deliverable list does not name them and the exit criteria do not turn on them — and
-> **Doze on the handset**.
+> **Owed:** §12's four away **transition notifications** only — specified and deliberately not built,
+> and this deliverable list does not name them and the exit criteria do not turn on them.
+> ~~**Doze on the handset.**~~ **Measured 2026-09-02**, on a real overnight: the reminder posted
+> **876 ms** after the armed second from 4h42m of unbroken `device_idle=full`.
 
 **Deliverables** — `users/{uid}/shared/away`, rules validation (31-day cap — **deliberately slack in the rules, see `security/firestore-rules-guidelines.md`; the exact check is `AwayRules`**, no retroactive,
 `through >= from`), the `onAwayChanged` fan-out, the Away button on the Tap screen (which becomes

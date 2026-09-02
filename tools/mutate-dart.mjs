@@ -34,9 +34,16 @@
 // `DayKey`, `ReminderPolicy`, either reconciler, the false-warning correction
 // path, `AlarmIds` (whose per-process stability is a `CLAUDE.md` constraint and
 // the premise the correction path rests on), the `onCheckInCreated` fan-out,
-// and `firestore.rules` — which has 80 tests and no mutation coverage from this
-// harness, though the two clauses Phase 6 changed were each verified by hand by
+// and `firestore.rules` — which has 82 tests and no mutation coverage from this
+// harness, though the three clauses Phase 6 changed were each verified by hand by
 // reverting them and watching the new tests fail.
+//
+// **The onboarding name path joined the list 2026-09-02**, with the decision to
+// ASK for a name rather than invent one. It earns a place for the usual reason:
+// `profileDisplayName`'s precedence is silent-direction by construction — get it
+// backwards and `refreshProfile` overwrites a typed name with the placeholder on
+// the next launch, and the person reads as a role word on their family's phones
+// for the life of the pairing, with nothing said and nothing logged.
 //
 // Those are most of the pure functions `docs/testing/strategy.md` says the risk
 // lives in. Extending the lists there is worth more than adding another Phase 5
@@ -525,6 +532,61 @@ const groups = [
           'spent away stop being covered on this phone — ADR-0001 decision ' +
           "5's argument, lost at the one call site that carries it.",
       },
+      // Added 2026-09-02, with the decision to ASK for a name rather than
+      // invent one. Both are the silent direction: nothing errors, nobody is
+      // told, and the person simply reads as a role word on their family's
+      // phones — which `guidelines.md` forbids and which also suppresses their
+      // away attribution, because `AwayRecord.unnameable` is the same string.
+      {
+        name: 'profileDisplayName: the account name beats the typed one',
+        from: 'await store.chosenDisplayName() ??',
+        to: 'auth.displayName ??',
+        why:
+          'The stored name drops out of the precedence, so `refreshProfile` — ' +
+          'which runs on EVERY launch — overwrites a name somebody typed with ' +
+          "the placeholder within minutes. The feature appears to work and " +
+          'then forgets, which is the exact trap the local copy exists for.',
+      },
+      {
+        name: 'needsDisplayName: nobody is ever asked',
+        from: "bool get needsDisplayName => (auth.displayName ?? '').trim().isEmpty;",
+        to: "bool get needsDisplayName => (auth.displayName ?? '').trim().isNotEmpty;",
+        why:
+          'Inverted. An account WITH a name is interrogated about it, and the ' +
+          'one without is not — so the literal string `Someone` goes into ' +
+          '`users/{uid}` and is denormalised onto every link by `redeemInvite`, ' +
+          'unreachably, for the life of the pairing.',
+      },
+    ],
+  },
+  {
+    // Added 2026-09-02. `AskNameForm` owns exactly one rule — a name is
+    // trimmed, and an empty one is refused — so that its caller has nothing
+    // left to validate. Both halves are load-bearing on the RULES: `users/{uid}`
+    // requires `displayName` to be 1–100 characters AFTER trimming, so either
+    // failure is a `permission-denied` on the one document that makes pairing
+    // possible, and the refusal surfaces on somebody ELSE's phone as a code
+    // that will not work.
+    file: 'lib/presentation/onboarding_screen.dart',
+    mutations: [
+      {
+        name: 'the typed name is not trimmed',
+        from: 'final typed = _field.text.trim();',
+        to: 'final typed = _field.text;',
+        why:
+          'A name of three spaces passes the form and is written. The rules ' +
+          'trim before bounding, so it is refused server-side — and a name ' +
+          'with trailing spaces reaches every watcher denormalised onto a link.',
+      },
+      {
+        name: 'the empty-name guard is inverted',
+        from: 'if (typed.isEmpty) {',
+        to: 'if (typed.isNotEmpty) {',
+        why:
+          'A real name is refused and an empty one is submitted, which is the ' +
+          'write the rules deny. The person is left on a screen that rejects ' +
+          'everything they type.',
+      },
     ],
   },
   {
@@ -540,6 +602,18 @@ const groups = [
           'decorative and then loses the eleven days it was there to protect. ' +
           'The owner asked for this control on 2026-09-01 precisely because ' +
           'ending TRUNCATES.',
+      },
+      {
+        // Added 2026-09-02, at the second gate.
+        name: 'the row keeps a sentence about a period that has moved',
+        from: 'if (moved && _message != null) setState(() => _message = null);',
+        to: 'if (moved && _message == null) setState(() => _message = null);',
+        why:
+          'The clear never fires. *"Saved. Mum is marked away."* is PRESENT ' +
+          'TENSE and survives a resume, a refresh or a foreground push, so it ' +
+          'sits under a row that now reads *"Everything OK"* — a status claim ' +
+          "contradicting the row above it, which is `guidelines.md`'s *state, " +
+          'not history* rule broken by the newest sentence on the screen.',
       },
     ],
   },

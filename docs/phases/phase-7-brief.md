@@ -37,10 +37,12 @@ of them.
 
 > I'm starting **Phase 7 — UI/UX and the health panel** of the I Am Ok project. Read
 > `docs/phases/phase-7-brief.md` first, then follow the reading order in `docs/README.md`.
-> `docs/phases/phase-6-summary.md` is the previous phase — read *The gate review*, *The device run*
-> and *Still owed*. `docs/OPEN-QUESTIONS.md` lists what is deliberately unsettled, and **two of its
-> entries become blockers in this phase**: #8 and #9. Read the *Blocking-when* table rather than
-> re-deriving any of it.
+> **Phase 6 is COMPLETE and SIGNED OFF (2026-09-02) and owes this phase nothing** — read
+> `docs/phases/phase-6-summary.md` for *what happened* (*The gate review*, *The device run*, *The
+> second gate*), not for work to pick up. `docs/phases/phase-6-handover.md` is historical.
+> `docs/OPEN-QUESTIONS.md` lists what is deliberately unsettled, and **two of its entries become
+> blockers in this phase**: #8 and #9. Read the *Blocking-when* table rather than re-deriving any of
+> it.
 >
 > **Two of the three deliverables are already built** — the watcher list and cold-open state. The
 > health panel does not exist at all. Start from *Read this first* in the brief so the phase is spent
@@ -50,27 +52,36 @@ of them.
 > Functions deploy is neither needed nor wanted here and would still fail — four 2nd-gen APIs are
 > missing, enabling them is billable, and it is the owner's call.
 >
-> **Where Phase 6 left things.** Built, **the five reviewers run TWICE — once over the phase, once
-> over the close-out** — every applied finding verified by reverting it, **run on two API 36 AVDs and
-> then on the POCO F3** with every device-checklist row answered and all three exit criteria met on
-> hardware, and **all seven owner decisions taken and applied**. 1 396 Dart tests, 102 Functions
-> tests plus a fourth no-emulator run, 82 rules tests, **39/39 mutations caught** with 14 controls,
-> `flutter analyze` clean, debug APK builds, secrets guard clean. **Doze was measured on a real
-> overnight 2026-09-02** — the reminder posted 876 ms after the armed second from 4h42m of unbroken
-> `device_idle=full`, which closed the last device row. **Not signed off**:
-> §12's four away transition notifications are specified and deliberately not built, and the second
-> gate left **four decisions for the owner** — read *What Phase 6's second gate leaves on this desk*
-> below before planning, because two of them are one edit away from Phase 7's own surfaces.
+> **The baseline this phase starts from, and it is green.** 1 396 Dart tests, 102 Functions tests
+> plus a fourth no-emulator run, 82 rules tests, **39 / 39 mutations caught** with 14 controls,
+> `flutter analyze` clean, debug APK builds, secrets guard clean. The five reviewers ran **twice** in
+> Phase 6 — once over the phase, once over the close-out — with every applied finding verified by
+> reverting it, all three exit criteria met in tests **and** on hardware, **all seven owner decisions
+> taken and the second gate's four with them**, and **Doze measured on a real overnight**: the
+> reminder posted 876 ms after the armed second
+> from 4h42m of unbroken `device_idle=full`.
+>
+> **Phase 6's only leftover is §12's four away transition notifications** — specified, deliberately
+> not built, and named on `testing/strategy.md`'s must-cover list. Whether they land here is one of
+> this phase's owner decisions; they are **not** inherited work. Read *What Phase 6's second gate
+> leaves on this desk* below anyway, because two of its observations describe surfaces this phase
+> will build on.
 >
 > **`firestore.rules` is CHANGED and NOT DEPLOYED**, and the live ruleset still carries the set-once
 > defect. A plain `flutter build apk --debug` is a **production** client, so anything not built with
 > `--dart-define=IAMOK_EMULATOR_HOST` will hit rules that refuse a second away period for ever.
 > `deploy-notes.md` said the opposite until 2026-09-01 and is now correct.
 >
-> **The rig is warm and worth reusing.** Two AVDs and the POCO all have the app installed and paired
-> — Mum (watched), Ana (watcher of both), Pop on the POCO (watched) — and `emulator-data/` holds the
-> 2026-09-01 export of all of it. `tools/emulators.ps1 -Device 1720f883` sets up `adb reverse`.
-> **Warm the Functions emulator with one `curl` before driving a phone.**
+> **The rig is warm and worth reusing, with two things changed since the export.** Two AVDs and the
+> POCO all have the app installed and paired — Mum (watched), Ana (watcher of both), Pop on the POCO
+> (watched) — and `emulator-data/` holds the 2026-09-01 export. Since then: **Pop's away period was
+> ended** for the Doze run, so he is no longer away and the POCO has ~17 reminders armed; and the
+> **POCO is running the 2026-09-01 11:35 build**, which predates the second gate and the name
+> question. Reinstalling it needs the emulator `--dart-define`s or the app will talk to production
+> Auth, find no such account and drop into onboarding — and an install force-stops the app, which
+> **cancels every armed alarm** until it is reopened. `tools/emulators.ps1 -Device 1720f883` sets up
+> `adb reverse`, which dies with the cable. **Warm the Functions emulator with one `curl` before
+> driving a phone.**
 >
 > **This phase opens with owner decisions** — see *The decisions this phase opens with*. Do not
 > decide them alone.
@@ -79,18 +90,18 @@ of them.
 
 ## What Phase 6's second gate leaves on this desk
 
-Five reviewers over the close-out, 2026-09-01. Nine findings applied, **four held for the owner**,
-and a handful of observations that land squarely in this phase's surfaces. The full write-up is
-`phase-6-summary.md`'s *The second gate*; what belongs here is the part Phase 7 will trip over.
+Five reviewers over the close-out, 2026-09-01. Nine findings applied, four decisions raised — **all
+four are now taken**, so **none of this is inherited work**. It is here because the answers constrain
+what this phase builds on. The full write-up is `phase-6-summary.md`'s *The second gate*.
 
-**The four owner decisions — none is a Phase 7 deliverable, but two touch its screens:**
+**The four decisions, and what each leaves Phase 7:**
 
-| | Why Phase 7 cares |
+| Decided | What this phase inherits |
 |---|---|
-| `awayPeriodEnded()` is permissive west of UTC | Rules-only. Decide it before any deploy, not before any screen |
-| `allow delete` is unconditional | Rules-only, but the **access matrix** in `firestore-rules-guidelines.md` currently disagrees with the file. Fix the disagreement before the health panel cites either |
-| ~~`pickerTitleFor` has no fallback~~ | **Closed 2026-09-01, at the source.** A person whose Google account has no display name is now asked for one before `users/{uid}` is written, so no link can carry `Someone`. Phase 7 inherits **no work** here — but it inherits the rule: a name reaching a surface comes from `link.watchedName`, and the health panel's per-person rows will name people the same way |
-| The queued-cache rule is not in ARCHITECTURE.md | Write it before the panel reads `self_away`, or the panel will be the second reader of a rule the design does not state |
+| `awayPeriodEnded()` is permissive west of UTC — **the claim was corrected, not the code** | Nothing to do. The permissive case cannot occur at a non-negative UTC offset, so it is unreachable in the zone this app ships to, and the rules comment now carries the condition that reopens it: **a negative UTC offset** |
+| `allow delete` **stays unconditional**, and the invariant is recorded as **client-enforced** | `AwayRules.periodInForce` is the only thing holding *"no new `from` while a period still has a day to run"*. Do not read the rules as backing it, and do not remove the client check on the strength of them |
+| `pickerTitleFor`'s missing fallback — **closed at the source** | A person whose Google account has no display name is now asked for one before `users/{uid}` is written, so no link can carry `Someone`. The rule this phase inherits: a name on a surface comes from `link.watchedName`, and the health panel's per-person rows will name people the same way |
+| The queued-cache rule → **[ADR-0012](../architecture/decisions/0012-a-queued-away-write-is-cached-on-the-phone-that-wrote-it.md)** | Read it **before the panel reads `self_away`**. Tier 3 is no longer a pure mirror of Firestore: the watched person's own row may hold an unconfirmed local write, bounded by the first successful read. A panel reporting *last sync* must not present that as what the server said |
 
 **Two things this phase's own layout will meet:**
 
@@ -237,9 +248,12 @@ elsewhere (`deploy-notes.md`'s ordering rule).
 
 ## What is not a blocker
 
-- **Doze on the handset**, carried from Phase 6. It affects what the *background deferral* row should
-  say, not whether the panel can be built. If it is measured during this phase, that row can stop
-  being a statement about the device class and become one about this device.
+- ~~**Doze on the handset**, carried from Phase 6.~~ **Measured 2026-09-02**, so §13's *background
+  deferral* row can now be a statement about **this device** rather than about the device class: on
+  the POCO at stock settings, a scheduled **reminder** is delivered at the armed second even after
+  4h42m of unbroken `device_idle=full` — 876 ms late, from a natural overnight. The **warning** path
+  is the one that is held, and ADR-0008 already accepts that: it hops through JobScheduler, which
+  does not run until Doze ends. Those are two different sentences and the panel must not merge them.
 - The first Functions deploy, App Check's console half, the live-radio measurement, ADR-0008 option
   1's cost, and `InviteCode.forSpeaking` — all carried, none of them in the way.
 

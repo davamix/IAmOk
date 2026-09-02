@@ -2,16 +2,24 @@
 
 **Written:** 2026-09-01, at the end of the build-and-review session.
 **Updated:** 2026-09-01, after the device run, and again after the **second gate**.
-**Status:** Built, run on two AVDs and then on the POCO F3 — every Phase 6 checklist row answered,
+
+> **PHASE 6 IS COMPLETE AND SIGNED OFF, 2026-09-02. This document is now historical.** It was the
+> close-out plan and it is kept for what it records — the second gate's findings, where `'Someone'`
+> actually comes from, and the traps that cost time — **not for current state**. For that, read
+> [phase-6-summary.md](phase-6-summary.md); for what happens next,
+> [phase-7-brief.md](phase-7-brief.md).
+
+**Status at sign-off:** Built, run on two AVDs and then on the POCO F3 — every Phase 6 checklist row answered,
 including the OEM half — all seven owner decisions taken and applied, and **the five reviewers run a
 second time, over the close-out itself, 2026-09-01.** Nine of that gate's findings are applied;
 **all four have since been decided and applied**. **Doze measured on a real overnight 2026-09-02** —
 the reminder fired **876 ms** after the armed second from 4h42m of unbroken deep Doze, which was the
-last open device row. **Not signed off**: §12's four away transition notifications are specified and deliberately not built,
-and `firestore.rules` is **changed and undeployed**.
+last open device row. **Signed off 2026-09-02.** Outstanding at sign-off, deliberately: §12's four
+away transition notifications, specified and not built; and `firestore.rules` **changed and
+undeployed**, which is the intended state until release.
 
-This is the *what to do next* document. [phase-6-summary.md](phase-6-summary.md) is the *what
-happened* one and is longer; read its **The gate review** section before touching anything, because
+This **was** the *what to do next* document. [phase-6-summary.md](phase-6-summary.md) is the *what
+happened* one and is longer; read its **The gate review** section first, because
 the first gate found that the feature did not work and the fix changed both the client and the rules,
 then **The device run**, which is what the checklist rows were ticked from, and then **The second
 gate**, which reviewed everything the first two produced and is where the four open decisions come

@@ -362,13 +362,16 @@ watcher list showing Mum. **The AVD also tapped**, which closes the half Phase 4
 
 ## Phase 6 — Away mode
 
-> **BUILT; REVIEWED TWICE — once over the phase 2026-08-27, once over the close-out 2026-09-01; RUN
-> ON DEVICES 2026-09-01 (two API 36 AVDs, then the POCO F3); ALL SEVEN OWNER DECISIONS TAKEN AND
-> APPLIED the same day; DOZE MEASURED ON A REAL OVERNIGHT 2026-09-02. Not signed off** — the only
-> thing outstanding is §12's four away transition notifications, which are specified and deliberately
-> not built, and which this deliverable list does not name. Start from
-> [phases/phase-6-handover.md](phases/phase-6-handover.md), then read *The gate review*, *The device
-> run* and *The second gate* in [phases/phase-6-summary.md](phases/phase-6-summary.md).
+> **COMPLETE and SIGNED OFF, 2026-09-02.** Built; **reviewed twice — once over the phase 2026-08-27,
+> once over the close-out 2026-09-01**, with every applied finding verified by reverting it; run on
+> devices 2026-09-01 (two API 36 AVDs, then the POCO F3), all three exit criteria met in tests **and**
+> on hardware; **all seven owner decisions taken and applied**, plus the second gate's four; and
+> **Doze measured on a real overnight 2026-09-02**, which closed the last device row. The only thing
+> outstanding is §12's four away **transition notifications**, specified and deliberately not built,
+> which neither this deliverable list nor the exit criteria name. Start from
+> [phases/phase-6-summary.md](phases/phase-6-summary.md) — *The gate review*, *The device run* and
+> *The second gate* are what happened. [phases/phase-6-handover.md](phases/phase-6-handover.md) was
+> the close-out plan and is now historical.
 >
 > **The second gate found four more defects**, which is why it exists: Phase 5 was signed off only
 > after the same second pass. A stale `deploy-notes.md` header claiming the live rules were

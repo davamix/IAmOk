@@ -2,10 +2,17 @@
 
 **Date:** 2026-08-27, with the device run and the owner's decisions added 2026-09-01, the second
 gate 2026-09-01, and Doze 2026-09-02 ·
-**Status:** Built, **reviewed by all five reviewers twice** — once over the phase, once over the
-close-out — every finding applied, **run on two AVDs and then on the POCO F3**, all seven owner
-decisions taken and applied, and **Doze measured on a real overnight**. **Not yet signed off** —
-§12's four away transition notifications are specified and deliberately not built.
+**Status: COMPLETE and SIGNED OFF, 2026-09-02.** Built, **reviewed by all five reviewers twice** —
+once over the phase, once over the close-out, with every applied finding verified by reverting it —
+**run on two AVDs and then on the POCO F3** with all three exit criteria met in tests and on
+hardware, all seven owner decisions taken and applied plus the second gate's four, and **Doze
+measured on a real overnight**. The one thing outstanding is §12's four away transition
+notifications, specified and deliberately not built, which neither the deliverable list nor the exit
+criteria name.
+
+**1 396 Dart tests**, **82 rules tests**, **102 Functions tests** plus a fourth no-emulator run,
+**39 / 39 mutations caught** with 14 controls, `flutter analyze` clean, debug APK builds, secrets
+guard clean.
 
 **The gate found that the feature did not work.** Away could be set once per person and then never
 again — see *The gate review* below, which is the part of this document to read first.

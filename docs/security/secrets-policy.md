@@ -57,6 +57,56 @@ Not the secrecy of the key. Two things:
    maps to *refused*, which is the access-lost notice arriving at every family at once. So: rules
    are the whole defence until enforcement is turned on, and this list has exactly one live entry.
 
+### The scanner will flag the API key. That is expected.
+
+GitHub secret scanning raised `google_api_key` against `android/app/google-services.json` line 31
+on **2026-09-02** — alert #1, resolved **won't fix**. The reasoning is the table row above, and it
+will be the same reasoning the next time. Two things not to do in response to one of these:
+
+- **Do not rotate the key.** The replacement ships in the next APK and is public the moment anyone
+  installs it. §5's *rotate first, clean second* applies to the items in §1; this is the documented
+  exception to it.
+- **Do not rewrite history** to strip the file. It is committed on purpose, the key is extractable
+  from any build anyway, and a fresh clone stops building without it.
+
+**What is worth checking when an alert fires is not the key but what the key may do.** Verified
+2026-09-02 with `gcloud services api-keys list` and the Identity Toolkit admin config:
+
+| | State on 2026-09-02 |
+|---|---|
+| Application restriction | `androidKeyRestrictions` present, `allowedApplications` **empty** — no package + SHA-1 pair registered |
+| API targets | **27 services**, including `identitytoolkit.googleapis.com` |
+| Enabled Auth providers | **Google federated only** — password, email link, anonymous and phone all off |
+| Live Firestore ruleset | `87c8784d…`, deployed 2026-08-20; catch-alls are `allow read, write: if false` |
+
+The first two rows are what an abusable key looks like, and on their own they would be a finding.
+**The third row is what closes it.** An unrestricted key that reaches Identity Toolkit is the
+ordinary way a project acquires thousands of junk accounts — but with Google as the only provider
+there is nothing to mint: a caller needs a Google ID token and can only obtain one for their own
+identity. They then arrive as an ordinary authenticated stranger, which is the *curious stranger
+with the APK* row of [threat-model.md](threat-model.md) and exactly what the rules already assume.
+
+**So the exposure is bounded by the provider list, not by the key.** If a password or anonymous
+provider is ever enabled, that stops being true on the day it is enabled, and the two items below
+stop being optional.
+
+### Owed at Phase 8, when the release keystore exists
+
+Neither is a control, and neither replaces App Check enforcement
+([OPEN-QUESTIONS.md](../OPEN-QUESTIONS.md) #5). Both are worth doing because they are nearly free.
+
+1. **Register the application restriction** — the package name plus the *release* SHA-1 — on the
+   Android key. Worth being honest about what it buys: the signing certificate's SHA-1 is
+   extractable from any APK and the `X-Android-Package` / `X-Android-Cert` headers are supplied by
+   the caller, so this stops copy-paste reuse of the key and nothing more determined than that.
+   **This is a different task from registering release fingerprints in Firebase**, which
+   [PLAN.md](../PLAN.md) already owes at Phase 8 so that Google Sign-In works on a release build.
+   Same fingerprint, two separate registrations, and doing one does not do the other.
+2. **Narrow the 27 API targets** to the services this app actually calls. The list is Firebase's
+   default blanket and includes `sqladmin.googleapis.com`, which this project will never reach for.
+   The value is not today: it is that enabling any billable Google API on the project later would
+   otherwise be reachable with a key that has been public since the repo went up.
+
 ---
 
 ## 3. The incident this policy was written after

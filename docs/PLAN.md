@@ -490,7 +490,17 @@ from three weeks ago that was followed by three weeks of check-ins is history, n
 ## Phase 8 — Release readiness
 
 **Deliverables** — release keystore + signing config, privacy policy and terms, the Play
-sensitive-permission justification for `USE_EXACT_ALARM`.
+sensitive-permission justification for `USE_EXACT_ALARM`, and the two API-key chores below.
+
+**The API key** — Phase 8 is the first moment a *release* SHA-1 exists, and two separate things
+want it. One is registering the release fingerprints **in Firebase**, without which Google
+Sign-In fails on a release build; that is owed from Phase 3 and is listed above. The other is
+registering an **application restriction on the API key itself** in Google Cloud, which is a
+different console page and is not done by doing the first. While there, narrow the key’s API
+targets — it currently allows 27 services, Firebase’s default blanket, including
+`sqladmin.googleapis.com`. Neither is a control and neither replaces App Check enforcement; both
+are cheap. The reasoning, and the state each was in on 2026-09-02, are in
+[security/secrets-policy.md](security/secrets-policy.md) — *The scanner will flag the API key*.
 
 **Signing** — `keytool` is available in the Android Studio JBR, so I can generate the keystore and
 wire `key.properties` + `build.gradle.kts`, with both gitignored. Two things are yours to decide:
